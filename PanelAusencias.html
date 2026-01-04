@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 12px; }
+      label { display: block; margin-top: 10px; font-size: 12px; font-weight: 700; }
+      select, input[type="date"] { width: 100%; padding: 8px; margin-top: 6px; box-sizing: border-box; }
+      button { margin-top: 14px; padding: 10px 12px; width: 100%; cursor: pointer; }
+      .msg { margin-top: 10px; font-size: 12px; }
+      .ok { color: #1a7f37; }
+      .error { color: #c62828; }
+    </style>
+  </head>
+  <body>
+    <h3>Registrar ausencia / vacaciones</h3>
+
+    <label for="colaborador">Colaborador</label>
+    <select id="colaborador">
+      <option value="">Cargando...</option>
+    </select>
+
+    <label for="fechaDesde">Fecha desde</label>
+    <input type="date" id="fechaDesde">
+
+    <label for="fechaHasta">Fecha hasta (opcional)</label>
+    <input type="date" id="fechaHasta">
+
+    <label for="tipo">Tipo</label>
+    <select id="tipo">
+      <option value="V">Vacaciones (V)</option>
+      <option value="M">Licencia médica (M)</option>
+      <option value="E">Examen (E)</option>
+      <option value="AI">Ausencia injustificada (AI)</option>
+    </select>
+
+    <button id="btn" type="button" onclick="enviar()">Guardar registro</button>
+    <div id="msg" class="msg"></div>
+
+    <script>
+      const btn = () => document.getElementById('btn');
+      const msg = () => document.getElementById('msg');
+
+      document.addEventListener('DOMContentLoaded', function () {
+        google.script.run
+          .withSuccessHandler(popularColaboradores)
+          .withFailureHandler(function(err) {
+            const m = msg();
+            m.textContent = 'Error cargando colaboradores: ' + (err && err.message ? err.message : err);
+            m.className = 'msg error';
+          })
+          .obtenerColaboradoresParaPanel();
+      });
+
+      function popularColaboradores(lista) {
+        const sel = document.getElementById('colaborador');
+        sel.innerHTML = '<option value="">Seleccionar...</option>';
+        (lista || []).forEach(function(item) {
+          const opt = document.createElement('option');
+          opt.value = item.idMeli;
+          opt.textContent = (item.nombre ? item.nombre + ' ' : '') + '(' + item.idMeli + ')';
+          sel.appendChild(opt);
+        });
+      }
+
+      function setLoading(isLoading) {
+        const b = btn();
+        b.disabled = isLoading;
+        b.textContent = isLoading ? 'Guardando...' : 'Guardar registro';
+      }
+
+      function enviar() {
+        const selColab = document.getElementById('colaborador').value;
+        const fechaDesde = document.getElementById('fechaDesde').value; // yyyy-mm-dd
+        const fechaHasta = document.getElementById('fechaHasta').value; // yyyy-mm-dd o ""
+        const tipo = document.getElementById('tipo').value;
+
+        const m = msg();
+        m.textContent = '';
+        m.className = 'msg';
+
+        if (!selColab || !fechaDesde || !tipo) {
+          m.textContent = 'Completá colaborador, fecha desde y tipo (fecha hasta es opcional).';
+          m.className = 'msg error';
+          return;
+        }
+
+        setLoading(true);
+
+        function finalize() {
+          setLoading(false);
+        }
+
+        google.script.run
+          .withSuccessHandler(function(res) {
+            m.textContent = (res && typeof res === 'string') ? res : 'Registro guardado correctamente.';
+            m.className = 'msg ok';
+            finalize();
+          })
+          .withFailureHandler(function(err) {
+            m.textContent = 'Error al guardar: ' + (err && err.message ? err.message : err);
+            m.className = 'msg error';
+            finalize();
+          })
+          .registrarAusenciaEnPresentismo(selColab, fechaDesde, fechaHasta, tipo);
+      }
+    </script>
+  </body>
+</html>
