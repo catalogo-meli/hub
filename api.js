@@ -49,3 +49,21 @@ const API = (() => {
     feriadosList: () => request("feriados.list"),
   };
 })();
+// === NUEVO ===
+// Set Perfiles_requeridos en Config_Flujos
+async function flujosSetPerfiles({ flujo, perfiles_requeridos }) {
+  return request("flujos.setPerfiles", { flujo, perfiles_requeridos });
+}
+
+// Set habilitado/fijo en Habilitaciones (para 1 ID_MELI y 1 flujo)
+async function habilitacionesSet({ idMeli, flujo, habilitado, fijo }) {
+  return request("habilitaciones.set", { idMeli, flujo, habilitado, fijo });
+}
+
+// y exportalo en HUB:
+export const HUB = {
+  // ...lo tuyo...
+  flujosSetPerfiles,
+  habilitacionesSet,
+};
+
