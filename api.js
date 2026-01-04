@@ -75,3 +75,5 @@ const API = (() => {
     slackOutboxEnviar: () => request("slack.outbox.enviar", { method: "POST" }),
   };
 })();
+export const HUB = API;
+export default API;
