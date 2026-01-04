@@ -1,5 +1,5 @@
 // api.js
-const API = (() => {
+const HUB = (() => {
   const BASE = "/.netlify/functions/gas";
 
   async function request(path, { method = "GET", query, body } = {}) {
@@ -10,27 +10,39 @@ const API = (() => {
       if (path) qs.set("action", path);
       if (query) {
         Object.entries(query).forEach(([k, v]) => {
-          if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+          if (v !== undefined && v !== null && v !== "") {
+            qs.set(k, String(v));
+          }
         });
       }
       url += "?" + qs.toString();
-
-      const r = await fetch(url, { method: "GET" });
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.error || "API error");
-      return j.data;
     }
 
-    // POST
-    const payload = { action: path, ...(body || {}) };
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    const opts =
+      method === "GET"
+        ? { method: "GET" }
+        : {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action: path, ...(body || {}) }),
+          };
 
-    const j = await r.json();
-    if (!j.ok) throw new Error(j.error || "API error");
+    const r = await fetch(url, opts);
+    const txt = await r.text();
+
+    let j;
+    try {
+      j = JSON.parse(txt);
+    } catch (err) {
+      console.error("API devolvió respuesta NO JSON:", txt);
+      throw new Error("Respuesta inválida del backend");
+    }
+
+    if (!j.ok) {
+      console.error("API error:", j);
+      throw new Error(j.error || "API error");
+    }
+
     return j.data;
   }
 
@@ -44,7 +56,8 @@ const API = (() => {
     feriadosList: () => request("feriados.list"),
 
     habilitacionesList: () => request("habilitaciones.list"),
-    habilitacionesGet: (idMeli) => request("habilitaciones.get", { query: { idMeli } }),
+    habilitacionesGet: (idMeli) =>
+      request("habilitaciones.get", { query: { idMeli } }),
 
     // === EDITS ===
 
@@ -55,14 +68,14 @@ const API = (() => {
         body: { flujo, perfiles_requeridos },
       }),
 
-    // B1) Habilitaciones (modo legacy): toggle por field/value (tu implementación vieja)
+    // B1) Habilitaciones (legacy)
     habilitacionesSetField: (idMeli, flujo, field, value) =>
       request("habilitaciones.set", {
         method: "POST",
         body: { idMeli, flujo, field, value },
       }),
 
-    // B2) Habilitaciones (modo nuevo): set habilitado/fijo juntos
+    // B2) Habilitaciones (nuevo)
     habilitacionesSet: (idMeli, flujo, { habilitado, fijo } = {}) =>
       request("habilitaciones.set", {
         method: "POST",
@@ -70,10 +83,17 @@ const API = (() => {
       }),
 
     // Acciones
-    planificacionGenerar: () => request("planificacion.generar", { method: "POST" }),
-    slackOutboxGenerar: () => request("slack.outbox.generar", { method: "POST" }),
-    slackOutboxEnviar: () => request("slack.outbox.enviar", { method: "POST" }),
+    planificacionGenerar: () =>
+      request("planificacion.generar", { method: "POST" }),
+
+    slackOutboxGenerar: () =>
+      request("slack.outbox.generar", { method: "POST" }),
+
+    slackOutboxEnviar: () =>
+      request("slack.outbox.enviar", { method: "POST" }),
   };
 })();
-export const HUB = API;
-export default API;
+
+// 🔴 ESTO ERA LO QUE FALTABA
+export { HUB };
+export default HUB;
