@@ -12,6 +12,7 @@ const API = (() => {
         if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
       });
       url += "?" + qs.toString();
+
       const r = await fetch(url, { method });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || "API error");
@@ -25,6 +26,7 @@ const API = (() => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     });
+
     const j = await r.json();
     if (!j.ok) throw new Error(j.error || "API error");
     return j.data;
@@ -35,12 +37,28 @@ const API = (() => {
 
     colaboradoresList: () => request("colaboradores.list"),
     flujosList: () => request("flujos.list"),
-    flujosSet: (flujo, patch) => request("flujos.set", { method: "POST", body: { flujo, ...patch } }),
+
+    // ✅ Genérico: actualiza campos en Config_Flujos (por ejemplo Perfiles_requeridos)
+    flujosSet: (flujo, patch) =>
+      request("flujos.set", { method: "POST", body: { flujo, ...patch } }),
+
+    // ✅ Alias explícito para el UI (más legible)
+    flujosSetPerfiles: (flujo, perfiles_requeridos) =>
+      request("flujos.setPerfiles", { method: "POST", body: { flujo, perfiles_requeridos } }),
 
     habilitacionesList: () => request("habilitaciones.list"),
     habilitacionesGet: (idMeli) => request("habilitaciones.get", { query: { idMeli } }),
-    habilitacionesSet: (idMeli, flujo, field, value) =>
+
+    // ⚠️ Viejo (toggle). Lo dejo por compatibilidad si alguna parte lo usa.
+    habilitacionesSetToggle: (idMeli, flujo, field, value) =>
       request("habilitaciones.set", { method: "POST", body: { idMeli, flujo, field, value } }),
+
+    // ✅ Nuevo (set explícito habilitado + fijo en una sola llamada)
+    habilitacionesSet: (idMeli, flujo, habilitado, fijo) =>
+      request("habilitaciones.set", {
+        method: "POST",
+        body: { idMeli, flujo, habilitado: !!habilitado, fijo: !!fijo }
+      }),
 
     planificacionGenerar: () => request("planificacion.generar", { method: "POST" }),
     slackOutboxGenerar: () => request("slack.outbox.generar", { method: "POST" }),
@@ -49,21 +67,3 @@ const API = (() => {
     feriadosList: () => request("feriados.list"),
   };
 })();
-// === NUEVO ===
-// Set Perfiles_requeridos en Config_Flujos
-async function flujosSetPerfiles({ flujo, perfiles_requeridos }) {
-  return request("flujos.setPerfiles", { flujo, perfiles_requeridos });
-}
-
-// Set habilitado/fijo en Habilitaciones (para 1 ID_MELI y 1 flujo)
-async function habilitacionesSet({ idMeli, flujo, habilitado, fijo }) {
-  return request("habilitaciones.set", { idMeli, flujo, habilitado, fijo });
-}
-
-// y exportalo en HUB:
-export const HUB = {
-  // ...lo tuyo...
-  flujosSetPerfiles,
-  habilitacionesSet,
-};
-
