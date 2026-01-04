@@ -1,6 +1,125 @@
 <!doctype html>
-<html>
-  <head><meta charset="utf-8"><title>HUB</title></head>
-  <body>HUB OK</body>
-</html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Catálogo | HUB</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 0; background:#0b1220; color:#e8eefc; }
+    header { padding: 18px 22px; border-bottom: 1px solid rgba(255,255,255,.08); background:#0d1730; position: sticky; top:0; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 18px 22px; }
+    h1 { font-size: 18px; margin: 0; font-weight: 700; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+    @media (min-width: 900px){ .grid{ grid-template-columns: 420px 1fr; } }
+    .card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 14px; }
+    label { display:block; font-size: 12px; opacity:.85; margin-bottom: 6px; }
+    input, select, textarea { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: rgba(0,0,0,.25); color:#e8eefc; }
+    textarea { min-height: 76px; resize: vertical; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .btns { display:flex; gap:10px; flex-wrap: wrap; }
+    button { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: #1b2b55; color:#e8eefc; cursor:pointer; font-weight:600; }
+    button:hover { filter: brightness(1.1); }
+    .status { margin-top: 10px; font-size: 12px; opacity:.9; }
+    .status.error { color: #ff8b8b; opacity: 1; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding: 10px; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 13px; vertical-align: top; }
+    th { text-align: left; font-size: 12px; opacity:.8; }
+    .muted { opacity:.7; }
+    .toprow { display:flex; align-items:center; justify-content: space-between; gap:12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap toprow">
+      <h1>Catálogo | HUB — Presentismo</h1>
+      <div class="btns">
+        <button id="btnHealth" type="button">Probar API (health)</button>
+        <button id="btnRefresh" type="button">Refrescar lista</button>
+      </div>
+    </div>
+  </header>
 
+  <main class="wrap">
+    <div class="grid">
+      <section class="card">
+        <h2 style="margin:0 0 10px 0; font-size:14px;">Filtros</h2>
+        <div class="row">
+          <div>
+            <label>Desde</label>
+            <input id="from" type="date" />
+          </div>
+          <div>
+            <label>Hasta</label>
+            <input id="to" type="date" />
+          </div>
+        </div>
+
+        <hr style="border:0; border-top:1px solid rgba(255,255,255,.08); margin:14px 0;"/>
+
+        <h2 style="margin:0 0 10px 0; font-size:14px;">Crear ausencia</h2>
+        <form id="formCreate">
+          <div>
+            <label>Colaborador (nombre o identificador)</label>
+            <input id="colaborador" placeholder="Ej: Juan Pérez / jperez" />
+          </div>
+
+          <div class="row" style="margin-top:10px;">
+            <div>
+              <label>Tipo</label>
+              <select id="tipo">
+                <option value="VAC">VAC (Vacaciones)</option>
+                <option value="AUS">AUS (Ausencia)</option>
+                <option value="FER">FER (Feriado)</option>
+                <option value="LIC">LIC (Licencia)</option>
+              </select>
+            </div>
+            <div>
+              <label>Comentario (opcional)</label>
+              <input id="comentario" placeholder="Ej: médico / trámite / etc." />
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:10px;">
+            <div>
+              <label>Desde</label>
+              <input id="desde" type="date" />
+            </div>
+            <div>
+              <label>Hasta</label>
+              <input id="hasta" type="date" />
+            </div>
+          </div>
+
+          <div style="margin-top:12px;">
+            <button type="submit">Guardar</button>
+          </div>
+        </form>
+
+        <div id="status" class="status">—</div>
+      </section>
+
+      <section class="card">
+        <h2 style="margin:0 0 10px 0; font-size:14px;">Ausencias registradas</h2>
+        <div style="overflow:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Colaborador</th>
+                <th>Tipo</th>
+                <th>Desde</th>
+                <th>Hasta</th>
+                <th>Comentario</th>
+              </tr>
+            </thead>
+            <tbody id="tbody">
+              <tr><td colspan="5" class="muted">Cargando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
