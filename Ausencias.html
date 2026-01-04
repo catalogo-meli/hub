@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HUB | Ausencias</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 32px;
+    }
+    .top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .back {
+      text-decoration: none;
+      border: 1px solid #ddd;
+      padding: 8px 12px;
+      border-radius: 8px;
+      color: #111;
+    }
+    .box {
+      border: 1px solid #e6e6e6;
+      border-radius: 12px;
+      padding: 16px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="top">
+    <a class="back" href="?page=home">← Volver</a>
+    <h1>Ausencias / Vacaciones</h1>
+  </div>
+
+  <div class="box">
+    <?!= include_('PanelAusencias'); ?>
+  </div>
+</body>
+</html>
