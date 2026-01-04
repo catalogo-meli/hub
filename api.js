@@ -8,12 +8,14 @@ const API = (() => {
 
     if (method === "GET") {
       if (path) qs.set("action", path);
-      if (query) Object.entries(query).forEach(([k, v]) => {
-        if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
-      });
+      if (query) {
+        Object.entries(query).forEach(([k, v]) => {
+          if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+        });
+      }
       url += "?" + qs.toString();
 
-      const r = await fetch(url, { method });
+      const r = await fetch(url, { method: "GET" });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || "API error");
       return j.data;
@@ -33,37 +35,43 @@ const API = (() => {
   }
 
   return {
+    // Health
     health: () => request("health"),
 
+    // Lecturas
     colaboradoresList: () => request("colaboradores.list"),
     flujosList: () => request("flujos.list"),
-
-    // ✅ Genérico: actualiza campos en Config_Flujos (por ejemplo Perfiles_requeridos)
-    flujosSet: (flujo, patch) =>
-      request("flujos.set", { method: "POST", body: { flujo, ...patch } }),
-
-    // ✅ Alias explícito para el UI (más legible)
-    flujosSetPerfiles: (flujo, perfiles_requeridos) =>
-      request("flujos.setPerfiles", { method: "POST", body: { flujo, perfiles_requeridos } }),
+    feriadosList: () => request("feriados.list"),
 
     habilitacionesList: () => request("habilitaciones.list"),
     habilitacionesGet: (idMeli) => request("habilitaciones.get", { query: { idMeli } }),
 
-    // ⚠️ Viejo (toggle). Lo dejo por compatibilidad si alguna parte lo usa.
-    habilitacionesSetToggle: (idMeli, flujo, field, value) =>
-      request("habilitaciones.set", { method: "POST", body: { idMeli, flujo, field, value } }),
+    // === EDITS ===
 
-    // ✅ Nuevo (set explícito habilitado + fijo en una sola llamada)
-    habilitacionesSet: (idMeli, flujo, habilitado, fijo) =>
-      request("habilitaciones.set", {
+    // A) Flujos: set Perfiles_requeridos en Config_Flujos
+    flujosSetPerfiles: (flujo, perfiles_requeridos) =>
+      request("flujos.setPerfiles", {
         method: "POST",
-        body: { idMeli, flujo, habilitado: !!habilitado, fijo: !!fijo }
+        body: { flujo, perfiles_requeridos },
       }),
 
+    // B1) Habilitaciones (modo legacy): toggle por field/value (tu implementación vieja)
+    habilitacionesSetField: (idMeli, flujo, field, value) =>
+      request("habilitaciones.set", {
+        method: "POST",
+        body: { idMeli, flujo, field, value },
+      }),
+
+    // B2) Habilitaciones (modo nuevo): set habilitado/fijo juntos
+    habilitacionesSet: (idMeli, flujo, { habilitado, fijo } = {}) =>
+      request("habilitaciones.set", {
+        method: "POST",
+        body: { idMeli, flujo, habilitado, fijo },
+      }),
+
+    // Acciones
     planificacionGenerar: () => request("planificacion.generar", { method: "POST" }),
     slackOutboxGenerar: () => request("slack.outbox.generar", { method: "POST" }),
     slackOutboxEnviar: () => request("slack.outbox.enviar", { method: "POST" }),
-
-    feriadosList: () => request("feriados.list"),
   };
 })();
