@@ -972,12 +972,19 @@ function abrirPanelAusencias() {
 function doGet(e) {
   const page = e?.parameter?.page || 'home';
 
-  let file = 'App';
-  if (page === 'ausencias') file = 'Ausencias';
+  let contentFile = 'App';
 
-  return HtmlService
-    .createTemplateFromFile(file)
+  if (page === 'ausencias') contentFile = 'Ausencias';
+  if (page === 'metricas') contentFile = 'Metricas';
+  if (page === 'calidad') contentFile = 'Calidad';
+
+  const layout = HtmlService.createTemplateFromFile('Layout');
+  layout.content = HtmlService
+    .createTemplateFromFile(contentFile)
     .evaluate()
+    .getContent();
+
+  return layout.evaluate()
     .setTitle('Catálogo | HUB')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
