@@ -2,124 +2,527 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Catálogo | HUB</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 0; background:#0b1220; color:#e8eefc; }
-    header { padding: 18px 22px; border-bottom: 1px solid rgba(255,255,255,.08); background:#0d1730; position: sticky; top:0; }
-    .wrap { max-width: 1100px; margin: 0 auto; padding: 18px 22px; }
-    h1 { font-size: 18px; margin: 0; font-weight: 700; }
-    .grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
-    @media (min-width: 900px){ .grid{ grid-template-columns: 420px 1fr; } }
-    .card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 14px; }
-    label { display:block; font-size: 12px; opacity:.85; margin-bottom: 6px; }
-    input, select, textarea { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: rgba(0,0,0,.25); color:#e8eefc; }
-    textarea { min-height: 76px; resize: vertical; }
-    .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .btns { display:flex; gap:10px; flex-wrap: wrap; }
-    button { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: #1b2b55; color:#e8eefc; cursor:pointer; font-weight:600; }
-    button:hover { filter: brightness(1.1); }
-    .status { margin-top: 10px; font-size: 12px; opacity:.9; }
-    .status.error { color: #ff8b8b; opacity: 1; }
-    table { width:100%; border-collapse: collapse; }
-    th, td { padding: 10px; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 13px; vertical-align: top; }
-    th { text-align: left; font-size: 12px; opacity:.8; }
-    .muted { opacity:.7; }
-    .toprow { display:flex; align-items:center; justify-content: space-between; gap:12px; }
+    :root{
+      --bg:#0b1220; --card:#0f1b33; --muted:#9fb0d0; --txt:#eaf0ff;
+      --line:#223458; --ok:#2de38b; --warn:#ffd166; --bad:#ff5c7a;
+      --btn:#1b2e54; --btn2:#244172;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu; background:var(--bg); color:var(--txt);}
+    header{padding:16px 20px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; justify-content:space-between;}
+    .title{font-weight:700; letter-spacing:.2px}
+    .sub{color:var(--muted); font-size:12px}
+    nav{display:flex; gap:8px; flex-wrap:wrap; padding:12px 20px; border-bottom:1px solid var(--line);}
+    .tab{padding:8px 10px; border:1px solid var(--line); background:transparent; color:var(--txt); border-radius:10px; cursor:pointer;}
+    .tab.active{background:var(--btn2); border-color:#33579a;}
+    main{padding:18px 20px; max-width:1200px; margin:0 auto;}
+    .row{display:flex; gap:12px; flex-wrap:wrap; align-items:center;}
+    .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px;}
+    .grow{flex:1}
+    .btn{padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--btn); color:var(--txt); cursor:pointer;}
+    .btn:hover{filter:brightness(1.1)}
+    .btn.ok{border-color:#1f7a54}
+    .btn.warn{border-color:#7a6a1f}
+    .btn.bad{border-color:#7a1f35}
+    input, select{
+      background:#0b1730; border:1px solid var(--line); color:var(--txt);
+      padding:8px 10px; border-radius:10px; outline:none;
+    }
+    table{width:100%; border-collapse:collapse; font-size:13px;}
+    th,td{border-bottom:1px solid var(--line); padding:10px 8px; vertical-align:top;}
+    th{color:var(--muted); font-weight:600; text-align:left;}
+    .pill{display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--muted);}
+    .pill.ok{border-color:#1f7a54; color:var(--ok)}
+    .pill.bad{border-color:#7a1f35; color:var(--bad)}
+    .muted{color:var(--muted)}
+    .err{color:var(--bad); white-space:pre-wrap;}
+    .ok{color:var(--ok);}
+    .hidden{display:none;}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;}
   </style>
 </head>
+
 <body>
-  <header>
-    <div class="wrap toprow">
-      <h1>Catálogo | HUB — Presentismo</h1>
-      <div class="btns">
-        <button id="btnHealth" type="button">Probar API (health)</button>
-        <button id="btnRefresh" type="button">Refrescar lista</button>
+<header>
+  <div>
+    <div class="title">Catálogo | HUB Equipo & Planificación</div>
+    <div class="sub">Netlify UI + GAS (proxy) — sin tokens en el front</div>
+  </div>
+  <div class="row">
+    <button class="btn" id="btnHealth">Health</button>
+    <span class="pill mono" id="healthState">—</span>
+  </div>
+</header>
+
+<nav id="tabs">
+  <button class="tab active" data-view="colaboradores">Colaboradores</button>
+  <button class="tab" data-view="flujos">Flujos</button>
+  <button class="tab" data-view="habilitaciones">Habilitaciones</button>
+  <button class="tab" data-view="planificacion">Planificación</button>
+  <button class="tab" data-view="slack">Slack</button>
+  <button class="tab" data-view="feriados">Feriados</button>
+</nav>
+
+<main>
+  <div class="card" id="statusCard">
+    <div class="row" style="justify-content:space-between;">
+      <div>
+        <div style="font-weight:700">Estado</div>
+        <div class="muted" id="statusMsg">Listo.</div>
+      </div>
+      <div class="row">
+        <button class="btn" id="btnReload">Recargar vista</button>
       </div>
     </div>
-  </header>
+    <div class="err hidden" id="statusErr"></div>
+  </div>
 
-  <main class="wrap">
-    <div class="grid">
-      <section class="card">
-        <h2 style="margin:0 0 10px 0; font-size:14px;">Filtros</h2>
-        <div class="row">
-          <div>
-            <label>Desde</label>
-            <input id="from" type="date" />
-          </div>
-          <div>
-            <label>Hasta</label>
-            <input id="to" type="date" />
-          </div>
-        </div>
-
-        <hr style="border:0; border-top:1px solid rgba(255,255,255,.08); margin:14px 0;"/>
-
-        <h2 style="margin:0 0 10px 0; font-size:14px;">Crear ausencia</h2>
-        <form id="formCreate">
-          <div>
-            <label>Colaborador (nombre o identificador)</label>
-            <input id="colaborador" placeholder="Ej: Juan Pérez / jperez" />
-          </div>
-
-          <div class="row" style="margin-top:10px;">
-            <div>
-              <label>Tipo</label>
-              <select id="tipo">
-                <option value="VAC">VAC (Vacaciones)</option>
-                <option value="AUS">AUS (Ausencia)</option>
-                <option value="FER">FER (Feriado)</option>
-                <option value="LIC">LIC (Licencia)</option>
-              </select>
-            </div>
-            <div>
-              <label>Comentario (opcional)</label>
-              <input id="comentario" placeholder="Ej: médico / trámite / etc." />
-            </div>
-          </div>
-
-          <div class="row" style="margin-top:10px;">
-            <div>
-              <label>Desde</label>
-              <input id="desde" type="date" />
-            </div>
-            <div>
-              <label>Hasta</label>
-              <input id="hasta" type="date" />
-            </div>
-          </div>
-
-          <div style="margin-top:12px;">
-            <button type="submit">Guardar</button>
-          </div>
-        </form>
-
-        <div id="status" class="status">—</div>
-      </section>
-
-      <section class="card">
-        <h2 style="margin:0 0 10px 0; font-size:14px;">Ausencias registradas</h2>
-        <div style="overflow:auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>Colaborador</th>
-                <th>Tipo</th>
-                <th>Desde</th>
-                <th>Hasta</th>
-                <th>Comentario</th>
-              </tr>
-            </thead>
-            <tbody id="tbody">
-              <tr><td colspan="5" class="muted">Cargando…</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+  <!-- COLABORADORES -->
+  <section class="card" id="view-colaboradores">
+    <div class="row" style="justify-content:space-between;">
+      <div>
+        <div style="font-weight:700">Colaboradores</div>
+        <div class="muted">Fuente: hoja <span class="mono">Colaboradores</span></div>
+      </div>
+      <div class="row">
+        <input id="colabSearch" placeholder="Buscar por nombre / ID / Slack" />
+      </div>
     </div>
-  </main>
+    <div style="height:12px"></div>
+    <div class="mono muted" id="colabCount"></div>
+    <div style="height:8px"></div>
+    <div style="overflow:auto;">
+      <table id="colabTable">
+        <thead><tr id="colabHead"></tr></thead>
+        <tbody id="colabBody"></tbody>
+      </table>
+    </div>
+  </section>
 
-  <script type="module" src="./app.js"></script>
+  <!-- FLUJOS -->
+  <section class="card hidden" id="view-flujos">
+    <div>
+      <div style="font-weight:700">Flujos</div>
+      <div class="muted">Fuente: hoja <span class="mono">Config_Flujos</span></div>
+    </div>
+    <div style="height:12px"></div>
+    <div style="overflow:auto;">
+      <table id="flujosTable">
+        <thead><tr id="flujosHead"></tr></thead>
+        <tbody id="flujosBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- HABILITACIONES -->
+  <section class="card hidden" id="view-habilitaciones">
+    <div class="row" style="justify-content:space-between; align-items:flex-end;">
+      <div>
+        <div style="font-weight:700">Habilitaciones</div>
+        <div class="muted">GET: <span class="mono">habilitaciones.get</span> — POST: <span class="mono">habilitaciones.set</span></div>
+      </div>
+      <div class="row">
+        <select id="habSelect"></select>
+        <button class="btn" id="btnHabLoad">Cargar</button>
+      </div>
+    </div>
+
+    <div style="height:12px"></div>
+    <div class="muted">Tip: tocá los botones para toggle <span class="mono">habilitado</span> / <span class="mono">fijo</span>.</div>
+    <div style="height:12px"></div>
+
+    <div style="overflow:auto;">
+      <table id="habTable">
+        <thead>
+          <tr>
+            <th>Flujo</th>
+            <th>Habilitado</th>
+            <th>Fijo</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="habBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- PLANIFICACION -->
+  <section class="card hidden" id="view-planificacion">
+    <div class="row" style="justify-content:space-between;">
+      <div>
+        <div style="font-weight:700">Planificación</div>
+        <div class="muted">Dispara <span class="mono">planificacion.generar</span> (escribe en Sheets)</div>
+      </div>
+      <div class="row">
+        <button class="btn ok" id="btnPlanGenerar">Generar planificación</button>
+      </div>
+    </div>
+    <div style="height:12px"></div>
+    <div class="muted">Si esto tarda, es normal: está ejecutando lógica + escritura en el spreadsheet.</div>
+  </section>
+
+  <!-- SLACK -->
+  <section class="card hidden" id="view-slack">
+    <div class="row" style="justify-content:space-between;">
+      <div>
+        <div style="font-weight:700">Slack</div>
+        <div class="muted">
+          <span class="mono">slack.outbox.generar</span> y <span class="mono">slack.outbox.enviar</span>
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn warn" id="btnSlackGenerar">Generar Outbox</button>
+        <button class="btn ok" id="btnSlackEnviar">Enviar pendientes</button>
+      </div>
+    </div>
+    <div style="height:12px"></div>
+    <div class="muted">Esto escribe/actualiza <span class="mono">Slack_Outbox</span> en Sheets y luego envía lo pendiente.</div>
+  </section>
+
+  <!-- FERIADOS -->
+  <section class="card hidden" id="view-feriados">
+    <div>
+      <div style="font-weight:700">Feriados</div>
+      <div class="muted">Fuente: hoja <span class="mono">Feriados_AR</span> (para validar días hábiles)</div>
+    </div>
+    <div style="height:12px"></div>
+    <div class="row">
+      <button class="btn" id="btnFeriados">Listar feriados</button>
+      <span class="muted mono" id="feriadosCount"></span>
+    </div>
+    <div style="height:12px"></div>
+    <div id="feriadosList" class="mono"></div>
+  </section>
+</main>
+
+<script type="module">
+  import { HUB } from "./api.js";
+
+  // ---------- UI helpers ----------
+  const $ = (id) => document.getElementById(id);
+  const setStatus = (msg, isErr=false) => {
+    $("statusMsg").textContent = msg;
+    $("statusErr").classList.toggle("hidden", !isErr);
+    $("statusErr").textContent = isErr ? msg : "";
+    if (!isErr) $("statusErr").textContent = "";
+  };
+
+  const setHealth = (txt, ok=null) => {
+    const el = $("healthState");
+    el.textContent = txt;
+    el.classList.remove("ok","bad");
+    if (ok === true) el.classList.add("ok");
+    if (ok === false) el.classList.add("bad");
+  };
+
+  const views = ["colaboradores","flujos","habilitaciones","planificacion","slack","feriados"];
+  let currentView = "colaboradores";
+
+  function showView(v){
+    currentView = v;
+    views.forEach(x => $("view-"+x).classList.toggle("hidden", x !== v));
+    document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === v));
+    setStatus("Listo.");
+  }
+
+  document.getElementById("tabs").addEventListener("click", (e)=>{
+    const b = e.target.closest(".tab");
+    if (!b) return;
+    showView(b.dataset.view);
+    loadCurrent();
+  });
+
+  $("btnReload").addEventListener("click", loadCurrent);
+
+  $("btnHealth").addEventListener("click", async ()=>{
+    try{
+      setHealth("…", null);
+      const data = await HUB.health();
+      setHealth("ok", true);
+      setStatus(`Health OK — ${data?.ts || ""}`);
+    }catch(err){
+      setHealth("fail", false);
+      setStatus(String(err?.message || err), true);
+    }
+  });
+
+  // ---------- Data caches ----------
+  let colaboradores = [];
+  let flujos = [];
+
+  async function bootstrap(){
+    // Health on load
+    try{
+      setHealth("…", null);
+      await HUB.health();
+      setHealth("ok", true);
+    }catch{
+      setHealth("fail", false);
+    }
+
+    // load base lists
+    await Promise.all([loadColaboradores(), loadFlujos()]);
+    fillHabSelect();
+    loadCurrent();
+  }
+
+  async function loadColaboradores(){
+    try{
+      setStatus("Cargando colaboradores…");
+      colaboradores = await HUB.colaboradoresList();
+      renderColaboradores(colaboradores);
+      setStatus("Listo.");
+    }catch(err){
+      setStatus(String(err?.message || err), true);
+    }
+  }
+
+  async function loadFlujos(){
+    try{
+      setStatus("Cargando flujos…");
+      flujos = await HUB.flujosList();
+      renderFlujos(flujos);
+      setStatus("Listo.");
+    }catch(err){
+      setStatus(String(err?.message || err), true);
+    }
+  }
+
+  function loadCurrent(){
+    if (currentView === "colaboradores") return loadColaboradores();
+    if (currentView === "flujos") return loadFlujos();
+    if (currentView === "habilitaciones") return loadHabilitacionesSelected();
+    // planificacion/slack/feriados son acciones
+    setStatus("Listo.");
+  }
+
+  // ---------- Render: Colaboradores ----------
+  function renderTableGeneric(headEl, bodyEl, rows){
+    headEl.innerHTML = "";
+    bodyEl.innerHTML = "";
+    if (!rows || rows.length === 0){
+      headEl.innerHTML = "<th>Sin datos</th>";
+      return;
+    }
+    const headers = Object.keys(rows[0]);
+    headers.forEach(h => {
+      const th = document.createElement("th");
+      th.textContent = h;
+      headEl.appendChild(th);
+    });
+    rows.forEach(r => {
+      const tr = document.createElement("tr");
+      headers.forEach(h => {
+        const td = document.createElement("td");
+        const v = r[h];
+        td.textContent = (v === null || v === undefined) ? "" : String(v);
+        tr.appendChild(td);
+      });
+      bodyEl.appendChild(tr);
+    });
+  }
+
+  function renderColaboradores(rows){
+    renderTableGeneric($("colabHead"), $("colabBody"), rows);
+    $("colabCount").textContent = `Registros: ${rows.length}`;
+  }
+
+  $("colabSearch").addEventListener("input", ()=>{
+    const q = $("colabSearch").value.trim().toLowerCase();
+    if (!q) return renderColaboradores(colaboradores);
+    const filtered = colaboradores.filter(o =>
+      Object.values(o).some(v => String(v ?? "").toLowerCase().includes(q))
+    );
+    renderColaboradores(filtered);
+  });
+
+  // ---------- Render: Flujos ----------
+  function renderFlujos(rows){
+    renderTableGeneric($("flujosHead"), $("flujosBody"), rows);
+  }
+
+  // ---------- Habilitaciones ----------
+  function fillHabSelect(){
+    const sel = $("habSelect");
+    sel.innerHTML = "";
+    const opt0 = document.createElement("option");
+    opt0.value = "";
+    opt0.textContent = "Seleccionar ID_MELI…";
+    sel.appendChild(opt0);
+
+    // intenta usar ID_MELI y Nombre si existen
+    const getLabel = (c) => {
+      const id = c.ID_MELI ?? c.Id ?? c.id ?? "";
+      const name = c.Nombre ?? c.nombre ?? "";
+      return name ? `${id} — ${name}` : String(id);
+    };
+
+    colaboradores
+      .map(c => ({ id: String(c.ID_MELI ?? "").trim(), label: getLabel(c) }))
+      .filter(x => x.id)
+      .sort((a,b)=> a.label.localeCompare(b.label))
+      .forEach(x=>{
+        const opt = document.createElement("option");
+        opt.value = x.id;
+        opt.textContent = x.label;
+        sel.appendChild(opt);
+      });
+  }
+
+  $("btnHabLoad").addEventListener("click", loadHabilitacionesSelected);
+
+  async function loadHabilitacionesSelected(){
+    try{
+      if (currentView !== "habilitaciones") return;
+      const idMeli = $("habSelect").value;
+      if (!idMeli){
+        $("habBody").innerHTML = `<tr><td colspan="4" class="muted">Elegí un ID_MELI</td></tr>`;
+        setStatus("Listo.");
+        return;
+      }
+      setStatus(`Cargando habilitaciones de ${idMeli}…`);
+      const row = await HUB.habilitacionesGet(idMeli);
+      renderHabilitacionesRow(idMeli, row);
+      setStatus("Listo.");
+    }catch(err){
+      setStatus(String(err?.message || err), true);
+    }
+  }
+
+  function boolFromCell(v){
+    if (v === true) return true;
+    if (v === false) return false;
+    const s = String(v ?? "").trim().toLowerCase();
+    return ["true","1","si","sí","yes","y"].includes(s);
+  }
+
+  function renderHabilitacionesRow(idMeli, rowObj){
+    const tbody = $("habBody");
+    tbody.innerHTML = "";
+
+    if (!rowObj){
+      tbody.innerHTML = `<tr><td colspan="4" class="muted">Sin datos para ese ID_MELI</td></tr>`;
+      return;
+    }
+
+    // Flujos: usa Config_Flujos columna "Flujo" si existe; sino lista keys de Habilitaciones
+    const flujosNames = flujos
+      .map(f => f.Flujo ?? f.flujo ?? "")
+      .map(x => String(x).trim())
+      .filter(Boolean);
+
+    // Si no hay flujos, no inventamos: mostramos lo que haya
+    const sourceFlujos = (flujosNames.length ? flujosNames : Object.keys(rowObj).filter(k => k !== "ID_MELI"));
+
+    sourceFlujos.forEach(flujoName => {
+      const habilVal = rowObj[flujoName];
+      const fijoKey = `Fijo_${flujoName}`;
+      const fijoVal = rowObj[fijoKey];
+
+      const tr = document.createElement("tr");
+
+      const tdFlujo = document.createElement("td");
+      tdFlujo.textContent = flujoName;
+      tr.appendChild(tdFlujo);
+
+      const tdHab = document.createElement("td");
+      const habOn = boolFromCell(habilVal);
+      tdHab.innerHTML = `<span class="pill ${habOn ? "ok" : "bad"}">${habOn ? "SI" : "NO"}</span>`;
+      tr.appendChild(tdHab);
+
+      const tdFijo = document.createElement("td");
+      const fijoOn = boolFromCell(fijoVal);
+      tdFijo.innerHTML = `<span class="pill ${fijoOn ? "ok" : "bad"}">${fijoOn ? "SI" : "NO"}</span>`;
+      tr.appendChild(tdFijo);
+
+      const tdAct = document.createElement("td");
+
+      const b1 = document.createElement("button");
+      b1.className = "btn";
+      b1.textContent = habOn ? "Deshabilitar" : "Habilitar";
+      b1.addEventListener("click", async ()=>{
+        await toggleHab(idMeli, flujoName, "habilitado");
+      });
+
+      const b2 = document.createElement("button");
+      b2.className = "btn";
+      b2.style.marginLeft = "8px";
+      b2.textContent = fijoOn ? "Quitar fijo" : "Marcar fijo";
+      b2.addEventListener("click", async ()=>{
+        await toggleHab(idMeli, flujoName, "fijo");
+      });
+
+      tdAct.appendChild(b1);
+      tdAct.appendChild(b2);
+      tr.appendChild(tdAct);
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function toggleHab(idMeli, flujo, field){
+    try{
+      setStatus(`Actualizando ${field} — ${idMeli} / ${flujo}…`);
+      await HUB.habilitacionesSet({ idMeli, flujo, field }); // toggle
+      // recargar
+      const row = await HUB.habilitacionesGet(idMeli);
+      renderHabilitacionesRow(idMeli, row);
+      setStatus("Listo.");
+    }catch(err){
+      setStatus(String(err?.message || err), true);
+    }
+  }
+
+  // ---------- Planificación ----------
+  $("btnPlanGenerar").addEventListener("click", async ()=>{
+    try{
+      setStatus("Generando planificación…");
+      await HUB.planificacionGenerar();
+      setStatus("Planificación generada (Sheets actualizado).");
+    }catch(err){
+      setStatus(String(err?.message || err), true);
+    }
+  });
+
+  // ---------- Slack ----------
+  $("btnSlackGenerar").addEventListener("click", async ()=>{
+    try{
+      setStatus("Generando Slack Outbox…");
+      await HUB.slackOutboxGenerar();
+      setStatus("Slack Outbox generado (Sheets actualizado).");
+    }catch(err){
+      setStatus(String(err?.message || err), true);
+    }
+  });
+
+  $("btnSlackEnviar").addEventListener("click", async ()=>{
+    try{
+      setStatus("Enviando pendientes de Slack Outbox…");
+      await HUB.slackOutboxEnviar();
+      setStatus("Slack Outbox procesado (ver Estados en Sheets).");
+    }catch(err){
+      setStatus(String(err?.message || err), true);
+    }
+  });
+
+  // ---------- Feriados ----------
+  $("btnFeriados").addEventListener("click", async ()=>{
+    try{
+      setStatus("Cargando feriados…");
+      const list = await HUB.feriadosList();
+      $("feriadosCount").textContent = `Total: ${list.length}`;
+      $("feriadosList").innerHTML = (list || []).map(d => `• ${d}`).join("<br/>");
+      setStatus("Listo.");
+    }catch(err){
+      setStatus(String(err?.message || err), true);
+    }
+  });
+
+  // Start
+  bootstrap();
+</script>
 </body>
 </html>
