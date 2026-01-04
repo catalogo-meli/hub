@@ -4,15 +4,13 @@ const HUB = (() => {
 
   async function request(path, { method = "GET", query, body } = {}) {
     let url = BASE;
-    const qs = new URLSearchParams();
 
     if (method === "GET") {
+      const qs = new URLSearchParams();
       if (path) qs.set("action", path);
       if (query) {
         Object.entries(query).forEach(([k, v]) => {
-          if (v !== undefined && v !== null && v !== "") {
-            qs.set(k, String(v));
-          }
+          if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
         });
       }
       url += "?" + qs.toString();
@@ -33,13 +31,13 @@ const HUB = (() => {
     let j;
     try {
       j = JSON.parse(txt);
-    } catch (err) {
-      console.error("API devolvió respuesta NO JSON:", txt);
-      throw new Error("Respuesta inválida del backend");
+    } catch {
+      console.error("API devolvió NO-JSON:", { url, status: r.status, txt });
+      throw new Error("Respuesta inválida del backend (no JSON).");
     }
 
     if (!j.ok) {
-      console.error("API error:", j);
+      console.error("API error payload:", j);
       throw new Error(j.error || "API error");
     }
 
@@ -54,46 +52,28 @@ const HUB = (() => {
     colaboradoresList: () => request("colaboradores.list"),
     flujosList: () => request("flujos.list"),
     feriadosList: () => request("feriados.list"),
-
     habilitacionesList: () => request("habilitaciones.list"),
-    habilitacionesGet: (idMeli) =>
-      request("habilitaciones.get", { query: { idMeli } }),
+    habilitacionesGet: (idMeli) => request("habilitaciones.get", { query: { idMeli } }),
 
-    // === EDITS ===
+    planificacionGet: () => request("planificacion.get"),
+    slackOutboxList: () => request("slack.outbox.list"),
 
-    // A) Flujos: set Perfiles_requeridos en Config_Flujos
+    // Escrituras
     flujosSetPerfiles: (flujo, perfiles_requeridos) =>
-      request("flujos.setPerfiles", {
-        method: "POST",
-        body: { flujo, perfiles_requeridos },
-      }),
+      request("flujos.setPerfiles", { method: "POST", body: { flujo, perfiles_requeridos } }),
 
-    // B1) Habilitaciones (legacy)
     habilitacionesSetField: (idMeli, flujo, field, value) =>
-      request("habilitaciones.set", {
-        method: "POST",
-        body: { idMeli, flujo, field, value },
-      }),
+      request("habilitaciones.set", { method: "POST", body: { idMeli, flujo, field, value } }),
 
-    // B2) Habilitaciones (nuevo)
     habilitacionesSet: (idMeli, flujo, { habilitado, fijo } = {}) =>
-      request("habilitaciones.set", {
-        method: "POST",
-        body: { idMeli, flujo, habilitado, fijo },
-      }),
+      request("habilitaciones.set", { method: "POST", body: { idMeli, flujo, habilitado, fijo } }),
 
     // Acciones
-    planificacionGenerar: () =>
-      request("planificacion.generar", { method: "POST" }),
-
-    slackOutboxGenerar: () =>
-      request("slack.outbox.generar", { method: "POST" }),
-
-    slackOutboxEnviar: () =>
-      request("slack.outbox.enviar", { method: "POST" }),
+    planificacionGenerar: () => request("planificacion.generar", { method: "POST" }),
+    slackOutboxGenerar: () => request("slack.outbox.generar", { method: "POST" }),
+    slackOutboxEnviar: () => request("slack.outbox.enviar", { method: "POST" }),
   };
 })();
 
-// 🔴 ESTO ERA LO QUE FALTABA
 export { HUB };
 export default HUB;
