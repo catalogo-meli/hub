@@ -1,18 +1,23 @@
+// netlify/functions/gas.js
 export async function handler(event) {
-  const GAS_URL = process.env.GAS_URL;
-  const API_TOKEN = process.env.API_TOKEN;
+  const GAS_URL = process.env.GAS_URL;     // tu URL de Apps Script que termina en /exec
+  const API_TOKEN = process.env.API_TOKEN; // el mismo token que guardaste en Apps Script Script Properties
 
   if (!GAS_URL) return resp(500, { ok: false, error: "Missing GAS_URL env var" });
   if (!API_TOKEN) return resp(500, { ok: false, error: "Missing API_TOKEN env var" });
 
+  // Preflight CORS
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: cors(), body: "" };
   }
 
   try {
+    // --- GET (querystring) ---
     if (event.httpMethod === "GET") {
       const qs = event.queryStringParameters || {};
       const url = new URL(GAS_URL);
+
+      // Reenvía todos los query params + agrega token
       url.search = new URLSearchParams({ ...qs, token: API_TOKEN }).toString();
 
       const r = await fetch(url.toString(), { method: "GET" });
@@ -20,11 +25,15 @@ export async function handler(event) {
 
       return {
         statusCode: r.status,
-        headers: { ...cors(), "content-type": r.headers.get("content-type") || "application/json" },
+        headers: {
+          ...cors(),
+          "content-type": r.headers.get("content-type") || "application/json"
+        },
         body: txt
       };
     }
 
+    // --- POST (JSON body) ---
     if (event.httpMethod === "POST") {
       const bodyIn = event.body ? JSON.parse(event.body) : {};
       const bodyOut = { ...bodyIn, token: API_TOKEN };
@@ -39,7 +48,10 @@ export async function handler(event) {
 
       return {
         statusCode: r.status,
-        headers: { ...cors(), "content-type": r.headers.get("content-type") || "application/json" },
+        headers: {
+          ...cors(),
+          "content-type": r.headers.get("content-type") || "application/json"
+        },
         body: txt
       };
     }
@@ -59,5 +71,9 @@ function cors() {
 }
 
 function resp(code, obj) {
-  return { statusCode: code, headers: { ...cors(), "content-type": "application/json" }, body: JSON.stringify(obj) };
+  return {
+    statusCode: code,
+    headers: { ...cors(), "content-type": "application/json" },
+    body: JSON.stringify(obj)
+  };
 }
