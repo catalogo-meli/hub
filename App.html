@@ -1,23 +1,20 @@
-<h1>Inicio</h1>
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <?!= include_('Layout'); ?>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Catálogo | HUB</h1>
 
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px">
+      <? if (page === 'home') { ?>
+        <p>Bienvenido al HUB.</p>
+      <? } ?>
 
-  <div style="border:1px solid #ddd;border-radius:12px;padding:16px">
-    <h2>Ausencias / Vacaciones</h2>
-    <p>Gestión del calendario del equipo.</p>
-    <a href="?page=ausencias">Abrir</a>
-  </div>
-
-  <div style="border:1px solid #ddd;border-radius:12px;padding:16px">
-    <h2>Métricas</h2>
-    <p>Acceso a tableros y reportes.</p>
-    <span style="color:#999">Próximamente</span>
-  </div>
-
-  <div style="border:1px solid #ddd;border-radius:12px;padding:16px">
-    <h2>Calidad</h2>
-    <p>Auditorías, errores y seguimiento.</p>
-    <span style="color:#999">Próximamente</span>
-  </div>
-
-</div>
+      <? if (page === 'ausencias') { ?>
+        <?!= include_('Ausencias'); ?>
+      <? } ?>
+    </div>
+  </body>
+</html>
