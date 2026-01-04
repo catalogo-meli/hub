@@ -1,14 +1,13 @@
-// netlify/functions/gas.js
 export async function handler(event) {
-  const GAS_URL = process.env.GAS_URL;       // https://script.google.com/macros/s/.../exec
-  const API_TOKEN = process.env.API_TOKEN;   // mismo valor que pusiste en Script Properties (Apps Script)
+  const GAS_URL = process.env.GAS_URL;
+  const API_TOKEN = process.env.API_TOKEN;
 
   if (!GAS_URL) return resp(500, { ok: false, error: "Missing GAS_URL env var" });
   if (!API_TOKEN) return resp(500, { ok: false, error: "Missing API_TOKEN env var" });
 
   // Preflight CORS
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: cors(event), body: "" };
+    return { statusCode: 204, headers: cors(), body: "" };
   }
 
   try {
@@ -16,39 +15,33 @@ export async function handler(event) {
       const qs = event.queryStringParameters || {};
       const url = new URL(GAS_URL);
 
-      // Reenvía query params + agrega token
+      // Importante: el token lo agrega Netlify, no el frontend
       url.search = new URLSearchParams({ ...qs, token: API_TOKEN }).toString();
 
-      const r = await fetch(url.toString(), {
-        method: "GET",
-        headers: {
-          "accept": event.headers?.accept || "*/*"
-        }
-      });
+      const r = await fetch(url.toString(), { method: "GET" });
+      const txt = await r.text();
 
-      const body = await r.text();
       return {
         statusCode: r.status,
         headers: {
-          ...cors(event),
-          "content-type": r.headers.get("content-type") || "application/json; charset=utf-8",
-          "cache-control": "no-store"
+          ...cors(),
+          "content-type": r.headers.get("content-type") || "application/json"
         },
-        body
+        body: txt
       };
     }
 
     if (event.httpMethod === "POST") {
-      const isJson = (event.headers?.["content-type"] || event.headers?.["Content-Type"] || "")
-        .toLowerCase()
-        .includes("application/json");
+      let bodyIn = {};
+      if (event.body) {
+        try {
+          bodyIn = JSON.parse(event.body);
+        } catch {
+          return resp(400, { ok: false, error: "Invalid JSON body" });
+        }
+      }
 
-      const bodyIn = event.body
-        ? (isJson ? JSON.parse(event.body) : safeParseJson(event.body))
-        : {};
-
-      // Agrega token al body
-      const bodyOut = { ...(bodyIn || {}), token: API_TOKEN };
+      const bodyOut = { ...bodyIn, token: API_TOKEN };
 
       const r = await fetch(GAS_URL, {
         method: "POST",
@@ -56,15 +49,15 @@ export async function handler(event) {
         body: JSON.stringify(bodyOut)
       });
 
-      const body = await r.text();
+      const txt = await r.text();
+
       return {
         statusCode: r.status,
         headers: {
-          ...cors(event),
-          "content-type": r.headers.get("content-type") || "application/json; charset=utf-8",
-          "cache-control": "no-store"
+          ...cors(),
+          "content-type": r.headers.get("content-type") || "application/json"
         },
-        body
+        body: txt
       };
     }
 
@@ -74,12 +67,7 @@ export async function handler(event) {
   }
 }
 
-function safeParseJson(s) {
-  try { return JSON.parse(s); } catch { return { raw: s }; }
-}
-
-function cors(event) {
-  // Si querés cerrar más: cambiá "*" por "https://hub-catalogo.netlify.app"
+function cors() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "content-type",
@@ -90,7 +78,7 @@ function cors(event) {
 function resp(code, obj) {
   return {
     statusCode: code,
-    headers: { ...cors({}), "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    headers: { ...cors(), "content-type": "application/json" },
     body: JSON.stringify(obj)
   };
 }
