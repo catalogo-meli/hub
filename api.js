@@ -1,48 +1,51 @@
 // api.js
-const API_BASE = ""; // mismo dominio (Netlify)
-const PROXY = `${API_BASE}/.netlify/functions/gas`;
+const API = (() => {
+  const BASE = "/.netlify/functions/gas";
 
-async function apiGet(action, params = {}) {
-  const url = new URL(PROXY, window.location.origin);
-  url.searchParams.set("action", action);
-  Object.entries(params).forEach(([k, v]) => {
-    if (v === undefined || v === null || v === "") return;
-    url.searchParams.set(k, String(v));
-  });
+  async function request(path, { method = "GET", query, body } = {}) {
+    let url = BASE;
+    const qs = new URLSearchParams();
 
-  const r = await fetch(url.toString(), { method: "GET" });
-  const txt = await r.text();
+    if (method === "GET") {
+      if (path) qs.set("action", path);
+      if (query) Object.entries(query).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+      });
+      url += "?" + qs.toString();
+      const r = await fetch(url, { method });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || "API error");
+      return j.data;
+    }
 
-  let json;
-  try { json = JSON.parse(txt); } catch { throw new Error(`Respuesta no-JSON (${r.status}): ${txt.slice(0, 200)}`); }
-  if (!r.ok || json.ok === false) throw new Error(json?.error || `HTTP ${r.status}`);
-  return json.data;
-}
+    // POST
+    const payload = { action: path, ...(body || {}) };
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || "API error");
+    return j.data;
+  }
 
-async function apiPost(action, body = {}) {
-  const r = await fetch(PROXY, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action, ...body })
-  });
+  return {
+    health: () => request("health"),
 
-  const txt = await r.text();
-  let json;
-  try { json = JSON.parse(txt); } catch { throw new Error(`Respuesta no-JSON (${r.status}): ${txt.slice(0, 200)}`); }
-  if (!r.ok || json.ok === false) throw new Error(json?.error || `HTTP ${r.status}`);
-  return json.data;
-}
+    colaboradoresList: () => request("colaboradores.list"),
+    flujosList: () => request("flujos.list"),
+    flujosSet: (flujo, patch) => request("flujos.set", { method: "POST", body: { flujo, ...patch } }),
 
-// Endpoints del HUB
-export const HUB = {
-  health: () => apiGet("health"),
-  colaboradoresList: () => apiGet("colaboradores.list"),
-  flujosList: () => apiGet("flujos.list"),
-  habilitacionesGet: (idMeli = "") => apiGet("habilitaciones.get", { idMeli }),
-  habilitacionesSet: ({ idMeli, flujo, field, value }) =>
-    apiPost("habilitaciones.set", { idMeli, flujo, field, value }),
-  planificacionGenerar: () => apiPost("planificacion.generar"),
-  slackOutboxGenerar: () => apiPost("slack.outbox.generar"),
-  slackOutboxEnviar: () => apiPost("slack.outbox.enviar"),
-  feriadosList: () => apiGet("feriados.list"),
-};
+    habilitacionesList: () => request("habilitaciones.list"),
+    habilitacionesGet: (idMeli) => request("habilitaciones.get", { query: { idMeli } }),
+    habilitacionesSet: (idMeli, flujo, field, value) =>
+      request("habilitaciones.set", { method: "POST", body: { idMeli, flujo, field, value } }),
+
+    planificacionGenerar: () => request("planificacion.generar", { method: "POST" }),
+    slackOutboxGenerar: () => request("slack.outbox.generar", { method: "POST" }),
+    slackOutboxEnviar: () => request("slack.outbox.enviar", { method: "POST" }),
+
+    feriadosList: () => request("feriados.list"),
+  };
+})();
