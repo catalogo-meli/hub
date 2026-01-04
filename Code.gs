@@ -969,26 +969,51 @@ function abrirPanelAusencias() {
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
+/** Catálogo | HUB - WebApp entrypoint **/
+
 function doGet(e) {
-  const page = e?.parameter?.page || 'home';
+  const page = (e && e.parameter && e.parameter.page) ? String(e.parameter.page) : "home";
 
-  let contentFile = 'App';
+  const t = HtmlService.createTemplateFromFile("App");
+  t.page = page;
+  t.config = getHubConfig_();
 
-  if (page === 'ausencias') contentFile = 'Ausencias';
-  if (page === 'metricas') contentFile = 'Metricas';
-  if (page === 'calidad') contentFile = 'Calidad';
-
-  const layout = HtmlService.createTemplateFromFile('Layout');
-  layout.content = HtmlService
-    .createTemplateFromFile(contentFile)
-    .evaluate()
-    .getContent();
-
-  return layout.evaluate()
-    .setTitle('Catálogo | HUB')
+  return t.evaluate()
+    .setTitle("Catálogo | HUB")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+// Include de parciales HTML
 function include_(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+// Config central del HUB (acá cargás links reales)
+function getHubConfig_() {
+  return {
+    title: "Catálogo | HUB",
+    repoUrl: "https://github.com/catalogo-meli/hub",
+    sections: [
+      {
+        id: "home",
+        label: "Nuevo HUB",
+        items: [
+          { label: "Repo GitHub", type: "link", href: "https://github.com/catalogo-meli/hub" }
+        ]
+      },
+      {
+        id: "ausencias",
+        label: "Vacaciones / Ausencias",
+        items: [
+          { label: "Panel Ausencias", type: "internal", page: "ausencias", description: "Carga y consulta de ausencias/vacaciones." }
+        ]
+      },
+      { id: "metricas", label: "Métricas", items: [] },
+      { id: "plan", label: "Plan de Carrera", items: [] },
+      { id: "matchers", label: "Matchers", items: [] },
+      { id: "fallos", label: "Fallos", items: [] },
+      { id: "mejoras", label: "Mejoras", items: [] },
+      { id: "calidad", label: "Calidad", items: [] }
+    ]
+  };
 }
