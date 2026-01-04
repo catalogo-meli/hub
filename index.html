@@ -1,649 +1,92 @@
 <!doctype html>
 <html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Catálogo | HUB</title>
-
-  <!-- Montserrat (look & feel como tu dashboard) -->
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-
-  <style>
-    :root{
-      --bg:#0b1220; --card:#0f1b33; --muted:#9fb0d0; --txt:#eaf0ff;
-      --line:#223458; --ok:#2de38b; --warn:#ffd166; --bad:#ff5c7a;
-      --btn:#1b2e54; --btn2:#244172;
-    }
-    *{box-sizing:border-box}
-    body{
-      margin:0;
-      font-family:'Montserrat',system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;
-      background:var(--bg);
-      color:var(--txt);
-    }
-    header{
-      padding:16px 20px;
-      border-bottom:1px solid var(--line);
-      display:flex; gap:12px; align-items:center; justify-content:space-between;
-    }
-    .title{font-weight:800; letter-spacing:.2px}
-    .sub{color:var(--muted); font-size:12px}
-    nav{
-      display:flex; gap:8px; flex-wrap:wrap;
-      padding:12px 20px; border-bottom:1px solid var(--line);
-    }
-    .tab{
-      padding:8px 10px;
-      border:1px solid var(--line);
-      background:transparent;
-      color:var(--txt);
-      border-radius:10px;
-      cursor:pointer;
-      font-weight:700;
-    }
-    .tab.active{background:var(--btn2); border-color:#33579a;}
-    main{padding:18px 20px; max-width:1200px; margin:0 auto;}
-    .row{display:flex; gap:12px; flex-wrap:wrap; align-items:center;}
-    .card{
-      background:var(--card);
-      border:1px solid var(--line);
-      border-radius:14px;
-      padding:14px;
-    }
-    .grow{flex:1}
-    .btn{
-      padding:8px 10px; border-radius:10px;
-      border:1px solid var(--line);
-      background:var(--btn);
-      color:var(--txt);
-      cursor:pointer;
-      font-weight:700;
-    }
-    .btn:hover{filter:brightness(1.1)}
-    .btn.ok{border-color:#1f7a54}
-    .btn.warn{border-color:#7a6a1f}
-    .btn.bad{border-color:#7a1f35}
-    input, select{
-      background:#0b1730; border:1px solid var(--line); color:var(--txt);
-      padding:8px 10px; border-radius:10px; outline:none;
-      font-family:'Montserrat',system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;
-    }
-    input[type="number"]{width:110px}
-    table{width:100%; border-collapse:collapse; font-size:13px;}
-    th,td{border-bottom:1px solid var(--line); padding:10px 8px; vertical-align:top;}
-    th{color:var(--muted); font-weight:700; text-align:left;}
-    .pill{display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--muted);}
-    .pill.ok{border-color:#1f7a54; color:var(--ok)}
-    .pill.bad{border-color:#7a1f35; color:var(--bad)}
-    .muted{color:var(--muted)}
-    .err{color:var(--bad); white-space:pre-wrap;}
-    .ok{color:var(--ok);}
-    .hidden{display:none;}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;}
-
-    /* Checkbox bonito sin volarte el layout */
-    .chk{
-      width:18px; height:18px;
-      accent-color:#22c3ee;
-      cursor:pointer;
-    }
-    .right{display:flex; justify-content:flex-end; gap:8px; align-items:center;}
-  </style>
-</head>
-
-<body>
-<header>
-  <div>
-    <div class="title">Catálogo</div>
-    <div class="sub">HUB Equipo & Planificación</div>
-  </div>
-  <div class="row">
-    <button class="btn" id="btnHealth">Health</button>
-    <span class="pill mono" id="healthState">—</span>
-  </div>
-</header>
-
-<nav id="tabs">
-  <button class="tab active" data-view="colaboradores">Colaboradores</button>
-  <button class="tab" data-view="flujos">Flujos</button>
-  <button class="tab" data-view="habilitaciones">Habilitaciones</button>
-  <button class="tab" data-view="planificacion">Planificación</button>
-  <button class="tab" data-view="slack">Slack</button>
-  <button class="tab" data-view="feriados">Feriados</button>
-</nav>
-
-<main>
-  <div class="card" id="statusCard">
-    <div class="row" style="justify-content:space-between;">
-      <div>
-        <div style="font-weight:800">Estado</div>
-        <div class="muted" id="statusMsg">Listo.</div>
-      </div>
-      <div class="row">
-        <button class="btn" id="btnReload">Recargar vista</button>
-      </div>
-    </div>
-    <div class="err hidden" id="statusErr"></div>
-  </div>
-
-  <!-- COLABORADORES -->
-  <section class="card" id="view-colaboradores">
-    <div class="row" style="justify-content:space-between;">
-      <div>
-        <div style="font-weight:800">Colaboradores</div>
-        <div class="muted">Fuente: hoja <span class="mono">Colaboradores</span></div>
-      </div>
-      <div class="row">
-        <input id="colabSearch" placeholder="Buscar por nombre / ID / Slack" />
-      </div>
-    </div>
-    <div style="height:12px"></div>
-    <div class="mono muted" id="colabCount"></div>
-    <div style="height:8px"></div>
-    <div style="overflow:auto;">
-      <table id="colabTable">
-        <thead><tr id="colabHead"></tr></thead>
-        <tbody id="colabBody"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- FLUJOS (EDITABLE) -->
-  <section class="card hidden" id="view-flujos">
-    <div class="row" style="justify-content:space-between; align-items:flex-end;">
-      <div>
-        <div style="font-weight:800">Flujos</div>
-        <div class="muted">Fuente: hoja <span class="mono">Config_Flujos</span> — editá <span class="mono">Perfiles_requeridos</span></div>
-      </div>
-      <div class="row">
-        <button class="btn" id="btnFlujosReload">Recargar</button>
-      </div>
-    </div>
-
-    <div style="height:12px"></div>
-
-    <div style="overflow:auto;">
-      <table id="flujosTable">
-        <thead>
-          <tr>
-            <th>Flujo</th>
-            <th>Perfiles_requeridos</th>
-            <th>Acciones</th>
-          </tr>
-        </thead>
-        <tbody id="flujosBody"></tbody>
-      </table>
-    </div>
-    <div class="muted" style="margin-top:10px; font-size:12px">
-      Nota: se guarda por fila. No invento nada: escribe directo en tu Sheet.
-    </div>
-  </section>
-
-  <!-- HABILITACIONES (EDITABLE CON CHECKBOX) -->
-  <section class="card hidden" id="view-habilitaciones">
-    <div class="row" style="justify-content:space-between; align-items:flex-end;">
-      <div>
-        <div style="font-weight:800">Habilitaciones</div>
-        <div class="muted">Hoja <span class="mono">Habilitaciones</span> — editá con checkboxes y guardá</div>
-      </div>
-      <div class="row">
-        <select id="habSelect"></select>
-        <button class="btn" id="btnHabLoad">Cargar</button>
-      </div>
-    </div>
-
-    <div style="height:12px"></div>
-
-    <div style="overflow:auto;">
-      <table id="habTable">
-        <thead>
-          <tr>
-            <th>Flujo</th>
-            <th>Habilitado</th>
-            <th>Fijo</th>
-            <th class="right">Acciones</th>
-          </tr>
-        </thead>
-        <tbody id="habBody"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- PLANIFICACION -->
-  <section class="card hidden" id="view-planificacion">
-    <div class="row" style="justify-content:space-between;">
-      <div>
-        <div style="font-weight:800">Planificación</div>
-        <div class="muted">Dispara <span class="mono">planificacion.generar</span> (escribe en Sheets)</div>
-      </div>
-      <div class="row">
-        <button class="btn ok" id="btnPlanGenerar">Generar planificación</button>
-      </div>
-    </div>
-    <div style="height:12px"></div>
-    <div class="muted">Si esto tarda, es normal: está ejecutando lógica + escritura en el spreadsheet.</div>
-  </section>
-
-  <!-- SLACK -->
-  <section class="card hidden" id="view-slack">
-    <div class="row" style="justify-content:space-between;">
-      <div>
-        <div style="font-weight:800">Slack</div>
-        <div class="muted">
-          <span class="mono">slack.outbox.generar</span> y <span class="mono">slack.outbox.enviar</span>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Catálogo · HUB Equipo & Planificación</title>
+    <style>
+      :root{
+        --bg:#070b14; --panel:#0c1325; --panel2:#0f1a33; --stroke:#1e2a4a;
+        --text:#e9eefc; --muted:#9bb0e7; --accent:#2b7cff; --good:#2fe39c; --bad:#ff5c6c; --warn:#ffcf5c;
+        --radius:16px;
+      }
+      *{box-sizing:border-box}
+      body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;background:linear-gradient(180deg,#050814,#070b14);color:var(--text)}
+      .wrap{max-width:1200px;margin:0 auto;padding:18px 18px 40px}
+      .top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+      .brand h1{margin:0;font-size:26px;letter-spacing:.2px}
+      .brand .sub{color:var(--muted);margin-top:2px}
+      .right{display:flex;gap:10px;align-items:center}
+      .chip{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:rgba(43,124,255,.10);border:1px solid rgba(43,124,255,.25);cursor:pointer;user-select:none}
+      .dot{width:10px;height:10px;border-radius:50%;background:var(--warn)}
+      .dot.ok{background:var(--good)}
+      .dot.bad{background:var(--bad)}
+      .tabs{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+      .tab{padding:10px 14px;border-radius:999px;background:transparent;border:1px solid var(--stroke);color:var(--text);cursor:pointer}
+      .tab.active{background:rgba(43,124,255,.18);border-color:rgba(43,124,255,.35)}
+      .card{margin-top:14px;background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--stroke);border-radius:var(--radius);padding:16px}
+      .row{display:flex;gap:12px;flex-wrap:wrap}
+      .kpi{flex:1;min-width:180px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:12px}
+      .kpi .label{color:var(--muted);font-size:12px}
+      .kpi .value{font-size:22px;margin-top:4px}
+      .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+      input,select{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);color:var(--text);padding:10px 12px;border-radius:12px;outline:none}
+      input:focus,select:focus{border-color:rgba(43,124,255,.6)}
+      .btn{padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);color:var(--text);cursor:pointer}
+      .btn.primary{background:rgba(43,124,255,.25);border-color:rgba(43,124,255,.45)}
+      .btn.good{background:rgba(47,227,156,.18);border-color:rgba(47,227,156,.35)}
+      .btn.bad{background:rgba(255,92,108,.15);border-color:rgba(255,92,108,.35)}
+      .status{color:var(--muted);margin-top:8px}
+      table{width:100%;border-collapse:collapse;margin-top:12px;overflow:hidden;border-radius:14px;border:1px solid rgba(255,255,255,.08)}
+      th,td{padding:10px 10px;border-bottom:1px solid rgba(255,255,255,.06);text-align:left}
+      th{color:var(--muted);font-weight:600;font-size:12px;background:rgba(255,255,255,.03);position:sticky;top:0}
+      tr:hover td{background:rgba(255,255,255,.02)}
+      .empty{padding:14px;color:var(--muted);border:1px dashed rgba(255,255,255,.14);border-radius:14px;margin-top:12px}
+      .badge{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);font-size:12px}
+      .toast-wrap{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:10px;z-index:9999}
+      .toast{min-width:280px;max-width:380px;background:rgba(12,19,37,.95);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px}
+      .toast .t{font-weight:700;margin:0 0 4px}
+      .toast .m{margin:0;color:var(--muted);font-size:13px}
+      .toast.good{border-color:rgba(47,227,156,.35)}
+      .toast.bad{border-color:rgba(255,92,108,.35)}
+      .toast.warn{border-color:rgba(255,207,92,.35)}
+      .hr{height:1px;background:rgba(255,255,255,.07);margin:12px 0}
+      .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+      .small{font-size:12px;color:var(--muted)}
+      .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+      @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div class="brand">
+          <h1>Catálogo</h1>
+          <div class="sub">HUB Equipo &amp; Planificación</div>
+        </div>
+        <div class="right">
+          <div id="healthChip" class="chip" title="Verifica conexión con backend">
+            <span class="dot" id="healthDot"></span>
+            <span>Health</span>
+            <span class="badge" id="healthText">…</span>
+          </div>
+          <button class="btn" id="reloadBtn" title="Recarga datos del tab actual">Recargar vista</button>
         </div>
       </div>
-      <div class="row">
-        <button class="btn warn" id="btnSlackGenerar">Generar Outbox</button>
-        <button class="btn ok" id="btnSlackEnviar">Enviar pendientes</button>
+
+      <div class="tabs" id="tabs"></div>
+
+      <div class="card">
+        <div id="cards" class="row"></div>
+        <div class="hr"></div>
+        <div id="controls" class="controls"></div>
+        <div id="status" class="status">Listo.</div>
+        <div id="content"></div>
       </div>
     </div>
-    <div style="height:12px"></div>
-    <div class="muted">Esto escribe/actualiza <span class="mono">Slack_Outbox</span> en Sheets y luego envía lo pendiente.</div>
-  </section>
 
-  <!-- FERIADOS -->
-  <section class="card hidden" id="view-feriados">
-    <div>
-      <div style="font-weight:800">Feriados</div>
-      <div class="muted">Fuente: hoja <span class="mono">Feriados_AR</span> (para validar días hábiles)</div>
-    </div>
-    <div style="height:12px"></div>
-    <div class="row">
-      <button class="btn" id="btnFeriados">Listar feriados</button>
-      <span class="muted mono" id="feriadosCount"></span>
-    </div>
-    <div style="height:12px"></div>
-    <div id="feriadosList" class="mono"></div>
-  </section>
-</main>
+    <div class="toast-wrap" id="toasts"></div>
 
-<script type="module">
-  import { HUB } from "./api.js";
-
-  // ---------- UI helpers ----------
-  const $ = (id) => document.getElementById(id);
-  const setStatus = (msg, isErr=false) => {
-    $("statusMsg").textContent = msg;
-    $("statusErr").classList.toggle("hidden", !isErr);
-    $("statusErr").textContent = isErr ? msg : "";
-    if (!isErr) $("statusErr").textContent = "";
-  };
-
-  const setHealth = (txt, ok=null) => {
-    const el = $("healthState");
-    el.textContent = txt;
-    el.classList.remove("ok","bad");
-    if (ok === true) el.classList.add("ok");
-    if (ok === false) el.classList.add("bad");
-  };
-
-  const views = ["colaboradores","flujos","habilitaciones","planificacion","slack","feriados"];
-  let currentView = "colaboradores";
-
-  function showView(v){
-    currentView = v;
-    views.forEach(x => $("view-"+x).classList.toggle("hidden", x !== v));
-    document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === v));
-    setStatus("Listo.");
-  }
-
-  document.getElementById("tabs").addEventListener("click", (e)=>{
-    const b = e.target.closest(".tab");
-    if (!b) return;
-    showView(b.dataset.view);
-    loadCurrent();
-  });
-
-  $("btnReload").addEventListener("click", loadCurrent);
-
-  $("btnHealth").addEventListener("click", async ()=>{
-    try{
-      setHealth("…", null);
-      const data = await HUB.health();
-      setHealth("ok", true);
-      setStatus(`Health OK — ${data?.ts || ""}`);
-    }catch(err){
-      setHealth("fail", false);
-      setStatus(String(err?.message || err), true);
-    }
-  });
-
-  // ---------- Data caches ----------
-  let colaboradores = [];
-  let flujos = [];
-
-  async function bootstrap(){
-    try{
-      setHealth("…", null);
-      await HUB.health();
-      setHealth("ok", true);
-    }catch{
-      setHealth("fail", false);
-    }
-
-    await Promise.all([loadColaboradores(), loadFlujos()]);
-    fillHabSelect();
-    loadCurrent();
-  }
-
-  async function loadColaboradores(){
-    try{
-      setStatus("Cargando colaboradores…");
-      colaboradores = await HUB.colaboradoresList();
-      renderColaboradores(colaboradores);
-      setStatus("Listo.");
-    }catch(err){
-      setStatus(String(err?.message || err), true);
-    }
-  }
-
-  async function loadFlujos(){
-    try{
-      setStatus("Cargando flujos…");
-      flujos = await HUB.flujosList();
-      renderFlujosEditable(flujos);
-      setStatus("Listo.");
-    }catch(err){
-      setStatus(String(err?.message || err), true);
-    }
-  }
-
-  function loadCurrent(){
-    if (currentView === "colaboradores") return loadColaboradores();
-    if (currentView === "flujos") return loadFlujos();
-    if (currentView === "habilitaciones") return loadHabilitacionesSelected();
-    setStatus("Listo.");
-  }
-
-  // ---------- Render: Colaboradores ----------
-  function renderTableGeneric(headEl, bodyEl, rows){
-    headEl.innerHTML = "";
-    bodyEl.innerHTML = "";
-    if (!rows || rows.length === 0){
-      headEl.innerHTML = "<th>Sin datos</th>";
-      return;
-    }
-    const headers = Object.keys(rows[0]);
-    headers.forEach(h => {
-      const th = document.createElement("th");
-      th.textContent = h;
-      headEl.appendChild(th);
-    });
-    rows.forEach(r => {
-      const tr = document.createElement("tr");
-      headers.forEach(h => {
-        const td = document.createElement("td");
-        const v = r[h];
-        td.textContent = (v === null || v === undefined) ? "" : String(v);
-        tr.appendChild(td);
-      });
-      bodyEl.appendChild(tr);
-    });
-  }
-
-  function renderColaboradores(rows){
-    renderTableGeneric($("colabHead"), $("colabBody"), rows);
-    $("colabCount").textContent = `Registros: ${rows.length}`;
-  }
-
-  $("colabSearch").addEventListener("input", ()=>{
-    const q = $("colabSearch").value.trim().toLowerCase();
-    if (!q) return renderColaboradores(colaboradores);
-    const filtered = colaboradores.filter(o =>
-      Object.values(o).some(v => String(v ?? "").toLowerCase().includes(q))
-    );
-    renderColaboradores(filtered);
-  });
-
-  // ---------- Flujos (EDITABLE) ----------
-  $("btnFlujosReload").addEventListener("click", loadFlujos);
-
-  function normKey(obj, keys){
-    for (const k of keys){
-      if (k in obj) return k;
-      const found = Object.keys(obj).find(x => x.toLowerCase() === k.toLowerCase());
-      if (found) return found;
-    }
-    return null;
-  }
-
-  function renderFlujosEditable(rows){
-    const tbody = $("flujosBody");
-    tbody.innerHTML = "";
-
-    if (!rows || rows.length === 0){
-      tbody.innerHTML = `<tr><td colspan="3" class="muted">Sin datos</td></tr>`;
-      return;
-    }
-
-    rows.forEach((r, idx)=>{
-      const kFlujo = normKey(r, ["Flujo","flujo"]);
-      const kReq   = normKey(r, ["Perfiles_requeridos","perfiles_requeridos","Perfiles requeridos","perfiles requeridos"]);
-      const flujoName = String(r[kFlujo] ?? "").trim();
-      const reqValRaw = r[kReq];
-
-      const tr = document.createElement("tr");
-
-      const tdF = document.createElement("td");
-      tdF.textContent = flujoName;
-      tr.appendChild(tdF);
-
-      const tdI = document.createElement("td");
-      const inp = document.createElement("input");
-      inp.type = "number";
-      inp.min = "0";
-      inp.step = "1";
-      inp.value = (reqValRaw === null || reqValRaw === undefined || reqValRaw === "") ? "" : Number(reqValRaw);
-      inp.dataset.flujo = flujoName;
-      inp.dataset.rowIndex = String(idx);
-      tdI.appendChild(inp);
-      tr.appendChild(tdI);
-
-      const tdA = document.createElement("td");
-      const btnSave = document.createElement("button");
-      btnSave.className = "btn ok";
-      btnSave.textContent = "Guardar";
-      btnSave.addEventListener("click", async ()=>{
-        try{
-          const n = inp.value === "" ? "" : Number(inp.value);
-          if (inp.value !== "" && (!Number.isFinite(n) || n < 0)) {
-            setStatus("Perfiles_requeridos debe ser un número >= 0.", true);
-            return;
-          }
-          setStatus(`Guardando Perfiles_requeridos — ${flujoName}…`);
-          await HUB.flujosSetPerfiles({ flujo: flujoName, perfiles_requeridos: (inp.value === "" ? "" : n) });
-          setStatus("Guardado. (Sheet actualizado)");
-          // refresh local data para reflejar lo que quedó
-          flujos = await HUB.flujosList();
-          renderFlujosEditable(flujos);
-        }catch(err){
-          setStatus(String(err?.message || err), true);
-        }
-      });
-
-      tdA.appendChild(btnSave);
-      tr.appendChild(tdA);
-
-      tbody.appendChild(tr);
-    });
-  }
-
-  // ---------- Habilitaciones (checkbox editable) ----------
-  function fillHabSelect(){
-    const sel = $("habSelect");
-    sel.innerHTML = "";
-    const opt0 = document.createElement("option");
-    opt0.value = "";
-    opt0.textContent = "Seleccionar ID_MELI…";
-    sel.appendChild(opt0);
-
-    const getLabel = (c) => {
-      const id = c.ID_MELI ?? c.Id ?? c.id ?? "";
-      const name = c.Nombre ?? c.nombre ?? "";
-      return name ? `${id} — ${name}` : String(id);
-    };
-
-    colaboradores
-      .map(c => ({ id: String(c.ID_MELI ?? "").trim(), label: getLabel(c) }))
-      .filter(x => x.id)
-      .sort((a,b)=> a.label.localeCompare(b.label))
-      .forEach(x=>{
-        const opt = document.createElement("option");
-        opt.value = x.id;
-        opt.textContent = x.label;
-        sel.appendChild(opt);
-      });
-  }
-
-  $("btnHabLoad").addEventListener("click", loadHabilitacionesSelected);
-
-  async function loadHabilitacionesSelected(){
-    try{
-      if (currentView !== "habilitaciones") return;
-      const idMeli = $("habSelect").value;
-      if (!idMeli){
-        $("habBody").innerHTML = `<tr><td colspan="4" class="muted">Elegí un ID_MELI</td></tr>`;
-        setStatus("Listo.");
-        return;
-      }
-      setStatus(`Cargando habilitaciones de ${idMeli}…`);
-      const row = await HUB.habilitacionesGet(idMeli);
-      renderHabilitacionesRowEditable(idMeli, row);
-      setStatus("Listo.");
-    }catch(err){
-      setStatus(String(err?.message || err), true);
-    }
-  }
-
-  function boolFromCell(v){
-    if (v === true) return true;
-    if (v === false) return false;
-    const s = String(v ?? "").trim().toLowerCase();
-    return ["true","1","si","sí","yes","y"].includes(s);
-  }
-
-  function renderHabilitacionesRowEditable(idMeli, rowObj){
-    const tbody = $("habBody");
-    tbody.innerHTML = "";
-
-    if (!rowObj){
-      tbody.innerHTML = `<tr><td colspan="4" class="muted">Sin datos para ese ID_MELI</td></tr>`;
-      return;
-    }
-
-    const flujosNames = flujos
-      .map(f => f.Flujo ?? f.flujo ?? "")
-      .map(x => String(x).trim())
-      .filter(Boolean);
-
-    const sourceFlujos = (flujosNames.length ? flujosNames : Object.keys(rowObj).filter(k => k !== "ID_MELI"));
-
-    sourceFlujos.forEach(flujoName => {
-      const habilVal = rowObj[flujoName];
-      const fijoKey = `Fijo_${flujoName}`;
-      const fijoVal = rowObj[fijoKey];
-
-      const habOn = boolFromCell(habilVal);
-      const fijoOn = boolFromCell(fijoVal);
-
-      const tr = document.createElement("tr");
-
-      const tdFlujo = document.createElement("td");
-      tdFlujo.textContent = flujoName;
-      tr.appendChild(tdFlujo);
-
-      const tdHab = document.createElement("td");
-      const chkHab = document.createElement("input");
-      chkHab.type = "checkbox";
-      chkHab.className = "chk";
-      chkHab.checked = habOn;
-      tdHab.appendChild(chkHab);
-      tr.appendChild(tdHab);
-
-      const tdFijo = document.createElement("td");
-      const chkFijo = document.createElement("input");
-      chkFijo.type = "checkbox";
-      chkFijo.className = "chk";
-      chkFijo.checked = fijoOn;
-      tdFijo.appendChild(chkFijo);
-      tr.appendChild(tdFijo);
-
-      const tdAct = document.createElement("td");
-      tdAct.className = "right";
-
-      const btnSave = document.createElement("button");
-      btnSave.className = "btn ok";
-      btnSave.textContent = "Guardar";
-      btnSave.addEventListener("click", async ()=>{
-        try{
-          setStatus(`Guardando habilitaciones — ${idMeli} / ${flujoName}…`);
-          await HUB.habilitacionesSet({
-            idMeli,
-            flujo: flujoName,
-            habilitado: chkHab.checked,
-            fijo: chkFijo.checked
-          });
-          setStatus("Guardado. (Sheet actualizado)");
-        }catch(err){
-          setStatus(String(err?.message || err), true);
-        }
-      });
-
-      tdAct.appendChild(btnSave);
-      tr.appendChild(tdAct);
-
-      tbody.appendChild(tr);
-    });
-  }
-
-  // ---------- Planificación ----------
-  $("btnPlanGenerar").addEventListener("click", async ()=>{
-    try{
-      setStatus("Generando planificación…");
-      await HUB.planificacionGenerar();
-      setStatus("Planificación generada (Sheets actualizado).");
-    }catch(err){
-      setStatus(String(err?.message || err), true);
-    }
-  });
-
-  // ---------- Slack ----------
-  $("btnSlackGenerar").addEventListener("click", async ()=>{
-    try{
-      setStatus("Generando Slack Outbox…");
-      await HUB.slackOutboxGenerar();
-      setStatus("Slack Outbox generado (Sheets actualizado).");
-    }catch(err){
-      setStatus(String(err?.message || err), true);
-    }
-  });
-
-  $("btnSlackEnviar").addEventListener("click", async ()=>{
-    try{
-      setStatus("Enviando pendientes de Slack Outbox…");
-      await HUB.slackOutboxEnviar();
-      setStatus("Slack Outbox procesado (ver Estados en Sheets).");
-    }catch(err){
-      setStatus(String(err?.message || err), true);
-    }
-  });
-
-  // ---------- Feriados ----------
-  $("btnFeriados").addEventListener("click", async ()=>{
-    try{
-      setStatus("Cargando feriados…");
-      const list = await HUB.feriadosList();
-      $("feriadosCount").textContent = `Total: ${list.length}`;
-      $("feriadosList").innerHTML = (list || []).map(d => `• ${d}`).join("<br/>");
-      setStatus("Listo.");
-    }catch(err){
-      setStatus(String(err?.message || err), true);
-    }
-  });
-
-  // Start
-  bootstrap();
-</script>
-</body>
+    <script type="module" src="./app.js"></script>
+  </body>
 </html>
