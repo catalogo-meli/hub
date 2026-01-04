@@ -956,3 +956,32 @@ function jobGenerarSlackOutbox() {
 
   generarSlackOutbox();
 }
+
+function doGet() {
+  return HtmlService
+    .createHtmlOutputFromFile('App')
+    .setTitle('Catálogo | HUB');
+}
+
+function abrirPanelAusencias() {
+  var html = HtmlService.createHtmlOutputFromFile('PanelAusencias')
+    .setTitle('Registrar ausencia / vacaciones');
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+function doGet(e) {
+  const page = e?.parameter?.page || 'home';
+
+  let file = 'App';
+  if (page === 'ausencias') file = 'Ausencias';
+
+  return HtmlService
+    .createTemplateFromFile(file)
+    .evaluate()
+    .setTitle('Catálogo | HUB')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function include_(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
