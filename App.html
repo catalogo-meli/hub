@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catálogo | HUB</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 32px;
+      background: #fff;
+      color: #111;
+    }
+    h1 {
+      font-size: 28px;
+      margin-bottom: 24px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 16px;
+      max-width: 1000px;
+    }
+    .card {
+      border: 1px solid #e6e6e6;
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .card h2 {
+      margin: 0 0 8px 0;
+      font-size: 18px;
+    }
+    .card p {
+      color: #666;
+      margin: 0 0 12px 0;
+    }
+    a.btn {
+      display: inline-block;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      text-decoration: none;
+      color: #111;
+    }
+    a.btn:hover {
+      background: #f6f6f6;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Catálogo | HUB</h1>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Ausencias / Vacaciones</h2>
+      <p>Registrar ausencias y vacaciones del equipo.</p>
+      <a class="btn" href="?page=ausencias">Abrir panel</a>
+    </div>
+
+    <div class="card">
+      <h2>Métricas</h2>
+      <p>Accesos a tableros y reportes.</p>
+      <span style="color:#999">Próximamente</span>
+    </div>
+
+    <div class="card">
+      <h2>Plan de Carrera</h2>
+      <p>Documentación y flujos activos.</p>
+      <span style="color:#999">Próximamente</span>
+    </div>
+
+    <div class="card">
+      <h2>Links útiles</h2>
+      <a class="btn" href="https://github.com/catalogo-meli/hub" target="_blank">
+        Repo GitHub
+      </a>
+    </div>
+  </div>
+</body>
+</html>
