@@ -4,6 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Catálogo | HUB</title>
+
+  <!-- Montserrat (look & feel como tu dashboard) -->
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
   <style>
     :root{
       --bg:#0b1220; --card:#0f1b33; --muted:#9fb0d0; --txt:#eaf0ff;
@@ -11,18 +15,50 @@
       --btn:#1b2e54; --btn2:#244172;
     }
     *{box-sizing:border-box}
-    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu; background:var(--bg); color:var(--txt);}
-    header{padding:16px 20px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; justify-content:space-between;}
-    .title{font-weight:700; letter-spacing:.2px}
+    body{
+      margin:0;
+      font-family:'Montserrat',system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;
+      background:var(--bg);
+      color:var(--txt);
+    }
+    header{
+      padding:16px 20px;
+      border-bottom:1px solid var(--line);
+      display:flex; gap:12px; align-items:center; justify-content:space-between;
+    }
+    .title{font-weight:800; letter-spacing:.2px}
     .sub{color:var(--muted); font-size:12px}
-    nav{display:flex; gap:8px; flex-wrap:wrap; padding:12px 20px; border-bottom:1px solid var(--line);}
-    .tab{padding:8px 10px; border:1px solid var(--line); background:transparent; color:var(--txt); border-radius:10px; cursor:pointer;}
+    nav{
+      display:flex; gap:8px; flex-wrap:wrap;
+      padding:12px 20px; border-bottom:1px solid var(--line);
+    }
+    .tab{
+      padding:8px 10px;
+      border:1px solid var(--line);
+      background:transparent;
+      color:var(--txt);
+      border-radius:10px;
+      cursor:pointer;
+      font-weight:700;
+    }
     .tab.active{background:var(--btn2); border-color:#33579a;}
     main{padding:18px 20px; max-width:1200px; margin:0 auto;}
     .row{display:flex; gap:12px; flex-wrap:wrap; align-items:center;}
-    .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px;}
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:14px;
+    }
     .grow{flex:1}
-    .btn{padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--btn); color:var(--txt); cursor:pointer;}
+    .btn{
+      padding:8px 10px; border-radius:10px;
+      border:1px solid var(--line);
+      background:var(--btn);
+      color:var(--txt);
+      cursor:pointer;
+      font-weight:700;
+    }
     .btn:hover{filter:brightness(1.1)}
     .btn.ok{border-color:#1f7a54}
     .btn.warn{border-color:#7a6a1f}
@@ -30,10 +66,12 @@
     input, select{
       background:#0b1730; border:1px solid var(--line); color:var(--txt);
       padding:8px 10px; border-radius:10px; outline:none;
+      font-family:'Montserrat',system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;
     }
+    input[type="number"]{width:110px}
     table{width:100%; border-collapse:collapse; font-size:13px;}
     th,td{border-bottom:1px solid var(--line); padding:10px 8px; vertical-align:top;}
-    th{color:var(--muted); font-weight:600; text-align:left;}
+    th{color:var(--muted); font-weight:700; text-align:left;}
     .pill{display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--muted);}
     .pill.ok{border-color:#1f7a54; color:var(--ok)}
     .pill.bad{border-color:#7a1f35; color:var(--bad)}
@@ -42,6 +80,14 @@
     .ok{color:var(--ok);}
     .hidden{display:none;}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;}
+
+    /* Checkbox bonito sin volarte el layout */
+    .chk{
+      width:18px; height:18px;
+      accent-color:#22c3ee;
+      cursor:pointer;
+    }
+    .right{display:flex; justify-content:flex-end; gap:8px; align-items:center;}
   </style>
 </head>
 
@@ -70,7 +116,7 @@
   <div class="card" id="statusCard">
     <div class="row" style="justify-content:space-between;">
       <div>
-        <div style="font-weight:700">Estado</div>
+        <div style="font-weight:800">Estado</div>
         <div class="muted" id="statusMsg">Listo.</div>
       </div>
       <div class="row">
@@ -84,7 +130,7 @@
   <section class="card" id="view-colaboradores">
     <div class="row" style="justify-content:space-between;">
       <div>
-        <div style="font-weight:700">Colaboradores</div>
+        <div style="font-weight:800">Colaboradores</div>
         <div class="muted">Fuente: hoja <span class="mono">Colaboradores</span></div>
       </div>
       <div class="row">
@@ -102,27 +148,43 @@
     </div>
   </section>
 
-  <!-- FLUJOS -->
+  <!-- FLUJOS (EDITABLE) -->
   <section class="card hidden" id="view-flujos">
-    <div>
-      <div style="font-weight:700">Flujos</div>
-      <div class="muted">Fuente: hoja <span class="mono">Config_Flujos</span></div>
+    <div class="row" style="justify-content:space-between; align-items:flex-end;">
+      <div>
+        <div style="font-weight:800">Flujos</div>
+        <div class="muted">Fuente: hoja <span class="mono">Config_Flujos</span> — editá <span class="mono">Perfiles_requeridos</span></div>
+      </div>
+      <div class="row">
+        <button class="btn" id="btnFlujosReload">Recargar</button>
+      </div>
     </div>
+
     <div style="height:12px"></div>
+
     <div style="overflow:auto;">
       <table id="flujosTable">
-        <thead><tr id="flujosHead"></tr></thead>
+        <thead>
+          <tr>
+            <th>Flujo</th>
+            <th>Perfiles_requeridos</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
         <tbody id="flujosBody"></tbody>
       </table>
     </div>
+    <div class="muted" style="margin-top:10px; font-size:12px">
+      Nota: se guarda por fila. No invento nada: escribe directo en tu Sheet.
+    </div>
   </section>
 
-  <!-- HABILITACIONES -->
+  <!-- HABILITACIONES (EDITABLE CON CHECKBOX) -->
   <section class="card hidden" id="view-habilitaciones">
     <div class="row" style="justify-content:space-between; align-items:flex-end;">
       <div>
-        <div style="font-weight:700">Habilitaciones</div>
-        <div class="muted">GET: <span class="mono">habilitaciones.get</span> — POST: <span class="mono">habilitaciones.set</span></div>
+        <div style="font-weight:800">Habilitaciones</div>
+        <div class="muted">Hoja <span class="mono">Habilitaciones</span> — editá con checkboxes y guardá</div>
       </div>
       <div class="row">
         <select id="habSelect"></select>
@@ -130,8 +192,6 @@
       </div>
     </div>
 
-    <div style="height:12px"></div>
-    <div class="muted">Tip: tocá los botones para toggle <span class="mono">habilitado</span> / <span class="mono">fijo</span>.</div>
     <div style="height:12px"></div>
 
     <div style="overflow:auto;">
@@ -141,7 +201,7 @@
             <th>Flujo</th>
             <th>Habilitado</th>
             <th>Fijo</th>
-            <th>Acciones</th>
+            <th class="right">Acciones</th>
           </tr>
         </thead>
         <tbody id="habBody"></tbody>
@@ -153,7 +213,7 @@
   <section class="card hidden" id="view-planificacion">
     <div class="row" style="justify-content:space-between;">
       <div>
-        <div style="font-weight:700">Planificación</div>
+        <div style="font-weight:800">Planificación</div>
         <div class="muted">Dispara <span class="mono">planificacion.generar</span> (escribe en Sheets)</div>
       </div>
       <div class="row">
@@ -168,7 +228,7 @@
   <section class="card hidden" id="view-slack">
     <div class="row" style="justify-content:space-between;">
       <div>
-        <div style="font-weight:700">Slack</div>
+        <div style="font-weight:800">Slack</div>
         <div class="muted">
           <span class="mono">slack.outbox.generar</span> y <span class="mono">slack.outbox.enviar</span>
         </div>
@@ -185,7 +245,7 @@
   <!-- FERIADOS -->
   <section class="card hidden" id="view-feriados">
     <div>
-      <div style="font-weight:700">Feriados</div>
+      <div style="font-weight:800">Feriados</div>
       <div class="muted">Fuente: hoja <span class="mono">Feriados_AR</span> (para validar días hábiles)</div>
     </div>
     <div style="height:12px"></div>
@@ -254,7 +314,6 @@
   let flujos = [];
 
   async function bootstrap(){
-    // Health on load
     try{
       setHealth("…", null);
       await HUB.health();
@@ -263,7 +322,6 @@
       setHealth("fail", false);
     }
 
-    // load base lists
     await Promise.all([loadColaboradores(), loadFlujos()]);
     fillHabSelect();
     loadCurrent();
@@ -284,7 +342,7 @@
     try{
       setStatus("Cargando flujos…");
       flujos = await HUB.flujosList();
-      renderFlujos(flujos);
+      renderFlujosEditable(flujos);
       setStatus("Listo.");
     }catch(err){
       setStatus(String(err?.message || err), true);
@@ -295,7 +353,6 @@
     if (currentView === "colaboradores") return loadColaboradores();
     if (currentView === "flujos") return loadFlujos();
     if (currentView === "habilitaciones") return loadHabilitacionesSelected();
-    // planificacion/slack/feriados son acciones
     setStatus("Listo.");
   }
 
@@ -339,12 +396,80 @@
     renderColaboradores(filtered);
   });
 
-  // ---------- Render: Flujos ----------
-  function renderFlujos(rows){
-    renderTableGeneric($("flujosHead"), $("flujosBody"), rows);
+  // ---------- Flujos (EDITABLE) ----------
+  $("btnFlujosReload").addEventListener("click", loadFlujos);
+
+  function normKey(obj, keys){
+    for (const k of keys){
+      if (k in obj) return k;
+      const found = Object.keys(obj).find(x => x.toLowerCase() === k.toLowerCase());
+      if (found) return found;
+    }
+    return null;
   }
 
-  // ---------- Habilitaciones ----------
+  function renderFlujosEditable(rows){
+    const tbody = $("flujosBody");
+    tbody.innerHTML = "";
+
+    if (!rows || rows.length === 0){
+      tbody.innerHTML = `<tr><td colspan="3" class="muted">Sin datos</td></tr>`;
+      return;
+    }
+
+    rows.forEach((r, idx)=>{
+      const kFlujo = normKey(r, ["Flujo","flujo"]);
+      const kReq   = normKey(r, ["Perfiles_requeridos","perfiles_requeridos","Perfiles requeridos","perfiles requeridos"]);
+      const flujoName = String(r[kFlujo] ?? "").trim();
+      const reqValRaw = r[kReq];
+
+      const tr = document.createElement("tr");
+
+      const tdF = document.createElement("td");
+      tdF.textContent = flujoName;
+      tr.appendChild(tdF);
+
+      const tdI = document.createElement("td");
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.min = "0";
+      inp.step = "1";
+      inp.value = (reqValRaw === null || reqValRaw === undefined || reqValRaw === "") ? "" : Number(reqValRaw);
+      inp.dataset.flujo = flujoName;
+      inp.dataset.rowIndex = String(idx);
+      tdI.appendChild(inp);
+      tr.appendChild(tdI);
+
+      const tdA = document.createElement("td");
+      const btnSave = document.createElement("button");
+      btnSave.className = "btn ok";
+      btnSave.textContent = "Guardar";
+      btnSave.addEventListener("click", async ()=>{
+        try{
+          const n = inp.value === "" ? "" : Number(inp.value);
+          if (inp.value !== "" && (!Number.isFinite(n) || n < 0)) {
+            setStatus("Perfiles_requeridos debe ser un número >= 0.", true);
+            return;
+          }
+          setStatus(`Guardando Perfiles_requeridos — ${flujoName}…`);
+          await HUB.flujosSetPerfiles({ flujo: flujoName, perfiles_requeridos: (inp.value === "" ? "" : n) });
+          setStatus("Guardado. (Sheet actualizado)");
+          // refresh local data para reflejar lo que quedó
+          flujos = await HUB.flujosList();
+          renderFlujosEditable(flujos);
+        }catch(err){
+          setStatus(String(err?.message || err), true);
+        }
+      });
+
+      tdA.appendChild(btnSave);
+      tr.appendChild(tdA);
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ---------- Habilitaciones (checkbox editable) ----------
   function fillHabSelect(){
     const sel = $("habSelect");
     sel.innerHTML = "";
@@ -353,7 +478,6 @@
     opt0.textContent = "Seleccionar ID_MELI…";
     sel.appendChild(opt0);
 
-    // intenta usar ID_MELI y Nombre si existen
     const getLabel = (c) => {
       const id = c.ID_MELI ?? c.Id ?? c.id ?? "";
       const name = c.Nombre ?? c.nombre ?? "";
@@ -385,7 +509,7 @@
       }
       setStatus(`Cargando habilitaciones de ${idMeli}…`);
       const row = await HUB.habilitacionesGet(idMeli);
-      renderHabilitacionesRow(idMeli, row);
+      renderHabilitacionesRowEditable(idMeli, row);
       setStatus("Listo.");
     }catch(err){
       setStatus(String(err?.message || err), true);
@@ -399,7 +523,7 @@
     return ["true","1","si","sí","yes","y"].includes(s);
   }
 
-  function renderHabilitacionesRow(idMeli, rowObj){
+  function renderHabilitacionesRowEditable(idMeli, rowObj){
     const tbody = $("habBody");
     tbody.innerHTML = "";
 
@@ -408,19 +532,20 @@
       return;
     }
 
-    // Flujos: usa Config_Flujos columna "Flujo" si existe; sino lista keys de Habilitaciones
     const flujosNames = flujos
       .map(f => f.Flujo ?? f.flujo ?? "")
       .map(x => String(x).trim())
       .filter(Boolean);
 
-    // Si no hay flujos, no inventamos: mostramos lo que haya
     const sourceFlujos = (flujosNames.length ? flujosNames : Object.keys(rowObj).filter(k => k !== "ID_MELI"));
 
     sourceFlujos.forEach(flujoName => {
       const habilVal = rowObj[flujoName];
       const fijoKey = `Fijo_${flujoName}`;
       const fijoVal = rowObj[fijoKey];
+
+      const habOn = boolFromCell(habilVal);
+      const fijoOn = boolFromCell(fijoVal);
 
       const tr = document.createElement("tr");
 
@@ -429,51 +554,47 @@
       tr.appendChild(tdFlujo);
 
       const tdHab = document.createElement("td");
-      const habOn = boolFromCell(habilVal);
-      tdHab.innerHTML = `<span class="pill ${habOn ? "ok" : "bad"}">${habOn ? "SI" : "NO"}</span>`;
+      const chkHab = document.createElement("input");
+      chkHab.type = "checkbox";
+      chkHab.className = "chk";
+      chkHab.checked = habOn;
+      tdHab.appendChild(chkHab);
       tr.appendChild(tdHab);
 
       const tdFijo = document.createElement("td");
-      const fijoOn = boolFromCell(fijoVal);
-      tdFijo.innerHTML = `<span class="pill ${fijoOn ? "ok" : "bad"}">${fijoOn ? "SI" : "NO"}</span>`;
+      const chkFijo = document.createElement("input");
+      chkFijo.type = "checkbox";
+      chkFijo.className = "chk";
+      chkFijo.checked = fijoOn;
+      tdFijo.appendChild(chkFijo);
       tr.appendChild(tdFijo);
 
       const tdAct = document.createElement("td");
+      tdAct.className = "right";
 
-      const b1 = document.createElement("button");
-      b1.className = "btn";
-      b1.textContent = habOn ? "Deshabilitar" : "Habilitar";
-      b1.addEventListener("click", async ()=>{
-        await toggleHab(idMeli, flujoName, "habilitado");
+      const btnSave = document.createElement("button");
+      btnSave.className = "btn ok";
+      btnSave.textContent = "Guardar";
+      btnSave.addEventListener("click", async ()=>{
+        try{
+          setStatus(`Guardando habilitaciones — ${idMeli} / ${flujoName}…`);
+          await HUB.habilitacionesSet({
+            idMeli,
+            flujo: flujoName,
+            habilitado: chkHab.checked,
+            fijo: chkFijo.checked
+          });
+          setStatus("Guardado. (Sheet actualizado)");
+        }catch(err){
+          setStatus(String(err?.message || err), true);
+        }
       });
 
-      const b2 = document.createElement("button");
-      b2.className = "btn";
-      b2.style.marginLeft = "8px";
-      b2.textContent = fijoOn ? "Quitar fijo" : "Marcar fijo";
-      b2.addEventListener("click", async ()=>{
-        await toggleHab(idMeli, flujoName, "fijo");
-      });
-
-      tdAct.appendChild(b1);
-      tdAct.appendChild(b2);
+      tdAct.appendChild(btnSave);
       tr.appendChild(tdAct);
 
       tbody.appendChild(tr);
     });
-  }
-
-  async function toggleHab(idMeli, flujo, field){
-    try{
-      setStatus(`Actualizando ${field} — ${idMeli} / ${flujo}…`);
-      await HUB.habilitacionesSet({ idMeli, flujo, field }); // toggle
-      // recargar
-      const row = await HUB.habilitacionesGet(idMeli);
-      renderHabilitacionesRow(idMeli, row);
-      setStatus("Listo.");
-    }catch(err){
-      setStatus(String(err?.message || err), true);
-    }
   }
 
   // ---------- Planificación ----------
