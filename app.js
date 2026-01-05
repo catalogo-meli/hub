@@ -11,10 +11,16 @@ const state = {
     habilitacionesAll: null,
     planificacion: null,
     slackOutbox: null,
+    presentismoMeta: null,
+    presentismoDay: null, // {dayKey, rows}
   },
   habilitacionesSelected: null, // {idMeli, perFlujo, raw}
   habilitacionesDirty: new Map(), // key: flujo -> {habilitado,fijo}
   flujosDirty: new Map(), // flujo -> perfiles_requeridos
+
+  // Presentismo
+  presentismoDayKey: null,
+  presentismoDirty: new Map(), // idMeli -> code
 };
 
 const TABS = [
@@ -24,6 +30,7 @@ const TABS = [
   { key: "planificacion", label: "Planificación" },
   { key: "slack", label: "Slack" },
   { key: "feriados", label: "Feriados" },
+  { key: "presentismo", label: "Presentismo" }, // ✅ nuevo
 ];
 
 init();
@@ -75,6 +82,7 @@ function renderTabs() {
       state.habilitacionesSelected = null;
       state.habilitacionesDirty.clear();
       state.flujosDirty.clear();
+      state.presentismoDirty.clear();
       renderTabs();
       loadTab(t.key, { force: false });
     });
@@ -121,6 +129,8 @@ async function loadTab(tab, { force }) {
         return await tabSlack(force);
       case "feriados":
         return await tabFeriados(force);
+      case "presentismo":
+        return await tabPresentismo(force);
       default:
         setStatus("Tab inválido.");
     }
@@ -361,7 +371,6 @@ async function tabFlujos(force) {
 async function tabHabilitaciones(force) {
   setStatus("Preparando…");
 
-  // Necesitamos colaboradores para selector + flujos para grilla
   const [colabs, flujos] = await Promise.all([
     force || !state.cache.colaboradores ? HUB.colaboradoresList() : state.cache.colaboradores,
     force || !state.cache.flujos ? HUB.flujosList() : state.cache.flujos,
@@ -399,7 +408,7 @@ async function tabHabilitaciones(force) {
 
     const prev = sel.value;
     sel.innerHTML = list
-      .slice(0, 200) // hard limit (si no, muere el DOM). con búsqueda alcanza.
+      .slice(0, 200)
       .map((r) => {
         const label = `${r.ID_MELI || ""} — ${r.Nombre || ""}`;
         return `<option value="${escapeHtml(r.ID_MELI)}">${escapeHtml(label)}</option>`;
@@ -527,7 +536,7 @@ async function loadHabilitaciones(idMeli) {
       const cur = state.habilitacionesDirty.get(flujo) || { ...base };
       cur.habilitado = el.checked;
       state.habilitacionesDirty.set(flujo, cur);
-      loadHabilitaciones(idMeli); // re-render simple (dataset chico). Si querés micro-opt, lo hacemos después.
+      loadHabilitaciones(idMeli);
     });
   });
 
@@ -713,4 +722,195 @@ function nextHoliday(list) {
   const today = new Date().toISOString().slice(0, 10);
   const next = list.slice().sort().find((d) => d >= today);
   return next || null;
+}
+
+/* ----------------------------
+   ✅ TAB: Presentismo (Matriz)
+---------------------------- */
+async function tabPresentismo(force) {
+  setStatus("Cargando presentismo…");
+  state.presentismoDirty.clear();
+
+  // meta (days + codes)
+  const meta = force || !state.cache.presentismoMeta
+    ? await HUB.presentismoMeta()
+    : state.cache.presentismoMeta;
+
+  state.cache.presentismoMeta = meta;
+
+  const days = meta.days || [];
+  const codeMap = meta.codeMap || {};
+  if (!days.length) {
+    $("#content").innerHTML = `<div class="empty">No hay columnas de fecha detectadas en <span class="mono">Presentismo</span>.</div>`;
+    setStatus("Sin días.");
+    return;
+  }
+
+  // default: último día disponible
+  if (!state.presentismoDayKey) state.presentismoDayKey = days[days.length - 1].key;
+
+  $("#controls").innerHTML = `
+    <select id="presDay" style="min-width:200px"></select>
+    <input id="qPres" placeholder="Buscar por nombre / ID…" style="min-width:280px" />
+    <button class="btn primary" id="loadPres">Cargar</button>
+    <button class="btn good" id="savePres">Guardar todo</button>
+    <span class="badge">Fuente: hoja <span class="mono">Presentismo</span></span>
+  `;
+
+  const sel = $("#presDay");
+  sel.innerHTML = days.map(d => `<option value="${escapeHtml(d.key)}">${escapeHtml(d.label)} (${escapeHtml(d.key)})</option>`).join("");
+  sel.value = state.presentismoDayKey;
+
+  $("#loadPres").addEventListener("click", async () => {
+    state.presentismoDayKey = sel.value;
+    state.presentismoDirty.clear();
+    await loadAndRender();
+  });
+
+  $("#savePres").addEventListener("click", async () => {
+    if (state.presentismoDirty.size === 0) {
+      toast("warn", "Sin cambios", "No hay cambios pendientes.");
+      return;
+    }
+
+    const dayKey = state.presentismoDayKey;
+    const preview = [...state.presentismoDirty.entries()]
+      .slice(0, 12)
+      .map(([id, code]) => `• ${id}: ${code || "(vacío)"}`)
+      .join("\n");
+
+    if (!confirmDanger("Guardar Presentismo", `Día: ${dayKey}\n\nCambios (hasta 12):\n${preview}\n\n¿Confirmás?`)) return;
+
+    setStatus("Guardando…");
+    try {
+      // batch secuencial (simple y seguro)
+      for (const [idMeli, code] of state.presentismoDirty.entries()) {
+        await HUB.presentismoSet({ dayKey, idMeli, code });
+      }
+      state.presentismoDirty.clear();
+      toast("good", "Guardado", "Presentismo actualizado.");
+      await loadAndRender(true);
+    } catch (e) {
+      toast("bad", "Error", e.message || String(e));
+      setStatus("Error al guardar.");
+    }
+  });
+
+  const q = $("#qPres");
+  q.addEventListener("input", () => render());
+
+  await loadAndRender();
+
+  async function loadAndRender(forceDay = false) {
+    const dayKey = state.presentismoDayKey;
+
+    const dayData = forceDay || !state.cache.presentismoDay || state.cache.presentismoDay.dayKey !== dayKey
+      ? await HUB.presentismoDay(dayKey)
+      : state.cache.presentismoDay;
+
+    state.cache.presentismoDay = dayData;
+
+    render();
+  }
+
+  function render() {
+    const dayKey = state.presentismoDayKey;
+    const rowsAll = (state.cache.presentismoDay?.rows || []).slice();
+
+    // KPIs
+    const total = rowsAll.length;
+    const counts = {};
+    for (const r of rowsAll) {
+      const c = String(r.Code || "").trim();
+      counts[c] = (counts[c] || 0) + 1;
+    }
+
+    const presentes = counts["P"] || 0;
+    const vacaciones = counts["V"] || 0;
+    const sinCarga = counts[""] || 0;
+    const noPresentes = total - presentes; // todo lo demás (incluye vacío)
+    const pctP = total ? Math.round((presentes / total) * 100) : 0;
+
+    setCards([
+      { label: "Día", value: dayKey },
+      { label: "Total", value: String(total) },
+      { label: "Presentes (P)", value: String(presentes), sub: `${pctP}%` },
+      { label: "Vacaciones (V)", value: String(vacaciones) },
+      { label: "Sin carga", value: String(sinCarga) },
+      { label: "No presentes", value: String(noPresentes) },
+      { label: "Cambios pendientes", value: String(state.presentismoDirty.size) },
+    ]);
+
+    const needle = ($("#qPres").value || "").toLowerCase().trim();
+    const filtered = needle
+      ? rowsAll.filter(r => (`${r.ID_MELI || ""} ${r.Nombre || ""}`).toLowerCase().includes(needle))
+      : rowsAll;
+
+    $("#content").innerHTML = filtered.length === 0
+      ? `<div class="empty">Sin datos para mostrar.</div>`
+      : `
+        <table>
+          <thead>
+            <tr>
+              <th>ID_MELI</th><th>Nombre</th><th>Rol</th><th>Equipo</th><th>Días trabajados</th>
+              <th>Código</th><th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filtered.map(r => {
+              const id = String(r.ID_MELI || "").trim();
+              const baseCode = String(r.Code || "").trim();
+              const dirtyCode = state.presentismoDirty.has(id) ? state.presentismoDirty.get(id) : null;
+              const curCode = dirtyCode !== null ? dirtyCode : baseCode;
+
+              const options = Object.keys(codeMap)
+                .filter(k => k !== "") // mapea los conocidos
+                .map(k => `<option value="${escapeHtml(k)}" ${curCode === k ? "selected" : ""}>${escapeHtml(k)} — ${escapeHtml(codeMap[k])}</option>`)
+                .join("");
+
+              const optClear = `<option value="" ${curCode === "" ? "selected" : ""}>— Limpiar —</option>`;
+
+              return `
+                <tr>
+                  <td class="mono">${escapeHtml(id)}</td>
+                  <td>${escapeHtml(r.Nombre || "")}</td>
+                  <td>${escapeHtml(r.Rol || "")}</td>
+                  <td>${escapeHtml(r.Equipo || "")}</td>
+                  <td>${escapeHtml(r.Dias_trabajados || "")}</td>
+                  <td>
+                    <select class="presCode" data-id="${escapeHtml(id)}" style="min-width:200px">
+                      ${options}
+                      ${optClear}
+                    </select>
+                  </td>
+                  <td>${state.presentismoDirty.has(id) ? `<span class="badge">editado</span>` : `<span class="small">ok</span>`}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      `;
+
+    $("#content").querySelectorAll(".presCode").forEach(sel => {
+      sel.addEventListener("change", () => {
+        const id = sel.getAttribute("data-id");
+        const code = sel.value;
+
+        state.presentismoDirty.set(id, code);
+
+        // refresco solo cards (no rerender pesado)
+        setCards([
+          { label: "Día", value: dayKey },
+          { label: "Total", value: String(total) },
+          { label: "Presentes (P)", value: String(presentes), sub: `${pctP}%` },
+          { label: "Vacaciones (V)", value: String(vacaciones) },
+          { label: "Sin carga", value: String(sinCarga) },
+          { label: "No presentes", value: String(noPresentes) },
+          { label: "Cambios pendientes", value: String(state.presentismoDirty.size) },
+        ]);
+      });
+    });
+
+    setStatus(`Listo. Mostrando ${filtered.length}/${total}.`);
+  }
 }
