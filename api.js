@@ -1,4 +1,4 @@
-// api.js (ESM)
+// api.js
 const HUB = (() => {
   const BASE = "/.netlify/functions/gas";
 
@@ -41,33 +41,31 @@ const HUB = (() => {
     // Lecturas
     colaboradoresList: () => request("colaboradores.list"),
     flujosList: () => request("flujos.list"),
-    feriadosList: () => request("feriados.list"),
-
-    // Habilitaciones
     habilitacionesList: () => request("habilitaciones.list"),
     habilitacionesGet: (idMeli) => request("habilitaciones.get", { query: { idMeli } }),
 
-    // Planificación / Slack OUTBOX (lecturas)
-    planificacionGet: () => request("planificacion.get"),
-    slackOutboxList: () => request("slack.outbox.list"),
+    // Presentismo (MATRIZ tipo hoja)
+    presentismoMatrix: () => request("presentismo.matrix"),
+    presentismoBatchSet: (updates = []) =>
+      request("presentismo.batchSet", { method: "POST", body: { updates } }),
 
     // === EDITS ===
 
-    // Flujos: set Perfiles_requeridos
+    // A) Flujos: set Perfiles_requeridos en Config_Flujos
     flujosSetPerfiles: (flujo, perfiles_requeridos) =>
       request("flujos.setPerfiles", {
         method: "POST",
         body: { flujo, perfiles_requeridos },
       }),
 
-    // Habilitaciones: modo legacy (field/value)
+    // B1) Habilitaciones legacy
     habilitacionesSetField: (idMeli, flujo, field, value) =>
       request("habilitaciones.set", {
         method: "POST",
         body: { idMeli, flujo, field, value },
       }),
 
-    // Habilitaciones: modo nuevo (habilitado/fijo)
+    // B2) Habilitaciones nuevo: set habilitado/fijo
     habilitacionesSet: (idMeli, flujo, { habilitado, fijo } = {}) =>
       request("habilitaciones.set", {
         method: "POST",
@@ -76,24 +74,10 @@ const HUB = (() => {
 
     // Acciones
     planificacionGenerar: () => request("planificacion.generar", { method: "POST" }),
+    planificacionGet: () => request("planificacion.get"),
+    slackOutboxList: () => request("slack.outbox.list"),
     slackOutboxGenerar: () => request("slack.outbox.generar", { method: "POST" }),
     slackOutboxEnviar: () => request("slack.outbox.enviar", { method: "POST" }),
-
-    // =========================
-    // PRESENTISMO (MATRIZ)
-    // =========================
-    // meta => { fixedCols, days:[{key,label}], codeMap }
-    presentismoMeta: () => request("presentismo.meta"),
-
-    // day => { dayKey, rows:[{ID_MELI,Nombre,Rol,Equipo,Dias_trabajados,Code}] }
-    presentismoDay: (dayKey) => request("presentismo.day", { query: { dayKey } }),
-
-    // set => { updated:true, dayKey, idMeli, code }
-    presentismoSet: ({ dayKey, idMeli, code }) =>
-      request("presentismo.set", {
-        method: "POST",
-        body: { dayKey, idMeli, code },
-      }),
   };
 })();
 
