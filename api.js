@@ -1,7 +1,4 @@
 // api.js (ESM)
-// Exporta HUB (y default) para que el frontend pueda importarlo como:
-// import HUB, { HUB } from "./api.js";
-
 const HUB = (() => {
   const BASE = "/.netlify/functions/gas";
 
@@ -46,26 +43,31 @@ const HUB = (() => {
     flujosList: () => request("flujos.list"),
     feriadosList: () => request("feriados.list"),
 
+    // Habilitaciones
     habilitacionesList: () => request("habilitaciones.list"),
     habilitacionesGet: (idMeli) => request("habilitaciones.get", { query: { idMeli } }),
 
+    // Planificación / Slack OUTBOX (lecturas)
+    planificacionGet: () => request("planificacion.get"),
+    slackOutboxList: () => request("slack.outbox.list"),
+
     // === EDITS ===
 
-    // A) Flujos: set Perfiles_requeridos en Config_Flujos
+    // Flujos: set Perfiles_requeridos
     flujosSetPerfiles: (flujo, perfiles_requeridos) =>
       request("flujos.setPerfiles", {
         method: "POST",
         body: { flujo, perfiles_requeridos },
       }),
 
-    // B1) Habilitaciones (modo legacy): toggle por field/value
+    // Habilitaciones: modo legacy (field/value)
     habilitacionesSetField: (idMeli, flujo, field, value) =>
       request("habilitaciones.set", {
         method: "POST",
         body: { idMeli, flujo, field, value },
       }),
 
-    // B2) Habilitaciones (modo nuevo): set habilitado/fijo juntos
+    // Habilitaciones: modo nuevo (habilitado/fijo)
     habilitacionesSet: (idMeli, flujo, { habilitado, fijo } = {}) =>
       request("habilitaciones.set", {
         method: "POST",
@@ -80,13 +82,13 @@ const HUB = (() => {
     // =========================
     // PRESENTISMO (MATRIZ)
     // =========================
-    // Devuelve opciones de días detectadas en headers (con key yyyy-mm-dd y label "08 ene")
+    // meta => { fixedCols, days:[{key,label}], codeMap }
     presentismoMeta: () => request("presentismo.meta"),
 
-    // Trae grilla para un día (por key yyyy-mm-dd)
+    // day => { dayKey, rows:[{ID_MELI,Nombre,Rol,Equipo,Dias_trabajados,Code}] }
     presentismoDay: (dayKey) => request("presentismo.day", { query: { dayKey } }),
 
-    // Escribe un código en la celda del día
+    // set => { updated:true, dayKey, idMeli, code }
     presentismoSet: ({ dayKey, idMeli, code }) =>
       request("presentismo.set", {
         method: "POST",
@@ -94,9 +96,6 @@ const HUB = (() => {
       }),
   };
 })();
-
-// opcional: debug en consola
-// window.HUB = HUB;
 
 export { HUB };
 export default HUB;
