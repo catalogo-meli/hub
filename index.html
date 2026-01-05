@@ -3,7 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#070b14" />
     <title>Catálogo · HUB Equipo & Planificación</title>
+
+    <!-- Evita el 404 /favicon.ico (poné un favicon real cuando quieras) -->
+    <link rel="icon" href="data:,">
+
     <style>
       :root{
         --bg:#070b14; --panel:#0c1325; --panel2:#0f1a33; --stroke:#1e2a4a;
@@ -87,6 +92,7 @@
 
     <div class="toast-wrap" id="toasts"></div>
 
-    <script type="module" src="./app.js"></script>
+    <!-- Cache busting simple: si te clava versiones viejas, subí este ?v= -->
+    <script type="module" src="./app.js?v=1"></script>
   </body>
 </html>
