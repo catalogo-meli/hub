@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#070b14" />
     <title>Catálogo · HUB Equipo & Planificación</title>
-
-    <!-- Evita el 404 /favicon.ico (poné un favicon real cuando quieras) -->
     <link rel="icon" href="data:,">
 
     <style>
@@ -15,8 +13,13 @@
         --text:#e9eefc; --muted:#9bb0e7; --accent:#2b7cff; --good:#2fe39c; --bad:#ff5c6c; --warn:#ffcf5c;
         --radius:16px;
       }
+      body.light{
+        --bg:#f6f8ff; --panel:#ffffff; --panel2:#f3f6ff; --stroke:#d9e1ff;
+        --text:#101a33; --muted:#51618c;
+      }
       *{box-sizing:border-box}
-      body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;background:linear-gradient(180deg,#050814,#070b14);color:var(--text)}
+      body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;background:linear-gradient(180deg,#050814,var(--bg));color:var(--text)}
+      body.light{background:linear-gradient(180deg,#eef3ff,var(--bg))}
       .wrap{max-width:1200px;margin:0 auto;padding:18px 18px 40px}
       .top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
       .brand h1{margin:0;font-size:26px;letter-spacing:.2px}
@@ -31,37 +34,47 @@
       .tab.active{background:rgba(43,124,255,.18);border-color:rgba(43,124,255,.35)}
       .card{margin-top:14px;background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--stroke);border-radius:var(--radius);padding:16px}
       .row{display:flex;gap:12px;flex-wrap:wrap}
-      .kpi{flex:1;min-width:180px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:12px}
+      .kpi{flex:1;min-width:180px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.10);border-radius:14px;padding:12px}
+      body.light .kpi{background:rgba(16,26,51,.02)}
       .kpi .label{color:var(--muted);font-size:12px}
       .kpi .value{font-size:22px;margin-top:4px}
       .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
-      input,select{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);color:var(--text);padding:10px 12px;border-radius:12px;outline:none}
-      input:focus,select:focus{border-color:rgba(43,124,255,.6)}
-      .btn{padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);color:var(--text);cursor:pointer}
+      input,select,textarea{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.16);color:var(--text);padding:10px 12px;border-radius:12px;outline:none}
+      body.light input, body.light select, body.light textarea{background:#fff}
+      input:focus,select:focus,textarea:focus{border-color:rgba(43,124,255,.6)}
+      .btn{padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.04);color:var(--text);cursor:pointer}
+      body.light .btn{background:#fff}
       .btn.primary{background:rgba(43,124,255,.25);border-color:rgba(43,124,255,.45)}
       .btn.good{background:rgba(47,227,156,.18);border-color:rgba(47,227,156,.35)}
       .btn.bad{background:rgba(255,92,108,.15);border-color:rgba(255,92,108,.35)}
       .status{color:var(--muted);margin-top:8px}
-      table{width:100%;border-collapse:collapse;margin-top:12px;overflow:hidden;border-radius:14px;border:1px solid rgba(255,255,255,.08)}
-      th,td{padding:10px 10px;border-bottom:1px solid rgba(255,255,255,.06);text-align:left}
+      table{width:100%;border-collapse:collapse;margin-top:12px;overflow:hidden;border-radius:14px;border:1px solid rgba(255,255,255,.12)}
+      body.light table{border-color:rgba(16,26,51,.12)}
+      th,td{padding:10px 10px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;vertical-align:top}
+      body.light th, body.light td{border-bottom:1px solid rgba(16,26,51,.08)}
       th{color:var(--muted);font-weight:600;font-size:12px;background:rgba(255,255,255,.03);position:sticky;top:0}
-      tr:hover td{background:rgba(255,255,255,.02)}
-      .empty{padding:14px;color:var(--muted);border:1px dashed rgba(255,255,255,.14);border-radius:14px;margin-top:12px}
-      .badge{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);font-size:12px}
+      body.light th{background:rgba(16,26,51,.03)}
+      tr:hover td{background:rgba(255,255,255,.03)}
+      .empty{padding:14px;color:var(--muted);border:1px dashed rgba(255,255,255,.18);border-radius:14px;margin-top:12px}
+      .badge{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.03);font-size:12px}
       .toast-wrap{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:10px;z-index:9999}
-      .toast{min-width:280px;max-width:380px;background:rgba(12,19,37,.95);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px}
+      .toast{min-width:280px;max-width:420px;background:rgba(12,19,37,.95);border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:12px}
+      body.light .toast{background:rgba(255,255,255,.96)}
       .toast .t{font-weight:700;margin:0 0 4px}
       .toast .m{margin:0;color:var(--muted);font-size:13px}
       .toast.good{border-color:rgba(47,227,156,.35)}
       .toast.bad{border-color:rgba(255,92,108,.35)}
       .toast.warn{border-color:rgba(255,207,92,.35)}
-      .hr{height:1px;background:rgba(255,255,255,.07);margin:12px 0}
+      .hr{height:1px;background:rgba(255,255,255,.10);margin:12px 0}
+      body.light .hr{background:rgba(16,26,51,.10)}
       .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
       .small{font-size:12px;color:var(--muted)}
-      .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-      @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+      .right .btn{white-space:nowrap}
+      .copyable{cursor:pointer}
+      .copyable:hover{text-decoration:underline}
     </style>
   </head>
+
   <body>
     <div class="wrap">
       <div class="top">
@@ -70,12 +83,15 @@
           <div class="sub">HUB Equipo &amp; Planificación</div>
         </div>
         <div class="right">
+          <button class="btn" id="themeBtn" title="Cambiar tema">Modo</button>
+
           <div id="healthChip" class="chip" title="Verifica conexión con backend">
             <span class="dot" id="healthDot"></span>
             <span>Health</span>
             <span class="badge" id="healthText">…</span>
           </div>
-          <button class="btn" id="reloadBtn" title="Recarga datos del tab actual">Recargar vista</button>
+
+          <button class="btn" id="reloadBtn" style="display:none;">Recargar</button>
         </div>
       </div>
 
@@ -92,7 +108,6 @@
 
     <div class="toast-wrap" id="toasts"></div>
 
-    <!-- Cache busting simple: si te clava versiones viejas, subí este ?v= -->
-    <script type="module" src="./app.js?v=1"></script>
+    <script type="module" src="./app.js?v=2"></script>
   </body>
 </html>
