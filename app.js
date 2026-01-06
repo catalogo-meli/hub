@@ -1,739 +1,789 @@
-import HUB from "./api.js";
+// app.js
+import { HUB } from "./api.js";
 
 const $ = (sel) => document.querySelector(sel);
 
-const TABS = [
-  { key: "operativa", label: "Operativa diaria" },
-  { key: "colaboradores", label: "Colaboradores" },
-  { key: "habilitaciones", label: "Habilitaciones" },
-  { key: "presentismo", label: "Presentismo" },
-];
-
 const state = {
   tab: "operativa",
-  cache: {},
-  filtros: {
-    q: "",
-    rol: "ALL",
-    equipo: "ALL",
-    ubicacion: "ALL",
-  },
+  canales: [],
+  flujos: [],
+  colaboradores: [],
+  habil: null,
+  plan: [],
+  outbox: [],
+  presentismo: null,
+  presentismoStats: null,
+
+  // filtros
+  colabFilter: { rol: "", equipo: "", ubic: "", q: "" },
+  habFilter: { equipo: "", q: "" },
 };
 
-init();
-
-function init() {
-  renderTabs();
-  $("#healthBtn").addEventListener("click", async () => {
-    await HUB.health();
-    toast("Health OK");
-  });
-
-  $("#themeBtn").addEventListener("click", () => {
-    document.body.classList.toggle("light");
-  });
-
-  loadTab("operativa");
-}
-
-function renderTabs() {
-  const el = $("#tabs");
-  el.innerHTML = "";
-  TABS.forEach((t) => {
-    const b = document.createElement("button");
-    b.className = `tab ${state.tab === t.key ? "active" : ""}`;
-    b.textContent = t.label;
-    b.onclick = () => {
-      state.tab = t.key;
-      state.filtros = { q: "", rol: "ALL", equipo: "ALL", ubicacion: "ALL" };
-      renderTabs();
-      loadTab(t.key);
-    };
-    el.appendChild(b);
-  });
-}
-
-function setCards(cards) {
-  const el = $("#cards");
-  el.innerHTML = "";
-  cards.forEach((c) => {
-    const div = document.createElement("div");
-    div.className = `card kpi ${c.onClick ? "clickable" : ""}`;
-    div.innerHTML = `<div class="label">${esc(c.label)}</div><div class="value">${esc(c.value)}</div><div class="muted">${esc(c.sub || "")}</div>`;
-    if (c.onClick) div.onclick = c.onClick;
-    el.appendChild(div);
-  });
-}
-
-function setControls(html) {
-  $("#controls").innerHTML = html;
-}
-
-function setContent(html) {
-  $("#content").innerHTML = html;
-}
-
-function setStatus(msg) {
-  $("#status").textContent = msg || "";
-}
-
-function toast(msg) {
-  const t = document.createElement("div");
-  t.className = "toast";
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2200);
-}
-
-function esc(s) {
+function htmlEscape(s) {
   return String(s ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
-function uniq(arr) {
-  return [...new Set(arr.filter(Boolean))];
+function toast(msg, type = "ok") {
+  const el = $("#toast");
+  el.textContent = msg;
+  el.className = `toast ${type}`;
+  el.style.opacity = "1";
+  clearTimeout(window.__toastT);
+  window.__toastT = setTimeout(() => (el.style.opacity = "0"), 2200);
 }
 
-function applyFilters(rows) {
-  const q = (state.filtros.q || "").toLowerCase().trim();
-  const rol = state.filtros.rol;
-  const equipo = state.filtros.equipo;
-  const ubic = state.filtros.ubicacion;
+function copyText(txt) {
+  navigator.clipboard.writeText(String(txt ?? "")).then(
+    () => toast("Copiado"),
+    () => toast("No se pudo copiar", "err")
+  );
+}
 
-  return rows.filter((r) => {
-    if (rol !== "ALL" && String(r.Rol) !== rol) return false;
-    if (equipo !== "ALL" && String(r.Equipo) !== equipo) return false;
-    if (ubic !== "ALL" && String(r["Ubicación"]) !== ubic) return false;
+async function boot() {
+  // health
+  try {
+    const h = await HUB.health();
+    $("#healthDot").textContent = "●";
+    $("#healthDot").className = "dot ok";
+    $("#healthText").textContent = h.status || "ok";
+  } catch (e) {
+    $("#healthDot").textContent = "●";
+    $("#healthDot").className = "dot err";
+    $("#healthText").textContent = "error";
+  }
 
-    if (!q) return true;
-    const hay = [
-      r.ID_MELI, r.Nombre, r.TAG, r.Rol, r.Equipo, r["Ubicación"],
-      r["Mail Productora"], r["Mail Externo"], r["Fecha Ingreso"]
-    ].map(x => String(x || "").toLowerCase());
-    return hay.some(v => v.includes(q));
+  // carga base
+  await loadBase();
+  bindNav();
+  render();
+}
+
+async function loadBase() {
+  $("#main").innerHTML = `<div class="card"><div class="muted">Cargando...</div></div>`;
+  try {
+    const [canales, flujos, colaboradores] = await Promise.all([
+      HUB.canalesList(),
+      HUB.flujosList(),
+      HUB.colaboradoresList(),
+    ]);
+    state.canales = canales;
+    state.flujos = flujos;
+    state.colaboradores = colaboradores;
+  } catch (e) {
+    $("#main").innerHTML = `<div class="card errbox">Error cargando base: ${htmlEscape(e.message)}</div>`;
+    throw e;
+  }
+}
+
+function bindNav() {
+  document.querySelectorAll("[data-tab]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      state.tab = b.dataset.tab;
+      document.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("active", x.dataset.tab === state.tab));
+      await ensureTabData();
+      render();
+    });
   });
 }
 
-function clickFilter(key, value) {
-  if (!value) return;
-  if (key === "Rol") state.filtros.rol = value;
-  if (key === "Equipo") state.filtros.equipo = value;
-  if (key === "Ubicación") state.filtros.ubicacion = value;
-  loadTab(state.tab);
+async function ensureTabData() {
+  if (state.tab === "operativa") {
+    // stats hoy + plan + outbox
+    const [stats, plan, out] = await Promise.all([
+      HUB.presentismoStats(""),
+      HUB.planificacionList(),
+      HUB.slackOutboxList(),
+    ]);
+    state.presentismoStats = stats;
+    state.plan = plan;
+    state.outbox = out;
+    return;
+  }
+
+  if (state.tab === "colaboradores") return;
+
+  if (state.tab === "habilitaciones") {
+    state.habil = await HUB.habilitacionesList();
+    return;
+  }
+
+  if (state.tab === "presentismo") {
+    const [wk, stats] = await Promise.all([HUB.presentismoWeek(""), HUB.presentismoStats("")]);
+    state.presentismo = wk;
+    state.presentismoStats = stats;
+    return;
+  }
 }
 
-function copyCell(value) {
-  navigator.clipboard?.writeText(String(value ?? ""));
-  toast("Copiado");
+function render() {
+  if (state.tab === "operativa") return renderOperativa();
+  if (state.tab === "colaboradores") return renderColaboradores();
+  if (state.tab === "habilitaciones") return renderHabilitaciones();
+  if (state.tab === "presentismo") return renderPresentismo();
 }
 
-/* =========================
-   TABS
-========================= */
-
-async function loadTab(tab) {
-  setStatus("");
-  setControls("");
-  setCards([]);
-  setContent("Cargando...");
-
-  if (tab === "operativa") return tabOperativa();
-  if (tab === "colaboradores") return tabColaboradores();
-  if (tab === "habilitaciones") return tabHabilitaciones();
-  if (tab === "presentismo") return tabPresentismo();
+function onlyAnalistas(colabs) {
+  return colabs.filter((c) => String(c.Rol || "").toLowerCase().includes("analista"));
 }
 
-/* -------------------------
-   Operativa diaria (unificada)
-   1) Flujos (autosave)
-   2) Planificación (agrupada)
-   3) Slack Outbox (editar/copy/enviar)
-------------------------- */
-async function tabOperativa() {
-  const [stats, flujos, canales] = await Promise.all([
-    HUB.presentismoStats(),
-    HUB.flujosList(),
-    HUB.canalesList(),
-  ]);
+/* --------------------------
+   OPERATIVA DIARIA
+-------------------------- */
+function renderOperativa() {
+  const analistas = onlyAnalistas(state.colaboradores);
+  const st = state.presentismoStats || { licencias: 0, disponibles: 0 };
+  const cards = `
+    <div class="cards">
+      <div class="kpi" data-kpi="analistas">
+        <div class="kpiLabel">Analistas totales</div>
+        <div class="kpiVal">${analistas.length}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpiLabel">Licencias hoy</div>
+        <div class="kpiVal">${Number(st.licencias || 0)}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpiLabel">Perfiles disponibles (hoy)</div>
+        <div class="kpiVal">${Number(st.disponibles || 0)}</div>
+      </div>
+    </div>
+  `;
 
-  // Cards: Analistas totales, Licencias hoy, Perfiles disponibles (hoy)
-  setCards([
-    { label: "Analistas totales", value: String(stats.analistas || 0) },
-    { label: "Licencias hoy", value: String(stats.licencias || 0) },
-    { label: "Perfiles disponibles (hoy)", value: String(stats.disponibles || 0) },
-  ]);
+  const canalesOptions = channelOptionsHtml();
 
-  // Flujos UI
-  const channelOptions = canales.map(c => ({
-    label: c.Canal || c.Slack_channel,
-    value: c.Slack_channel || c.Canal
-  }));
+  const flujosRows = state.flujos
+    .map((f) => {
+      const flujo = f.Flujo || f.flujo || "";
+      const req = Number(f.Perfiles_requeridos || f.perfiles_requeridos || 0);
+      const slack = String(f.Slack_channel || f.slack_channel || "");
+      return `
+        <tr data-flujo="${htmlEscape(flujo)}">
+          <td><input class="in" value="${htmlEscape(flujo)}" data-edit="flujo" disabled></td>
+          <td>
+            <select class="in" data-edit="slack">
+              ${canalesOptions(slack)}
+            </select>
+          </td>
+          <td><input class="in" type="number" min="0" value="${req}" data-edit="req"></td>
+          <td style="text-align:right">
+            <button class="btn danger" data-action="flujo-del">Borrar</button>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
 
-  setControls(`
-    <button class="btn primary" id="btnPlan">Generar planificación</button>
-    <button class="btn" id="btnOutbox">Generar Outbox</button>
-    <button class="btn" id="btnEnviar">Enviar pendientes</button>
-  `);
+  const flujosAdd = `
+    <tr data-new="1">
+      <td><input class="in" placeholder="+ Nuevo flujo..." data-new="flujo"></td>
+      <td><select class="in" data-new="slack">${canalesOptions("")}</select></td>
+      <td><input class="in" type="number" min="0" value="0" data-new="req"></td>
+      <td style="text-align:right"><button class="btn primary" data-action="flujo-add">Agregar</button></td>
+    </tr>
+  `;
 
-  $("#btnPlan").onclick = async () => {
-    await HUB.planificacionGenerar();
-    toast("Planificación generada");
-    return tabOperativa();
-  };
-  $("#btnOutbox").onclick = async () => {
-    await HUB.slackOutboxGenerar();
-    toast("Outbox generado");
-    return tabOperativa();
-  };
-  $("#btnEnviar").onclick = async () => {
-    const r = await HUB.slackOutboxEnviar({ all: true });
-    toast(`Enviados: ${r.sent || 0}`);
-    return tabOperativa();
-  };
+  const planByFlujo = groupBy(state.plan, "Flujo");
+  const planHtml = Object.keys(planByFlujo).length
+    ? Object.entries(planByFlujo)
+        .map(([flujo, rows]) => {
+          const items = rows
+            .map((r) => `<li>${htmlEscape(r.Nombre || r.ID_MELI || "")}</li>`)
+            .join("");
+          return `
+            <div class="card">
+              <div class="cardTitle">${htmlEscape(flujo)}</div>
+              <ul class="list">${items || "<li class='muted'>Sin asignaciones</li>"}</ul>
+            </div>
+          `;
+        })
+        .join("")
+    : `<div class="muted">Sin planificación cargada.</div>`;
 
-  // Render 1) Flujos
-  const flujosHtml = `
-    <div class="card" style="margin-bottom:12px;">
-      <h3 style="margin:0 0 10px 0;">1) Flujos (Perfiles requeridos)</h3>
+  const outRows = (state.outbox || []).map((r, idx) => {
+    const rowN = idx + 2; // asumiendo header row 1
+    const canalName = String(r.Canal || r.Slack_channel || "");
+    const msg = String(r.Mensaje || "");
+    const estado = String(r.Estado || "");
+    const err = String(r.LastError || "");
+    return `
+      <tr>
+        <td>${htmlEscape(r.Fecha || "")}</td>
+        <td>
+          <select class="in" data-outbox-row="${rowN}" data-outbox-field="Canal">
+            ${canalesOptions(canalName)}
+          </select>
+        </td>
+        <td>
+          <textarea class="ta" data-outbox-row="${rowN}" data-outbox-field="Mensaje">${htmlEscape(msg)}</textarea>
+          <div class="rowActions">
+            <button class="btn" data-action="copy" data-copy="${htmlEscape(msg)}">Copiar</button>
+            <button class="btn primary" data-action="sendRow" data-row="${rowN}">Enviar</button>
+          </div>
+        </td>
+        <td>${htmlEscape(estado)}</td>
+        <td class="muted">${htmlEscape(err)}</td>
+      </tr>
+    `;
+  }).join("");
+
+  $("#main").innerHTML = `
+    ${cards}
+
+    <div class="card">
+      <div class="cardTitle">1) Flujos (Perfiles requeridos)</div>
       <div class="muted">Autosave: se guarda al cambiar Slack channel o Perfiles requeridos.</div>
-      <div style="margin-top:10px; overflow:auto;">
+      <div class="tableWrap">
+        <table>
+          <thead><tr><th>Flujo</th><th>Slack channel</th><th>Perfiles requeridos</th><th></th></tr></thead>
+          <tbody>${flujosRows}${flujosAdd}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="row">
+      <button class="btn primary" id="btnPlan">Generar planificación</button>
+      <button class="btn" id="btnOutbox">Generar Outbox</button>
+      <button class="btn success" id="btnSendAll">Enviar todos</button>
+    </div>
+
+    <div class="card">
+      <div class="cardTitle">2) Planificación (resultado)</div>
+      <div class="muted">Agrupado por flujo.</div>
+      <div class="grid">${planHtml}</div>
+    </div>
+
+    <div class="card">
+      <div class="cardTitle">3) Slack Outbox (pendientes)</div>
+      <div class="tableWrap">
+        <table>
+          <thead><tr><th>Fecha</th><th>Canal</th><th>Mensaje</th><th>Estado</th><th>Error</th></tr></thead>
+          <tbody>${outRows || `<tr><td colspan="5" class="muted">Sin outbox.</td></tr>`}</tbody>
+        </table>
+      </div>
+      <div class="muted">Nota: si un canal no tiene al bot agregado, Slack devuelve <b>channel_not_found</b>.</div>
+    </div>
+  `;
+
+  // handlers: autosave flujos
+  $("#main").querySelectorAll('tr[data-flujo] select[data-edit="slack"], tr[data-flujo] input[data-edit="req"]').forEach((el) => {
+    el.addEventListener("change", () => saveFlujoRow(el.closest("tr")));
+  });
+
+  $("#main").querySelectorAll('[data-action="flujo-del"]').forEach((b) => {
+    b.addEventListener("click", async () => {
+      const tr = b.closest("tr[data-flujo]");
+      const flujo = tr.dataset.flujo;
+      if (!flujo) return;
+      try {
+        await HUB.flujosDelete({ flujo });
+        state.flujos = await HUB.flujosList();
+        toast("Flujo borrado");
+        renderOperativa();
+      } catch (e) {
+        toast(`Error: ${e.message}`, "err");
+      }
+    });
+  });
+
+  $("#main").querySelector('[data-action="flujo-add"]').addEventListener("click", async () => {
+    const tr = $("#main").querySelector('tr[data-new="1"]');
+    const flujo = tr.querySelector('[data-new="flujo"]').value.trim();
+    const slack = tr.querySelector('[data-new="slack"]').value.trim();
+    const req = Number(tr.querySelector('[data-new="req"]').value || 0);
+    if (!flujo) return toast("Falta nombre de flujo", "err");
+    try {
+      await HUB.flujosUpsert({ flujo, perfiles_requeridos: req, slack_channel: slack });
+      state.flujos = await HUB.flujosList();
+      toast("Flujo agregado");
+      renderOperativa();
+    } catch (e) {
+      toast(`Error: ${e.message}`, "err");
+    }
+  });
+
+  $("#btnPlan").addEventListener("click", async () => {
+    try {
+      await HUB.planificacionGenerar();
+      const [plan, stats] = await Promise.all([HUB.planificacionList(), HUB.presentismoStats("")]);
+      state.plan = plan;
+      state.presentismoStats = stats;
+      toast("Planificación generada");
+      renderOperativa();
+    } catch (e) {
+      toast(`Error: ${e.message}`, "err");
+    }
+  });
+
+  $("#btnOutbox").addEventListener("click", async () => {
+    try {
+      await HUB.slackOutboxGenerar();
+      state.outbox = await HUB.slackOutboxList();
+      toast("Outbox generado");
+      renderOperativa();
+    } catch (e) {
+      toast(`Error: ${e.message}`, "err");
+    }
+  });
+
+  $("#btnSendAll").addEventListener("click", async () => {
+    try {
+      const r = await HUB.slackOutboxEnviarAll();
+      toast(`Enviados: ${r.sent || 0}`);
+      state.outbox = await HUB.slackOutboxList();
+      renderOperativa();
+    } catch (e) {
+      toast(`Error: ${e.message}`, "err");
+    }
+  });
+
+  $("#main").querySelectorAll('[data-action="sendRow"]').forEach((b) => {
+    b.addEventListener("click", async () => {
+      const row = Number(b.dataset.row);
+      try {
+        const r = await HUB.slackOutboxEnviarRow(row);
+        toast(`Enviado: ${r.sent || 0}`);
+        state.outbox = await HUB.slackOutboxList();
+        renderOperativa();
+      } catch (e) {
+        toast(`Error: ${e.message}`, "err");
+      }
+    });
+  });
+
+  $("#main").querySelectorAll('[data-action="copy"]').forEach((b) => {
+    b.addEventListener("click", () => copyText(b.dataset.copy));
+  });
+}
+
+async function saveFlujoRow(tr) {
+  const flujo = tr.dataset.flujo;
+  const slack = tr.querySelector('select[data-edit="slack"]').value.trim();
+  const req = Number(tr.querySelector('input[data-edit="req"]').value || 0);
+  try {
+    await HUB.flujosUpsert({ flujo, perfiles_requeridos: req, slack_channel: slack });
+    toast("Guardado");
+    // refresco flujos (por si normaliza)
+    state.flujos = await HUB.flujosList();
+  } catch (e) {
+    toast(`Error guardando: ${e.message}`, "err");
+  }
+}
+
+function channelOptionsHtml() {
+  const opts = state.canales
+    .map((c) => {
+      const name = String(c.Canal || c.Channel || "").trim();
+      if (!name) return null;
+      return name;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "es"));
+
+  return (selected) => {
+    const s = String(selected || "");
+    return [
+      `<option value="">—</option>`,
+      ...opts.map((n) => `<option value="${htmlEscape(n)}" ${n === s ? "selected" : ""}>${htmlEscape(n)}</option>`),
+    ].join("");
+  };
+}
+
+function groupBy(rows, key) {
+  const m = {};
+  (rows || []).forEach((r) => {
+    const k = String(r[key] || "").trim() || "Sin flujo";
+    (m[k] ||= []).push(r);
+  });
+  return m;
+}
+
+/* --------------------------
+   COLABORADORES
+-------------------------- */
+function renderColaboradores() {
+  const all = onlyAnalistas(state.colaboradores);
+
+  let rows = all.slice();
+  const f = state.colabFilter;
+
+  if (f.q) {
+    const q = f.q.toLowerCase();
+    rows = rows.filter((r) => String(r.ID_MELI).toLowerCase().includes(q) || String(r.Nombre).toLowerCase().includes(q));
+  }
+  if (f.rol) rows = rows.filter((r) => String(r.Rol) === f.rol);
+  if (f.equipo) rows = rows.filter((r) => String(r.Equipo) === f.equipo);
+  if (f.ubic) rows = rows.filter((r) => String(r["Ubicación"] || r.Ubicación) === f.ubic);
+
+  const countByRol = (rol) => rows.filter((r) => String(r.Rol) === rol).length;
+
+  const roles = ["Analista PM", "Analista KV", "Analista QA"];
+  const equipos = uniq(all.map((r) => r.Equipo).filter(Boolean)).sort((a, b) => a.localeCompare(b, "es"));
+  const ubics = uniq(all.map((r) => r.Ubicación).filter(Boolean)).sort((a, b) => a.localeCompare(b, "es"));
+
+  const cards = `
+    <div class="cards four">
+      <div class="kpi clickable" data-set="rol" data-val="">
+        <div class="kpiLabel">Colaboradores (Analistas)</div><div class="kpiVal">${rows.length}</div>
+      </div>
+      ${roles
+        .map(
+          (r) => `
+        <div class="kpi clickable" data-set="rol" data-val="${htmlEscape(r)}">
+          <div class="kpiLabel">${htmlEscape(r)}</div><div class="kpiVal">${countByRol(r)}</div>
+        </div>`
+        )
+        .join("")}
+    </div>
+  `;
+
+  const tableRows = rows
+    .map((r) => {
+      const cells = [
+        cellCopy(r.ID_MELI),
+        cellCopy(r.TAG),
+        cellFilter("rol", r.Rol),
+        cellFilter("equipo", r.Equipo),
+        cellFilter("ubic", r.Ubicación),
+        cellCopy(r["Mail Productora"]),
+        cellCopy(r["Mail Externo"]),
+        cellCopy(r["Fecha Ingreso"]),
+      ].join("");
+
+      return `<tr>${cells}</tr>`;
+    })
+    .join("");
+
+  $("#main").innerHTML = `
+    ${cards}
+
+    <div class="card">
+      <div class="row">
+        <input class="in grow" id="qColab" placeholder="Buscar por Nombre/ID_MELI" value="${htmlEscape(f.q)}">
+        <select class="in" id="selEquipo">
+          <option value="">Equipo (todos)</option>
+          ${equipos.map((e) => `<option ${e === f.equipo ? "selected" : ""}>${htmlEscape(e)}</option>`).join("")}
+        </select>
+        <select class="in" id="selRol">
+          <option value="">Rol (todos)</option>
+          ${uniq(all.map((x) => x.Rol).filter(Boolean)).sort((a,b)=>a.localeCompare(b,"es")).map((e) => `<option ${e === f.rol ? "selected" : ""}>${htmlEscape(e)}</option>`).join("")}
+        </select>
+        <select class="in" id="selUbic">
+          <option value="">Ubicación (todas)</option>
+          ${ubics.map((e) => `<option ${e === f.ubic ? "selected" : ""}>${htmlEscape(e)}</option>`).join("")}
+        </select>
+      </div>
+
+      <div class="tableWrap">
         <table>
           <thead>
             <tr>
-              <th>Flujo</th>
-              <th>Slack channel</th>
-              <th>Perfiles requeridos</th>
-              <th></th>
+              <th>ID_MELI</th><th>TAG</th><th>Rol</th><th>Equipo</th><th>Ubicación</th><th>Mail Productora</th><th>Mail Externo</th><th>Fecha ingreso</th>
             </tr>
           </thead>
-          <tbody>
-            ${flujos.map(f => flujoRow_(f, channelOptions)).join("")}
-            ${nuevoFlujoRow_(channelOptions)}
-          </tbody>
+          <tbody>${tableRows || `<tr><td colspan="8" class="muted">Sin resultados.</td></tr>`}</tbody>
         </table>
       </div>
     </div>
   `;
 
-  // Render 2) Planificación agrupada
-  const plan = await HUB.planificacionList();
-  const planByFlujo = {};
-  plan.forEach(p => {
-    const k = String(p.Flujo || "").trim();
-    if (!k) return;
-    if (!planByFlujo[k]) planByFlujo[k] = [];
-    planByFlujo[k].push(p);
+  // cards click -> filtro rol
+  $("#main").querySelectorAll(".clickable").forEach((c) => {
+    c.addEventListener("click", async () => {
+      const set = c.dataset.set;
+      const val = c.dataset.val || "";
+      state.colabFilter[set] = val;
+      renderColaboradores();
+    });
   });
 
-  const fechaPlan = plan?.[0]?.Fecha || "";
-  const planHtml = `
-    <div class="card" style="margin-bottom:12px;">
-      <h3 style="margin:0 0 10px 0;">2) Planificación (resultado) ${fechaPlan ? `— ${esc(fechaPlan)}` : ""}</h3>
-      ${Object.keys(planByFlujo).length === 0 ? `<div class="muted">Sin datos. Generá planificación.</div>` : `
-        <div class="grid2">
-          ${Object.entries(planByFlujo).map(([flujo, rows]) => `
-            <div class="card">
-              <div style="font-weight:700; margin-bottom:8px;">${esc(flujo)}</div>
-              <div class="muted">Perfiles requeridos: ${esc(rows?.[0]?.Perfiles_requeridos ?? "")}</div>
-            </div>
-          `).join("")}
-        </div>
-      `}
-    </div>
-  `;
-
-  // Render 3) Slack Outbox
-  const outbox = await HUB.slackOutboxList();
-  const outHtml = `
-    <div class="card">
-      <h3 style="margin:0 0 10px 0;">3) Slack Outbox (pendientes)</h3>
-      ${outbox.length === 0 ? `<div class="muted">Sin datos. Generá Outbox.</div>` : `
-        <div style="overflow:auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Canal</th>
-                <th>Mensaje</th>
-                <th>Estado</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${outbox.map((r, i) => outboxRow_(r, i+2, channelOptions)).join("")}
-            </tbody>
-          </table>
-        </div>
-      `}
-    </div>
-  `;
-
-  setContent(flujosHtml + planHtml + outHtml);
-
-  bindFlujosAutosave_(channelOptions);
-  bindOutboxActions_();
-}
-
-function flujoRow_(f, channelOptions) {
-  const flujo = String(f.Flujo || "");
-  const slack = String(f.Slack_channel || "");
-  const req = Number(f.Perfiles_requeridos || 0);
-
-  return `
-    <tr data-flujo="${esc(flujo)}">
-      <td>
-        <input class="input flujoName" value="${esc(flujo)}" disabled />
-      </td>
-      <td>
-        <select class="slackSel">
-          <option value="">—</option>
-          ${channelOptions.map(o => `<option value="${esc(o.value)}" ${o.value===slack?"selected":""}>${esc(o.label)}</option>`).join("")}
-        </select>
-      </td>
-      <td>
-        <input class="input reqInp" type="number" min="0" value="${esc(req)}" style="width:120px;" />
-      </td>
-      <td>
-        <button class="btn btnDel" data-del="${esc(flujo)}" style="border-color:rgba(255,80,80,.35);">Borrar</button>
-      </td>
-    </tr>
-  `;
-}
-
-function nuevoFlujoRow_(channelOptions) {
-  return `
-    <tr data-new="1">
-      <td><input class="input newFlujo" placeholder="+ Nuevo flujo..." /></td>
-      <td>
-        <select class="newSlack">
-          <option value="">—</option>
-          ${channelOptions.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("")}
-        </select>
-      </td>
-      <td><input class="input newReq" type="number" min="0" value="0" style="width:120px;" /></td>
-      <td><button class="btn primary newAdd">Agregar</button></td>
-    </tr>
-  `;
-}
-
-function bindFlujosAutosave_() {
-  // autosave on change
-  document.querySelectorAll("tr[data-flujo]").forEach(tr => {
-    const flujo = tr.getAttribute("data-flujo");
-    const sel = tr.querySelector(".slackSel");
-    const inp = tr.querySelector(".reqInp");
-    const del = tr.querySelector(".btnDel");
-
-    sel.onchange = debounce(async () => {
-      await HUB.flujosUpsert({ flujo, slack_channel: sel.value, perfiles_requeridos: Number(inp.value || 0) });
-      toast("Guardado");
-    }, 250);
-
-    inp.oninput = debounce(async () => {
-      await HUB.flujosUpsert({ flujo, slack_channel: sel.value, perfiles_requeridos: Number(inp.value || 0) });
-      toast("Guardado");
-    }, 350);
-
-    del.onclick = async () => {
-      if (!confirm(`Borrar flujo "${flujo}"?`)) return;
-      await HUB.flujosDelete({ flujo });
-      toast("Flujo borrado");
-      await tabOperativa();
-    };
+  $("#qColab").addEventListener("input", (e) => {
+    state.colabFilter.q = e.target.value.trim();
+    renderColaboradores();
+  });
+  $("#selEquipo").addEventListener("change", (e) => {
+    state.colabFilter.equipo = e.target.value;
+    renderColaboradores();
+  });
+  $("#selRol").addEventListener("change", (e) => {
+    state.colabFilter.rol = e.target.value;
+    renderColaboradores();
+  });
+  $("#selUbic").addEventListener("change", (e) => {
+    state.colabFilter.ubic = e.target.value;
+    renderColaboradores();
   });
 
-  // add new flow
-  const newRow = document.querySelector("tr[data-new='1']");
-  if (newRow) {
-    newRow.querySelector(".newAdd").onclick = async () => {
-      const flujo = String(newRow.querySelector(".newFlujo").value || "").trim();
-      const slack = String(newRow.querySelector(".newSlack").value || "").trim();
-      const req = Number(newRow.querySelector(".newReq").value || 0);
-      if (!flujo) return toast("Ingresá un nombre de flujo");
-      await HUB.flujosUpsert({ flujo, slack_channel: slack, perfiles_requeridos: req });
-      toast("Flujo creado");
-      await tabOperativa();
-    };
-  }
+  // clicks in table
+  $("#main").querySelectorAll("[data-copy]").forEach((el) => el.addEventListener("click", () => copyText(el.dataset.copy)));
+  $("#main").querySelectorAll("[data-filter]").forEach((el) =>
+    el.addEventListener("click", () => {
+      const k = el.dataset.filter;
+      const v = el.dataset.val || "";
+      state.colabFilter[k] = v;
+      renderColaboradores();
+    })
+  );
 }
 
-function outboxRow_(r, rowNum, channelOptions) {
-  const fecha = String(r.Fecha || "");
-  const canal = String(r.Canal || "");
-  const msg = String(r.Mensaje || "");
-  const estado = String(r.Estado || "");
-
-  return `
-    <tr data-outrow="${rowNum}">
-      <td>${esc(fecha)}</td>
-      <td>
-        <select class="outCanal">
-          <option value="">—</option>
-          ${channelOptions.map(o => `<option value="${esc(o.value)}" ${o.value===canal?"selected":""}>${esc(o.label)}</option>`).join("")}
-        </select>
-      </td>
-      <td>
-        <textarea class="input outMsg" rows="3" style="min-width:420px;">${esc(msg)}</textarea>
-        <div class="row" style="margin-top:6px;">
-          <button class="btn outCopy">Copiar</button>
-          <button class="btn primary outSend">Enviar</button>
-        </div>
-      </td>
-      <td>${esc(estado)}</td>
-      <td></td>
-    </tr>
-  `;
+function cellCopy(v) {
+  const s = String(v ?? "");
+  return `<td><span class="copy" data-copy="${htmlEscape(s)}">${htmlEscape(s)}</span></td>`;
+}
+function cellFilter(key, v) {
+  const s = String(v ?? "");
+  return `<td><span class="chip" data-filter="${htmlEscape(key)}" data-val="${htmlEscape(s)}">${htmlEscape(s)}</span></td>`;
+}
+function uniq(arr) {
+  return Array.from(new Set(arr.map((x) => String(x))));
 }
 
-function bindOutboxActions_() {
-  document.querySelectorAll("tr[data-outrow]").forEach(tr => {
-    const row = Number(tr.getAttribute("data-outrow"));
-    const copy = tr.querySelector(".outCopy");
-    const send = tr.querySelector(".outSend");
-    const msg = tr.querySelector(".outMsg");
+/* --------------------------
+   HABILITACIONES
+-------------------------- */
+function renderHabilitaciones() {
+  const data = state.habil;
+  if (!data) return ($("#main").innerHTML = `<div class="card"><div class="muted">Cargando...</div></div>`);
 
-    copy.onclick = () => copyCell(msg.value);
-    send.onclick = async () => {
-      const r = await HUB.slackOutboxEnviar({ row });
-      toast(`Enviados: ${r.sent || 0}`);
-      await tabOperativa();
-    };
-  });
-}
-
-/* -------------------------
-   Colaboradores
-------------------------- */
-async function tabColaboradores() {
-  const all = await HUB.colaboradoresList();
-
-  // filtros disponibles
-  const roles = uniq(all.map(r => r.Rol));
-  const equipos = uniq(all.map(r => r.Equipo));
-  const ubics = uniq(all.map(r => r["Ubicación"]));
-
-  const filtered = applyFilters(all);
-
-  // cards dinámicas según filtros: total analistas + por rol (PM/KV/QA)
-  const analistas = filtered.filter(r => String(r.Rol).toLowerCase().includes("analista"));
-  const pm = analistas.filter(r => String(r.Rol).includes("PM")).length;
-  const kv = analistas.filter(r => String(r.Rol).includes("KV")).length;
-  const qa = analistas.filter(r => String(r.Rol).includes("QA")).length;
-
-  setCards([
-    { label: "Colaboradores (Analistas)", value: String(analistas.length) },
-    { label: "Analistas PM", value: String(pm), onClick: () => clickFilter("Rol", "Analista PM") },
-    { label: "Analistas KV", value: String(kv), onClick: () => clickFilter("Rol", "Analista KV") },
-    { label: "Analistas QA", value: String(qa), onClick: () => clickFilter("Rol", "Analista QA") },
-  ]);
-
-  setControls(`
-    <input id="q" class="input" placeholder="Buscar..." style="min-width:300px;" value="${esc(state.filtros.q)}"/>
-    <select id="rol" class="input">
-      <option value="ALL">Rol (todos)</option>
-      ${roles.map(x => `<option ${x===state.filtros.rol?"selected":""}>${esc(x)}</option>`).join("")}
-    </select>
-    <select id="equipo" class="input">
-      <option value="ALL">Equipo (todos)</option>
-      ${equipos.map(x => `<option ${x===state.filtros.equipo?"selected":""}>${esc(x)}</option>`).join("")}
-    </select>
-    <select id="ubic" class="input">
-      <option value="ALL">Ubicación (todas)</option>
-      ${ubics.map(x => `<option ${x===state.filtros.ubicacion?"selected":""}>${esc(x)}</option>`).join("")}
-    </select>
-  `);
-
-  $("#q").oninput = (e) => { state.filtros.q = e.target.value; tabColaboradores(); };
-  $("#rol").onchange = (e) => { state.filtros.rol = e.target.value; tabColaboradores(); };
-  $("#equipo").onchange = (e) => { state.filtros.equipo = e.target.value; tabColaboradores(); };
-  $("#ubic").onchange = (e) => { state.filtros.ubicacion = e.target.value; tabColaboradores(); };
-
-  const rows = analistas;
-
-  setContent(`
-    <div style="overflow:auto;">
-      <table>
-        <thead>
-          <tr>
-            <th>ID_MELI</th>
-            <th>TAG</th>
-            <th>Rol</th>
-            <th>Equipo</th>
-            <th>Ubicación</th>
-            <th>Mail Productora</th>
-            <th>Mail Externo</th>
-            <th>Fecha ingreso</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map(r => `
-            <tr>
-              ${cellCopy_(r.ID_MELI)}
-              ${cellCopy_(r.TAG)}
-              ${cellFilterOrCopy_("Rol", r.Rol)}
-              ${cellFilterOrCopy_("Equipo", r.Equipo)}
-              ${cellFilterOrCopy_("Ubicación", r["Ubicación"])}
-              ${cellCopy_(r["Mail Productora"])}
-              ${cellCopy_(r["Mail Externo"])}
-              ${cellCopy_(r["Fecha Ingreso"])}
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
-  `);
-
-  setStatus(`Mostrando ${rows.length}/${all.length}`);
-}
-
-/* -------------------------
-   Habilitaciones
-------------------------- */
-async function tabHabilitaciones() {
-  const { flujos, rows } = await HUB.habilitacionesList();
-
-  // Solo filtro por Equipo (vos pediste eliminar rol/ubic)
-  const equipos = uniq(rows.map(r => r.Equipo));
-  const q = (state.filtros.q || "").toLowerCase().trim();
-  const equipo = state.filtros.equipo;
-
-  const filtered = rows.filter(r => {
-    if (equipo !== "ALL" && String(r.Equipo) !== equipo) return false;
-    if (!q) return true;
-    return [r.ID_MELI, r.Nombre, r.Equipo].some(x => String(x||"").toLowerCase().includes(q));
-  });
-
-  setCards([
-    { label: "Colaboradores (Analistas)", value: String(filtered.length) },
-    { label: "Flujos", value: String(flujos.length) },
-    { label: "", value: "", sub: "" },
-  ]);
-
-  setControls(`
-    <input id="q" class="input" placeholder="Buscar..." style="min-width:300px;" value="${esc(state.filtros.q)}"/>
-    <select id="equipo" class="input">
-      <option value="ALL">Equipo (todos)</option>
-      ${equipos.map(x => `<option ${x===equipo?"selected":""}>${esc(x)}</option>`).join("")}
-    </select>
-  `);
-
-  $("#q").oninput = (e) => { state.filtros.q = e.target.value; tabHabilitaciones(); };
-  $("#equipo").onchange = (e) => { state.filtros.equipo = e.target.value; tabHabilitaciones(); };
-
-  // tabla: ID, Nombre, Equipo + por flujo (H/F)
-  setContent(`
-    <div style="overflow:auto;">
-      <table>
-        <thead>
-          <tr>
-            <th>ID_MELI</th>
-            <th>Nombre</th>
-            <th>Equipo</th>
-            ${flujos.map(f => `<th>${esc(f)}<div class="muted">H / F</div></th>`).join("")}
-          </tr>
-        </thead>
-        <tbody>
-          ${filtered.map(r => `
-            <tr data-id="${esc(r.ID_MELI)}">
-              ${cellCopy_(r.ID_MELI)}
-              ${cellCopy_(r.Nombre)}
-              <td class="clickcopy" data-filter="Equipo" data-value="${esc(r.Equipo)}">${esc(r.Equipo)}</td>
-              ${flujos.map(f => {
-                const v = r.perFlujo?.[f] || { habilitado:false, fijo:false };
-                return `
-                  <td>
-                    <label><input type="checkbox" data-flow="${esc(f)}" data-kind="H" ${v.habilitado?"checked":""}/> H</label>
-                    <label style="margin-left:8px;"><input type="checkbox" data-flow="${esc(f)}" data-kind="F" ${v.fijo?"checked":""}/> F</label>
-                  </td>
-                `;
-              }).join("")}
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
-  `);
-
-  // bind checkboxes
-  document.querySelectorAll("tr[data-id] input[type='checkbox']").forEach(cb => {
-    cb.onchange = async (e) => {
-      const tr = e.target.closest("tr");
-      const idMeli = tr.getAttribute("data-id");
-      const flujo = e.target.getAttribute("data-flow");
-      const kind = e.target.getAttribute("data-kind");
-      const checked = e.target.checked;
-
-      try {
-        if (kind === "H") await HUB.habilitacionesSet({ idMeli, flujo, habilitado: checked });
-        else await HUB.habilitacionesSet({ idMeli, flujo, fijo: checked });
-        toast("Guardado");
-      } catch (err) {
-        toast("Error guardando");
-        e.target.checked = !checked;
-      }
-    };
-  });
-
-  // click filter equipo
-  document.querySelectorAll("[data-filter='Equipo']").forEach(td => {
-    td.onclick = () => clickFilter("Equipo", td.getAttribute("data-value"));
-  });
-
-  setStatus(`Mostrando ${filtered.length}/${rows.length}`);
-}
-
-/* -------------------------
-   Presentismo (semana hábil + panel licencias)
-------------------------- */
-async function tabPresentismo() {
-  const week = await HUB.presentismoWeek();
-  const stats = await HUB.presentismoStats();
-
-  // cards: presentes hoy, fecha hoy, licencias hoy
-  setCards([
-    { label: "Colaboradores presentes (hoy)", value: String(stats.presentes || 0) },
-    { label: "Fecha", value: String(stats.date || "") },
-    { label: "Licencias hoy", value: String(stats.licencias || 0) },
-  ]);
-
-  // filtros + panel licencias
-  const equipos = uniq(week.rows.map(r => r.Equipo));
-  const roles = uniq(week.rows.map(r => r.Rol));
-  const ubics = uniq(week.rows.map(r => r["Ubicación"]));
-
-  setControls(`
-    <input id="q" class="input" placeholder="Buscar..." style="min-width:280px;" value="${esc(state.filtros.q)}"/>
-    <select id="rol" class="input">
-      <option value="ALL">Rol (todos)</option>
-      ${roles.map(x => `<option ${x===state.filtros.rol?"selected":""}>${esc(x)}</option>`).join("")}
-    </select>
-    <select id="equipo" class="input">
-      <option value="ALL">Equipo (todos)</option>
-      ${equipos.map(x => `<option ${x===state.filtros.equipo?"selected":""}>${esc(x)}</option>`).join("")}
-    </select>
-    <select id="ubic" class="input">
-      <option value="ALL">Ubicación (todas)</option>
-      ${ubics.map(x => `<option ${x===state.filtros.ubicacion?"selected":""}>${esc(x)}</option>`).join("")}
-    </select>
-  `);
-
-  $("#q").oninput = (e) => { state.filtros.q = e.target.value; tabPresentismo(); };
-  $("#rol").onchange = (e) => { state.filtros.rol = e.target.value; tabPresentismo(); };
-  $("#equipo").onchange = (e) => { state.filtros.equipo = e.target.value; tabPresentismo(); };
-  $("#ubic").onchange = (e) => { state.filtros.ubicacion = e.target.value; tabPresentismo(); };
-
-  const filtered = applyFilters(week.rows.map(r => ({
+  const flujos = data.flujos || [];
+  const rowsAll = (data.rows || []).map((r) => ({
     ID_MELI: r.ID_MELI,
     Nombre: r.Nombre,
-    Rol: r.Rol,
     Equipo: r.Equipo,
-    "Ubicación": r["Ubicación"],
-    Dias_trabajados: r.Dias_trabajados,
-    days: r.days
-  })));
+    perFlujo: r.perFlujo || {},
+  }));
 
-  setContent(`
-    <div class="card" style="margin-bottom:12px;">
-      <h3 style="margin:0 0 10px 0;">Cargar licencia</h3>
+  const f = state.habFilter;
+  let rows = rowsAll.slice();
+  if (f.q) {
+    const q = f.q.toLowerCase();
+    rows = rows.filter((r) => String(r.ID_MELI).toLowerCase().includes(q) || String(r.Nombre).toLowerCase().includes(q));
+  }
+  if (f.equipo) rows = rows.filter((r) => String(r.Equipo) === f.equipo);
+
+  const equipos = uniq(rowsAll.map((r) => r.Equipo).filter(Boolean)).sort((a, b) => a.localeCompare(b, "es"));
+
+  const head = `
+    <tr>
+      <th>ID_MELI</th><th>Nombre</th><th>Equipo</th>
+      ${flujos.map((x) => `<th>${htmlEscape(x)}<div class="muted tiny">H / F</div></th>`).join("")}
+    </tr>
+  `;
+
+  const body = rows
+    .map((r) => {
+      const cols = flujos
+        .map((flujo) => {
+          const v = r.perFlujo[flujo] || { habilitado: false, fijo: false };
+          return `
+            <td class="hf">
+              <label><input type="checkbox" data-hab="H" data-id="${htmlEscape(r.ID_MELI)}" data-flujo="${htmlEscape(flujo)}" ${v.habilitado ? "checked" : ""}> H</label>
+              <label><input type="checkbox" data-hab="F" data-id="${htmlEscape(r.ID_MELI)}" data-flujo="${htmlEscape(flujo)}" ${v.fijo ? "checked" : ""}> F</label>
+            </td>
+          `;
+        })
+        .join("");
+
+      return `
+        <tr>
+          ${cellCopy(r.ID_MELI)}
+          ${cellCopy(r.Nombre)}
+          ${cellFilter("equipo", r.Equipo)}
+          ${cols}
+        </tr>
+      `;
+    })
+    .join("");
+
+  $("#main").innerHTML = `
+    <div class="card">
       <div class="row">
-        <select id="licId" class="input" style="min-width:280px;">
-          <option value="">Colaborador...</option>
-          ${week.rows.map(r => `<option value="${esc(r.ID_MELI)}">${esc(r.Nombre)} — ${esc(r.ID_MELI)}</option>`).join("")}
+        <input class="in grow" id="qHab" placeholder="Buscar por Nombre/ID_MELI" value="${htmlEscape(f.q)}">
+        <select class="in" id="selHabEquipo">
+          <option value="">Equipo (todos)</option>
+          ${equipos.map((e) => `<option ${e === f.equipo ? "selected" : ""}>${htmlEscape(e)}</option>`).join("")}
         </select>
-        <input id="licDesde" class="input" type="date"/>
-        <input id="licHasta" class="input" type="date"/>
-        <select id="licTipo" class="input">
-          <option value="E">E = Día de Estudio</option>
-          <option value="M">M = Licencia Médica</option>
-          <option value="MM">MM = Licencia Médica Menor</option>
-          <option value="AI">AI = Ausencia Injustificada</option>
-          <option value="V">V = Vacaciones</option>
-          <option value="P">P = Presente</option>
-        </select>
-        <button id="licSave" class="btn primary">Guardar</button>
       </div>
+
+      <div class="tableWrap">
+        <table>
+          <thead>${head}</thead>
+          <tbody>${body || `<tr><td colspan="${3 + flujos.length}" class="muted">Sin resultados.</td></tr>`}</tbody>
+        </table>
+      </div>
+      <div class="muted tiny">Tip: click en “Equipo” aplica filtro. Click en otros campos copia.</div>
     </div>
+  `;
 
-    <div style="overflow:auto;">
-      <table>
-        <thead>
-          <tr>
-            <th>Nombre</th>
-            <th>ID_MELI</th>
-            <th>Rol</th>
-            <th>Equipo</th>
-            <th>Ubicación</th>
-            <th>Días trabajados</th>
-            ${week.days.map(d => `<th>${esc(d.short)}<div class="muted">${esc(d.label)}</div></th>`).join("")}
-          </tr>
-        </thead>
-        <tbody>
-          ${filtered.map(r => `
-            <tr>
-              ${cellCopy_(r.Nombre)}
-              ${cellCopy_(r.ID_MELI)}
-              ${cellFilterOrCopy_("Rol", r.Rol)}
-              ${cellFilterOrCopy_("Equipo", r.Equipo)}
-              ${cellFilterOrCopy_("Ubicación", r["Ubicación"])}
-              ${cellCopy_(r.Dias_trabajados)}
-              ${week.days.map(d => cellCopy_(r.days?.[d.key] || "")).join("")}
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
-  `);
-
-  $("#licSave").onclick = async () => {
-    const idMeli = $("#licId").value;
-    const desde = $("#licDesde").value;
-    const hasta = $("#licHasta").value;
-    const tipo = $("#licTipo").value;
-    if (!idMeli || !desde || !hasta || !tipo) return toast("Completar todos los campos");
-    await HUB.presentismoLicenciasSet({ idMeli, desde, hasta, tipo });
-    toast("Licencia guardada");
-    await tabPresentismo();
-  };
-
-  // filtros clickeables en tabla
-  document.querySelectorAll("[data-filter]").forEach(td => {
-    td.onclick = () => clickFilter(td.getAttribute("data-filter"), td.getAttribute("data-value"));
+  $("#qHab").addEventListener("input", (e) => {
+    state.habFilter.q = e.target.value.trim();
+    renderHabilitaciones();
+  });
+  $("#selHabEquipo").addEventListener("change", async (e) => {
+    state.habFilter.equipo = e.target.value;
+    renderHabilitaciones();
   });
 
-  setStatus(`Mostrando ${filtered.length}/${week.rows.length}`);
+  $("#main").querySelectorAll("[data-copy]").forEach((el) => el.addEventListener("click", () => copyText(el.dataset.copy)));
+  $("#main").querySelectorAll("[data-filter]").forEach((el) =>
+    el.addEventListener("click", () => {
+      state.habFilter.equipo = el.dataset.val || "";
+      renderHabilitaciones();
+    })
+  );
+
+  $("#main").querySelectorAll("input[type=checkbox][data-hab]").forEach((cb) => {
+    cb.addEventListener("change", async () => {
+      const idMeli = cb.dataset.id;
+      const flujo = cb.dataset.flujo;
+      const type = cb.dataset.hab; // H or F
+      try {
+        if (type === "H") await HUB.habilitacionesSet({ idMeli, flujo, habilitado: cb.checked });
+        if (type === "F") await HUB.habilitacionesSet({ idMeli, flujo, fijo: cb.checked });
+        toast("Guardado");
+      } catch (e) {
+        toast(`Error: ${e.message}`, "err");
+        cb.checked = !cb.checked;
+      }
+    });
+  });
 }
 
-/* =========================
-   cells helpers
-========================= */
-function cellCopy_(value) {
-  return `<td class="clickcopy" data-copy="${esc(value)}">${esc(value)}</td>`;
-}
-function cellFilterOrCopy_(key, value) {
-  return `<td class="clickcopy" data-filter="${esc(key)}" data-value="${esc(value)}">${esc(value)}</td>`;
-}
+/* --------------------------
+   PRESENTISMO
+-------------------------- */
+function renderPresentismo() {
+  const wk = state.presentismo;
+  const stats = state.presentismoStats || { presentes: 0, licencias: 0 };
 
-// bind copy behavior globally
-document.addEventListener("click", (e) => {
-  const td = e.target.closest(".clickcopy");
-  if (!td) return;
-
-  const filterKey = td.getAttribute("data-filter");
-  if (filterKey) {
-    clickFilter(filterKey, td.getAttribute("data-value"));
+  if (!wk) {
+    $("#main").innerHTML = `<div class="card"><div class="muted">Cargando...</div></div>`;
     return;
   }
 
-  const v = td.getAttribute("data-copy") ?? td.textContent;
-  copyCell(v);
-});
+  const days = wk.days || []; // 5 días hábiles
+  const rows = wk.rows || [];
 
-function debounce(fn, ms) {
-  let t;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
-  };
+  const cards = `
+    <div class="cards">
+      <div class="kpi">
+        <div class="kpiLabel">Colaboradores presentes (hoy)</div>
+        <div class="kpiVal">${Number(stats.presentes || 0)}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpiLabel">Licencias hoy</div>
+        <div class="kpiVal">${Number(stats.licencias || 0)}</div>
+      </div>
+    </div>
+  `;
+
+  const head = `
+    <tr>
+      <th>Nombre</th><th>ID_MELI</th><th>Rol</th><th>Equipo</th><th>Ubicación</th><th>Días trabajados</th>
+      ${days.map((d) => `<th>${htmlEscape(d.short || d.label || d.key)}</th>`).join("")}
+    </tr>
+  `;
+
+  const body = rows
+    .map((r) => {
+      const cols = days
+        .map((d) => {
+          const code = String((r.days || {})[d.key] || "");
+          return `<td class="code">${htmlEscape(code)}</td>`;
+        })
+        .join("");
+      return `
+        <tr>
+          ${cellCopy(r.Nombre)}
+          ${cellCopy(r.ID_MELI)}
+          ${cellFilter("rol", r.Rol)}
+          ${cellFilter("equipo", r.Equipo)}
+          ${cellFilter("ubic", r.Ubicación)}
+          ${cellCopy(r.Dias_trabajados)}
+          ${cols}
+        </tr>
+      `;
+    })
+    .join("");
+
+  $("#main").innerHTML = `
+    ${cards}
+
+    <div class="card">
+      <div class="cardTitle">Cargar licencia</div>
+      <div class="row">
+        <select class="in grow" id="licId">
+          <option value="">Colaborador…</option>
+          ${rows.map((r) => `<option value="${htmlEscape(r.ID_MELI)}">${htmlEscape(r.Nombre)} — ${htmlEscape(r.ID_MELI)}</option>`).join("")}
+        </select>
+        <input class="in" id="licDesde" type="date">
+        <input class="in" id="licHasta" type="date">
+        <select class="in" id="licTipo">
+          <option value="E">E — Día de Estudio</option>
+          <option value="M">M — Licencia Médica</option>
+          <option value="MM">MM — Licencia Médica Menor</option>
+          <option value="AI">AI — Ausencia Injustificada</option>
+          <option value="V">V — Vacaciones</option>
+        </select>
+        <button class="btn primary" id="btnLic">Guardar</button>
+      </div>
+      <div class="muted tiny">Se escribe en la hoja Presentismo sobre las columnas de fechas existentes.</div>
+    </div>
+
+    <div class="card">
+      <div class="cardTitle">Semana en curso (5 días hábiles)</div>
+      <div class="tableWrap">
+        <table>
+          <thead>${head}</thead>
+          <tbody>${body || `<tr><td colspan="${6 + days.length}" class="muted">Sin datos.</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  $("#btnLic").addEventListener("click", async () => {
+    const idMeli = $("#licId").value.trim();
+    const desde = $("#licDesde").value;
+    const hasta = $("#licHasta").value;
+    const tipo = $("#licTipo").value;
+    if (!idMeli || !desde || !hasta || !tipo) return toast("Completar todos los campos", "err");
+
+    try {
+      await HUB.presentismoLicenciasSet({ idMeli, desde, hasta, tipo });
+      toast("Licencia guardada");
+      // recarga
+      const [wk2, st2] = await Promise.all([HUB.presentismoWeek(""), HUB.presentismoStats("")]);
+      state.presentismo = wk2;
+      state.presentismoStats = st2;
+      renderPresentismo();
+    } catch (e) {
+      toast(`Error: ${e.message}`, "err");
+    }
+  });
+
+  // clicks: filtros en rol/equipo/ubic (no hay dropdown global aún)
+  $("#main").querySelectorAll("[data-copy]").forEach((el) => el.addEventListener("click", () => copyText(el.dataset.copy)));
+  $("#main").querySelectorAll("[data-filter]").forEach((el) =>
+    el.addEventListener("click", () => {
+      // reutilizo filtros de colaboradores para no inventar otra UX ahora
+      const k = el.dataset.filter;
+      const v = el.dataset.val || "";
+      state.colabFilter[k] = v;
+      state.tab = "colaboradores";
+      document.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("active", x.dataset.tab === state.tab));
+      renderColaboradores();
+    })
+  );
 }
+
+/* --------------------------
+   START
+-------------------------- */
+window.addEventListener("DOMContentLoaded", async () => {
+  document.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("active", x.dataset.tab === state.tab));
+  await ensureTabData().catch(() => {});
+  await boot().catch(() => {});
+});
