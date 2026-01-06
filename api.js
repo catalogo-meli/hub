@@ -21,7 +21,6 @@ const HUB = (() => {
       return j.data;
     }
 
-    // POST
     const payload = { action: path, ...(body || {}) };
     const r = await fetch(url, {
       method: "POST",
@@ -38,46 +37,36 @@ const HUB = (() => {
     // Health
     health: () => request("health"),
 
-    // Lecturas
+    // Lists
     colaboradoresList: () => request("colaboradores.list"),
     flujosList: () => request("flujos.list"),
-    habilitacionesList: () => request("habilitaciones.list"),
-    habilitacionesGet: (idMeli) => request("habilitaciones.get", { query: { idMeli } }),
+    canalesList: () => request("canales.list"),
 
-    // Presentismo (MATRIZ tipo hoja)
-    presentismoMatrix: () => request("presentismo.matrix"),
-    presentismoBatchSet: (updates = []) =>
-      request("presentismo.batchSet", { method: "POST", body: { updates } }),
+    // Flujos CRUD
+    flujosUpsert: (payload) => request("flujos.upsert", { method: "POST", body: payload }),
+    flujosDelete: (flujo) => request("flujos.delete", { method: "POST", body: { flujo } }),
+    flujosBatchSet: (updates = []) => request("flujos.batchSet", { method: "POST", body: { updates } }),
 
-    // === EDITS ===
-
-    // A) Flujos: set Perfiles_requeridos en Config_Flujos
-    flujosSetPerfiles: (flujo, perfiles_requeridos) =>
-      request("flujos.setPerfiles", {
-        method: "POST",
-        body: { flujo, perfiles_requeridos },
-      }),
-
-    // B1) Habilitaciones legacy
-    habilitacionesSetField: (idMeli, flujo, field, value) =>
-      request("habilitaciones.set", {
-        method: "POST",
-        body: { idMeli, flujo, field, value },
-      }),
-
-    // B2) Habilitaciones nuevo: set habilitado/fijo
-    habilitacionesSet: (idMeli, flujo, { habilitado, fijo } = {}) =>
-      request("habilitaciones.set", {
-        method: "POST",
-        body: { idMeli, flujo, habilitado, fijo },
-      }),
-
-    // Acciones
-    planificacionGenerar: () => request("planificacion.generar", { method: "POST" }),
+    // Planificación
     planificacionGet: () => request("planificacion.get"),
+    planificacionGenerar: () => request("planificacion.generar", { method: "POST" }),
+    planificacionBatchSet: (updates = []) => request("planificacion.batchSet", { method: "POST", body: { updates } }),
+
+    // Slack
     slackOutboxList: () => request("slack.outbox.list"),
     slackOutboxGenerar: () => request("slack.outbox.generar", { method: "POST" }),
+    slackOutboxBatchSet: (updates = []) => request("slack.outbox.batchSet", { method: "POST", body: { updates } }),
     slackOutboxEnviar: () => request("slack.outbox.enviar", { method: "POST" }),
+
+    // Habilitaciones
+    habilitacionesMatrix: () => request("habilitaciones.matrix"),
+    habilitacionesSet: (idMeli, flujo, { habilitado, fijo } = {}) =>
+      request("habilitaciones.set", { method: "POST", body: { idMeli, flujo, habilitado, fijo } }),
+
+    // Presentismo
+    presentismoMatrix: (query) => request("presentismo.matrix", { query }),
+    presentismoBatchSet: (updates = []) => request("presentismo.batchSet", { method: "POST", body: { updates } }),
+    presentismoSummaryToday: () => request("presentismo.summaryToday"),
   };
 })();
 
