@@ -2,18 +2,19 @@
 const HUB = (() => {
   const BASE = "/.netlify/functions/gas";
 
-  async function request(action, { method = "GET", query, body } = {}) {
+  async function request(path, { method = "GET", query, body } = {}) {
     let url = BASE;
+    const qs = new URLSearchParams();
 
     if (method === "GET") {
-      const qs = new URLSearchParams();
-      if (action) qs.set("action", action);
+      if (path) qs.set("action", path);
       if (query) {
         Object.entries(query).forEach(([k, v]) => {
           if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
         });
       }
       url += "?" + qs.toString();
+
       const r = await fetch(url, { method: "GET" });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || "API error");
@@ -21,12 +22,13 @@ const HUB = (() => {
     }
 
     // POST
-    const payload = { action, ...(body || {}) };
+    const payload = { action: path, ...(body || {}) };
     const r = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     });
+
     const j = await r.json();
     if (!j.ok) throw new Error(j.error || "API error");
     return j.data;
@@ -36,30 +38,29 @@ const HUB = (() => {
     // Health
     health: () => request("health"),
 
-    // Lists
+    // Lecturas
     colaboradoresList: () => request("colaboradores.list"),
     flujosList: () => request("flujos.list"),
+    feriadosList: () => request("feriados.list"),
     canalesList: () => request("canales.list"),
+
     habilitacionesList: () => request("habilitaciones.list"),
+    habilitacionesGet: (idMeli) => request("habilitaciones.get", { query: { idMeli } }),
 
-    // Presentismo
-    presentismoWeek: (date) => request("presentismo.week", { query: date ? { date } : undefined }),
-    presentismoStats: (date) => request("presentismo.stats", { query: date ? { date } : undefined }),
-    presentismoLicenciasSet: (payload) => request("presentismo.licencias.set", { method: "POST", body: payload }),
+    // Edits
+    flujosSetPerfiles: (flujo, perfiles_requeridos) =>
+      request("flujos.setPerfiles", { method: "POST", body: { flujo, perfiles_requeridos } }),
 
-    // Flujos autosave
-    flujosUpsert: (payload) => request("flujos.upsert", { method: "POST", body: payload }),
-    flujosDelete: (payload) => request("flujos.delete", { method: "POST", body: payload }),
+    habilitacionesSetField: (idMeli, flujo, field, value) =>
+      request("habilitaciones.set", { method: "POST", body: { idMeli, flujo, field, value } }),
 
-    // Habilitaciones
-    habilitacionesSet: (payload) => request("habilitaciones.set", { method: "POST", body: payload }),
+    habilitacionesSet: (idMeli, flujo, { habilitado, fijo } = {}) =>
+      request("habilitaciones.set", { method: "POST", body: { idMeli, flujo, habilitado, fijo } }),
 
-    // Operativa diaria
+    // Acciones
     planificacionGenerar: () => request("planificacion.generar", { method: "POST" }),
-    planificacionList: () => request("planificacion.list"),
     slackOutboxGenerar: () => request("slack.outbox.generar", { method: "POST" }),
-    slackOutboxList: () => request("slack.outbox.list"),
-    slackOutboxEnviar: (payload) => request("slack.outbox.enviar", { method: "POST", body: payload }),
+    slackOutboxEnviar: () => request("slack.outbox.enviar", { method: "POST" }),
   };
 })();
 
