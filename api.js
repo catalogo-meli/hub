@@ -1,4 +1,4 @@
-// api.js
+// api.js (ESM)
 const HUB = (() => {
   const BASE = "/.netlify/functions/gas";
 
@@ -21,6 +21,7 @@ const HUB = (() => {
       return j.data;
     }
 
+    // POST
     const payload = { action: path, ...(body || {}) };
     const r = await fetch(url, {
       method: "POST",
@@ -39,34 +40,41 @@ const HUB = (() => {
 
     // Lists
     colaboradoresList: () => request("colaboradores.list"),
-    flujosList: () => request("flujos.list"),
     canalesList: () => request("canales.list"),
+    flujosList: () => request("flujos.list"),
+    habilitacionesList: () => request("habilitaciones.list"),
+    habilitacionesGet: (idMeli) => request("habilitaciones.get", { query: { idMeli } }),
 
-    // Flujos CRUD
-    flujosUpsert: (payload) => request("flujos.upsert", { method: "POST", body: payload }),
-    flujosDelete: (flujo) => request("flujos.delete", { method: "POST", body: { flujo } }),
-    flujosBatchSet: (updates = []) => request("flujos.batchSet", { method: "POST", body: { updates } }),
+    // Presentismo
+    presentismoSummaryToday: () => request("presentismo.summaryToday"),
+    presentismoMeta: () => request("presentismo.meta"),
+    presentismoDay: (dayKey) => request("presentismo.day", { query: { dayKey } }),
+    presentismoSet: ({ dayKey, idMeli, code }) =>
+      request("presentismo.set", { method: "POST", body: { dayKey, idMeli, code } }),
+    presentismoApplyLicense: ({ idMeli, from, to, tipo }) =>
+      request("presentismo.applyLicense", { method: "POST", body: { idMeli, from, to, tipo } }),
+
+    // Flujos autosave
+    flujosUpsert: ({ flujo, slack_channel, perfiles_requeridos }) =>
+      request("flujos.upsert", { method: "POST", body: { flujo, slack_channel, perfiles_requeridos } }),
+    flujosDelete: ({ flujo }) =>
+      request("flujos.delete", { method: "POST", body: { flujo } }),
+
+    // Habilitaciones
+    habilitacionesSet: (idMeli, flujo, { habilitado, fijo } = {}) =>
+      request("habilitaciones.set", { method: "POST", body: { idMeli, flujo, habilitado, fijo } }),
 
     // Planificación
-    planificacionGet: () => request("planificacion.get"),
+    planificacionList: () => request("planificacion.list"),
     planificacionGenerar: () => request("planificacion.generar", { method: "POST" }),
-    planificacionBatchSet: (updates = []) => request("planificacion.batchSet", { method: "POST", body: { updates } }),
 
     // Slack
     slackOutboxList: () => request("slack.outbox.list"),
     slackOutboxGenerar: () => request("slack.outbox.generar", { method: "POST" }),
-    slackOutboxBatchSet: (updates = []) => request("slack.outbox.batchSet", { method: "POST", body: { updates } }),
     slackOutboxEnviar: () => request("slack.outbox.enviar", { method: "POST" }),
-
-    // Habilitaciones
-    habilitacionesMatrix: () => request("habilitaciones.matrix"),
-    habilitacionesSet: (idMeli, flujo, { habilitado, fijo } = {}) =>
-      request("habilitaciones.set", { method: "POST", body: { idMeli, flujo, habilitado, fijo } }),
-
-    // Presentismo
-    presentismoMatrix: (query) => request("presentismo.matrix", { query }),
-    presentismoBatchSet: (updates = []) => request("presentismo.batchSet", { method: "POST", body: { updates } }),
-    presentismoSummaryToday: () => request("presentismo.summaryToday"),
+    slackOutboxEnviarUno: (Row) => request("slack.outbox.enviarUno", { method: "POST", body: { Row } }),
+    slackOutboxUpdate: ({ Row, canal, mensaje }) =>
+      request("slack.outbox.update", { method: "POST", body: { Row, canal, mensaje } }),
   };
 })();
 
