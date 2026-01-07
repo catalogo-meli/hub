@@ -1,31 +1,39 @@
-// app.js (ESM)
+// app.js (ESM) — HUB Catálogo
+// Robusto (no revienta por nodos inexistentes), UX prolija, y sin “parches” de null.
+// Requiere: api.js exporte `API` con los mismos métodos usados acá.
+
 import { API } from "./api.js";
 
-const $ = (sel) => document.querySelector(sel);
+/* -----------------------------
+ * DOM helpers (seguros)
+ * ----------------------------- */
+const qs = (sel, root = document) => root.querySelector(sel);
+const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-let BUSY = false;
-function setBusy(v) {
-  BUSY = !!v;
-  document.querySelectorAll("button").forEach(b => (b.disabled = BUSY));
+function must(sel, root = document) {
+  const el = qs(sel, root);
+  if (!el) throw new Error(`Falta el nodo requerido en el DOM: ${sel}`);
+  return el;
 }
 
-function toast(msg, isError = false) {
-  const el = $("#toast");
-  el.textContent = msg;
-  el.classList.add("show");
-  el.style.borderColor = isError ? "rgba(255,70,70,.35)" : "rgba(255,255,255,.14)";
-  setTimeout(() => el.classList.remove("show"), isError ? 5200 : 2600);
+function safeText(el, text) {
+  if (!el) return;
+  el.textContent = text ?? "";
 }
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (m) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
   }[m]));
 }
 
-function by(arr, keyFn) {
+function groupBy(arr, keyFn) {
   const m = new Map();
-  for (const x of arr) {
+  for (const x of arr || []) {
     const k = keyFn(x);
     if (!m.has(k)) m.set(k, []);
     m.get(k).push(x);
@@ -33,36 +41,104 @@ function by(arr, keyFn) {
   return m;
 }
 
-let STATE = {
-  canales: [],
-  canalesById: new Map(),
-  flujos: [],
-  plan: [],
-  outbox: [],
-};
+/* -----------------------------
+ * Toast (crea el contenedor si no existe)
+ * ----------------------------- */
+function ensureToastEl() {
+  let el = qs("#toast");
+  if (el) return el;
 
-async function loadAll() {
-  const [canales, flujos, plan, outbox] = await Promise.all([
-    API.canalesList(),
-    API.flujosList(),
-    API.planificacionList().catch(() => []),
-    API.slackOutboxList().catch(() => []),
-  ]);
-
-  STATE.canales = canales || [];
-  STATE.canalesById = new Map(STATE.canales.map(c => [String(c.channel_id), c.canal]));
-  STATE.flujos = flujos || [];
-  STATE.plan = plan || [];
-  STATE.outbox = outbox || [];
-
-  $("#lastLoad").textContent = new Date().toLocaleString();
+  // Si index.html no tiene #toast, lo creamos (evita el null crash).
+  el = document.createElement("div");
+  el.id = "toast";
+  el.className = "toast";
+  document.body.appendChild(el);
+  return el;
 }
 
-function render() {
-  const app = $("#app");
+function toast(msg, isError = false) {
+  const el = ensureToastEl();
+  safeText(el, msg);
+
+  el.classList.add("show");
+  el.style.borderColor = isError ? "rgba(255,70,70,.35)" : "rgba(255,255,255,.14)";
+  el.style.background = isError ? "rgba(80,10,10,.85)" : "rgba(15,20,30,.85)";
+
+  window.clearTimeout(toast._t);
+  toast._t = window.setTimeout(() => el.classList.remove("show"), isError ? 5200 : 2600);
+}
+
+/* -----------------------------
+ * Estado
+ * ----------------------------- */
+const STATE = {
+  canales: [], // [{canal, channel_id}]   (front normaliza)
+  canalesById: new Map(), // channel_id -> canal
+  flujos: [], // [{flujo, perfiles_requeridos, channel_id, canal}] (front normaliza)
+  plan: [], // [{fecha, flujo, nombre, ...}]
+  outbox: [], // [{row, fecha, canal, channel_id, mensaje, estado, error}]
+  busy: {
+    loading: false,
+    plan: false,
+    outbox: false,
+    sendAll: false,
+  },
+};
+
+/* -----------------------------
+ * Normalizadores (backend a veces cambia nombres)
+ * ----------------------------- */
+function normCanalRow(r) {
+  if (!r) return { canal: "", channel_id: "" };
+  return {
+    canal: String(r.canal ?? r.Canal ?? r.name ?? "").trim(),
+    channel_id: String(r.channel_id ?? r.Channel_ID ?? r.Slack_channel ?? r.Slack_Channel_ID ?? r.id ?? "").trim(),
+  };
+}
+
+function normFlujoRow(r) {
+  if (!r) return { flujo: "", perfiles_requeridos: 0, channel_id: "" };
+  return {
+    flujo: String(r.flujo ?? r.Flujo ?? "").trim(),
+    perfiles_requeridos: Number(r.perfiles_requeridos ?? r.Perfiles_requeridos ?? r.perfiles ?? 0) || 0,
+    channel_id: String(r.channel_id ?? r.Channel_ID ?? r.Slack_channel ?? r.Slack_Channel_ID ?? "").trim(),
+    canal: String(r.canal ?? r.Canal ?? "").trim(),
+  };
+}
+
+function normPlanRow(r) {
+  if (!r) return { fecha: "", flujo: "", nombre: "" };
+  return {
+    fecha: r.fecha ?? r.Fecha ?? "",
+    flujo: String(r.flujo ?? r.Flujo ?? "").trim(),
+    nombre: String(r.nombre ?? r.Nombre ?? r.ID_MELI ?? "").trim(),
+    id_meli: String(r.id_meli ?? r.ID_MELI ?? "").trim(),
+    es_fijo: String(r.es_fijo ?? r.Es_Fijo ?? "").trim(),
+  };
+}
+
+function normOutboxRow(r) {
+  if (!r) return { row: 0, fecha: "", canal: "", channel_id: "", mensaje: "", estado: "", error: "" };
+  return {
+    row: Number(r.row ?? r.Row ?? r.fila ?? r.Fila ?? 0) || 0,
+    fecha: r.fecha ?? r.Fecha ?? "",
+    canal: String(r.canal ?? r.Canal ?? "").trim(),
+    channel_id: String(r.channel_id ?? r.Channel_ID ?? r.Slack_channel_id ?? r.Slack_Channel_ID ?? "").trim(),
+    mensaje: String(r.mensaje ?? r.Mensaje ?? "").trim(),
+    estado: String(r.estado ?? r.Estado ?? "").trim(),
+    error: String(r.error ?? r.Error ?? "").trim(),
+  };
+}
+
+/* -----------------------------
+ * Render
+ * ----------------------------- */
+function renderShell() {
+  const app = must("#app");
+
   app.innerHTML = `
     <div class="sectionTitle">1) Flujos (Perfiles requeridos)</div>
-    <div class="muted">Se guarda al cambiar Slack channel o Perfiles requeridos.</div>
+    <div class="muted">Autosave: se guarda al cambiar Slack channel o Perfiles requeridos.</div>
 
     <div class="grid3 gridFlujosHead" style="margin-top:12px;">
       <div class="small">Flujo</div>
@@ -72,11 +148,11 @@ function render() {
 
     <div id="flujosList" style="margin-top:10px;"></div>
 
-    <div class="row" style="margin-top:12px;">
+    <div class="row" style="margin-top:12px; align-items:center;">
       <button id="btnPlan" class="btn primary">Generar planificación</button>
       <button id="btnOutbox" class="btn">Generar Outbox</button>
       <button id="btnSendAll" class="btn success">Enviar todos</button>
-      <div id="opStatus" class="muted"></div>
+      <div id="opStatus" class="muted" style="margin-left:10px;"></div>
     </div>
 
     <div class="sep"></div>
@@ -91,51 +167,72 @@ function render() {
     <div class="muted">Editá canal/mensaje y enviá por fila o “Enviar todos”.</div>
     <div id="outboxBox" style="margin-top:10px;"></div>
   `;
+}
 
-  renderFlujos();
-  renderPlan();
-  renderOutbox();
+function renderButtonsState() {
+  const btnPlan = qs("#btnPlan");
+  const btnOut = qs("#btnOutbox");
+  const btnSend = qs("#btnSendAll");
+  const op = qs("#opStatus");
 
-  $("#btnPlan").onclick = onGenerarPlan;
-  $("#btnOutbox").onclick = onGenerarOutbox;
-  $("#btnSendAll").onclick = onEnviarTodos;
+  if (btnPlan) btnPlan.disabled = !!STATE.busy.plan || !!STATE.busy.loading;
+  if (btnOut) btnOut.disabled = !!STATE.busy.outbox || !!STATE.busy.loading;
+  if (btnSend) btnSend.disabled = !!STATE.busy.sendAll || !!STATE.busy.loading;
+
+  if (op) {
+    if (STATE.busy.loading) safeText(op, "Cargando…");
+    else if (STATE.busy.plan) safeText(op, "Generando planificación…");
+    else if (STATE.busy.outbox) safeText(op, "Generando Outbox…");
+    else if (STATE.busy.sendAll) safeText(op, "Enviando…");
+    else safeText(op, "");
+  }
 }
 
 function canalesOptions(selectedChannelId) {
-  const sel = String(selectedChannelId || "");
-  const opts = [`<option value="">—</option>`]
-    .concat(STATE.canales.map(c => {
-      const v = String(c.channel_id);
-      const label = c.canal;
-      const s = v === sel ? "selected" : "";
+  const sel = String(selectedChannelId || "").trim();
+  const opts = [`<option value="">—</option>`].concat(
+    (STATE.canales || []).map((c) => {
+      const v = String(c.channel_id || "").trim();
+      const label = String(c.canal || "").trim();
+      const s = v && v === sel ? "selected" : "";
       return `<option value="${escapeHtml(v)}" ${s}>${escapeHtml(label)}</option>`;
-    }));
+    })
+  );
   return opts.join("");
 }
 
 function renderFlujos() {
-  const wrap = $("#flujosList");
-  const rows = STATE.flujos.slice().sort((a,b)=>String(a.flujo).localeCompare(String(b.flujo)));
+  const wrap = must("#flujosList");
+  const rows = (STATE.flujos || [])
+    .slice()
+    .filter((f) => f.flujo)
+    .sort((a, b) => String(a.flujo).localeCompare(String(b.flujo)));
 
-  wrap.innerHTML = rows.map(f => `
-    <div class="grid3" style="gap:10px; margin: 10px 0;">
-      <div class="pill">
-        <strong>${escapeHtml(f.flujo)}</strong>
-      </div>
+  wrap.innerHTML = `
+    ${rows
+      .map(
+        (f) => `
+      <div class="grid3" style="gap:10px; margin: 10px 0;">
+        <div class="pill">
+          <strong>${escapeHtml(f.flujo)}</strong>
+        </div>
 
-      <div>
-        <select data-flujo="${escapeHtml(f.flujo)}" data-field="channel_id">
-          ${canalesOptions(f.channel_id)}
-        </select>
-      </div>
+        <div>
+          <select data-flujo="${escapeHtml(f.flujo)}" data-field="channel_id">
+            ${canalesOptions(f.channel_id)}
+          </select>
+        </div>
 
-      <div class="row" style="gap:10px;">
-        <input data-flujo="${escapeHtml(f.flujo)}" data-field="perfiles" type="number" min="0"
-          value="${Number(f.perfiles_requeridos || 0)}" />
-        <button class="btn danger" data-action="delete" data-flujo="${escapeHtml(f.flujo)}">Borrar</button>
+        <div class="row" style="gap:10px;">
+          <input data-flujo="${escapeHtml(f.flujo)}" data-field="perfiles" type="number" min="0"
+            value="${Number(f.perfiles_requeridos || 0)}" />
+          <button class="btn danger" data-action="delete" data-flujo="${escapeHtml(f.flujo)}">Borrar</button>
+        </div>
       </div>
-    </div>
-  `).join("") + `
+    `
+      )
+      .join("")}
+
     <div class="grid3" style="gap:10px; margin-top: 16px;">
       <input id="newFlujo" placeholder="+ Nuevo flujo…" />
       <select id="newChannel">
@@ -148,124 +245,121 @@ function renderFlujos() {
     </div>
   `;
 
-  // autosave handlers
-  wrap.querySelectorAll('select[data-field="channel_id"]').forEach(sel => {
-    sel.onchange = async (ev) => {
-      const flujo = ev.target.dataset.flujo;
-      const channel_id = ev.target.value;
-      const current = STATE.flujos.find(x => x.flujo === flujo);
+  // Delegación (menos handlers sueltos, menos posibilidades de “null”)
+  wrap.onchange = async (ev) => {
+    const t = ev.target;
+
+    // change channel select
+    if (t && t.matches('select[data-field="channel_id"]')) {
+      const flujo = t.dataset.flujo;
+      const channel_id = String(t.value || "").trim();
+      const current = (STATE.flujos || []).find((x) => x.flujo === flujo);
       const perfiles = Number(current?.perfiles_requeridos || 0);
 
       try {
-        setBusy(true);
         await API.flujosUpsert(flujo, perfiles, channel_id);
         toast(`Guardado: ${flujo}`);
         await refreshFlujosOnly();
       } catch (e) {
-        toast(e.message, true);
-      } finally {
-        setBusy(false);
+        toast(e.message || String(e), true);
       }
-    };
-  });
+    }
 
-  wrap.querySelectorAll('input[data-field="perfiles"]').forEach(inp => {
-    inp.onchange = async (ev) => {
-      const flujo = ev.target.dataset.flujo;
-      const perfiles = Number(ev.target.value || 0);
-      const current = STATE.flujos.find(x => x.flujo === flujo);
+    // change perfiles input
+    if (t && t.matches('input[data-field="perfiles"]')) {
+      const flujo = t.dataset.flujo;
+      const perfiles = Number(t.value || 0);
+      const current = (STATE.flujos || []).find((x) => x.flujo === flujo);
       const channel_id = String(current?.channel_id || "");
 
+      if (Number.isNaN(perfiles) || perfiles < 0) return toast("Perfiles inválidos", true);
+
       try {
-        setBusy(true);
         await API.flujosUpsert(flujo, perfiles, channel_id);
         toast(`Guardado: ${flujo}`);
         await refreshFlujosOnly();
       } catch (e) {
-        toast(e.message, true);
-      } finally {
-        setBusy(false);
+        toast(e.message || String(e), true);
       }
-    };
-  });
+    }
+  };
 
-  wrap.querySelectorAll('button[data-action="delete"]').forEach(btn => {
-    btn.onclick = async (ev) => {
-      const flujo = ev.target.dataset.flujo;
+  wrap.onclick = async (ev) => {
+    const t = ev.target;
+
+    // delete flujo
+    if (t && t.matches('button[data-action="delete"]')) {
+      const flujo = t.dataset.flujo;
       try {
-        setBusy(true);
         await API.flujosDelete(flujo);
         toast(`Borrado: ${flujo}`);
         await reloadAndRender();
       } catch (e) {
-        toast(e.message, true);
-      } finally {
-        setBusy(false);
+        toast(e.message || String(e), true);
       }
-    };
-  });
+      return;
+    }
 
-  $("#btnAddFlujo").onclick = async () => {
-    const flujo = ($("#newFlujo").value || "").trim();
-    const channel_id = ($("#newChannel").value || "").trim();
-    const perfiles = Number($("#newPerfiles").value || 0);
+    // add flujo
+    if (t && t.id === "btnAddFlujo") {
+      const flujo = String(qs("#newFlujo")?.value || "").trim();
+      const channel_id = String(qs("#newChannel")?.value || "").trim();
+      const perfiles = Number(qs("#newPerfiles")?.value || 0);
 
-    if (!flujo) return toast("Flujo requerido", true);
-    if (!channel_id) return toast("Slack channel requerido", true);
-    if (Number.isNaN(perfiles) || perfiles < 0) return toast("Perfiles inválidos", true);
+      if (!flujo) return toast("Flujo requerido", true);
+      if (!channel_id) return toast("Slack channel requerido", true);
+      if (Number.isNaN(perfiles) || perfiles < 0) return toast("Perfiles inválidos", true);
 
-    try {
-      setBusy(true);
-      await API.flujosUpsert(flujo, perfiles, channel_id);
-      toast("Flujo agregado");
-      await reloadAndRender();
-    } catch (e) {
-      toast(e.message, true);
-    } finally {
-      setBusy(false);
+      try {
+        await API.flujosUpsert(flujo, perfiles, channel_id);
+        toast("Flujo agregado");
+        await reloadAndRender();
+      } catch (e) {
+        toast(e.message || String(e), true);
+      }
     }
   };
 }
 
 function renderPlan() {
-  const box = $("#planBox");
-  if (!STATE.plan || STATE.plan.length === 0) {
+  const box = must("#planBox");
+  const plan = (STATE.plan || []).map(normPlanRow).filter((r) => r.flujo);
+
+  if (!plan.length) {
     box.innerHTML = `<div class="muted">Sin planificación cargada.</div>`;
     return;
   }
 
-  const grouped = by(STATE.plan, x => String(x.flujo || ""));
-  const cards = [];
+  const grouped = groupBy(plan, (x) => String(x.flujo || ""));
+  const flujosOrden = Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b));
 
-  const flujosOrden = Array.from(grouped.keys()).sort((a,b)=>a.localeCompare(b));
-
-  for (const flujo of flujosOrden) {
+  const cards = flujosOrden.map((flujo) => {
     const items = grouped.get(flujo) || [];
-    const nombres = items.map(x => x.nombre).filter(Boolean);
-    const fijos = items.filter(x => x.es_fijo).map(x => x.nombre).filter(Boolean);
 
-    cards.push(`
+    // Preferimos nombre si existe; si no, ID
+    const list = items
+      .map((x) => x.nombre || x.id_meli || "")
+      .map((s) => String(s).trim())
+      .filter(Boolean);
+
+    return `
       <div class="card" style="margin: 10px 0;">
-        <div style="font-weight:900; margin-bottom: 8px;">${escapeHtml(flujo)}</div>
-        <div>${nombres.length ? escapeHtml(nombres.join(", ")) : `<span class="muted">•</span>`}</div>
-        <div class="small" style="margin-top:6px;">
-          Total: ${nombres.length}${fijos.length ? ` • Fijos: ${fijos.length}` : ""}
-        </div>
+        <div style="font-weight:800; margin-bottom: 8px;">${escapeHtml(flujo)}</div>
+        <div>${list.length ? escapeHtml(list.join(", ")) : `<span class="muted">•</span>`}</div>
+        <div class="small" style="margin-top:6px;">Total: ${list.length}</div>
       </div>
-    `);
-  }
+    `;
+  });
 
   box.innerHTML = cards.join("");
 }
 
-function isEnviado(estado) {
-  const s = String(estado || "").toUpperCase();
-  return s.startsWith("ENVIADO");
-}
-
 function renderOutbox() {
-  const box = $("#outboxBox");
-  const rows = (STATE.outbox || []).filter(x => !isEnviado(x.estado));
+  const box = must("#outboxBox");
+
+  const rows = (STATE.outbox || [])
+    .map(normOutboxRow)
+    .filter((x) => String(x.estado || "").toUpperCase() !== "ENVIADO");
 
   if (!rows.length) {
     box.innerHTML = `<div class="muted">Sin pendientes.</div>`;
@@ -280,188 +374,276 @@ function renderOutbox() {
           <th style="width:220px;">Canal</th>
           <th>Mensaje</th>
           <th style="width:110px;">Estado</th>
-          <th style="width:220px;">Error</th>
+          <th style="width:240px;">Error</th>
           <th style="width:120px;"></th>
         </tr>
       </thead>
       <tbody>
-        ${rows.map(r => `
+        ${rows
+          .map(
+            (r) => `
           <tr>
             <td>${escapeHtml(String(r.fecha || ""))}</td>
+
             <td>
               <select data-outbox-row="${r.row}" data-field="channel_id">
                 ${canalesOptions(r.channel_id)}
               </select>
             </td>
+
             <td>
               <textarea data-outbox-row="${r.row}" data-field="mensaje">${escapeHtml(r.mensaje || "")}</textarea>
               <div class="row" style="margin-top:8px; gap:10px;">
                 <button class="btn" data-action="copy" data-row="${r.row}">Copiar</button>
               </div>
             </td>
+
             <td>${escapeHtml(String(r.estado || ""))}</td>
+
             <td>${r.error ? `<div class="errorBox">${escapeHtml(r.error)}</div>` : ""}</td>
+
             <td>
               <button class="btn primary" data-action="send" data-row="${r.row}">Enviar</button>
             </td>
           </tr>
-        `).join("")}
+        `
+          )
+          .join("")}
       </tbody>
     </table>
   `;
 
-  // Change channel => update outbox row
-  box.querySelectorAll('select[data-field="channel_id"]').forEach(sel => {
-    sel.onchange = async (ev) => {
-      const row = Number(ev.target.dataset.outboxRow);
-      const channel_id = ev.target.value;
-      const canal = STATE.canalesById.get(String(channel_id)) || "";
-      try {
-        setBusy(true);
-        await API.slackOutboxUpdate(row, canal, channel_id, "");
-        toast("Outbox actualizado");
-        await refreshOutboxOnly();
-      } catch (e) {
-        toast(e.message, true);
-      } finally {
-        setBusy(false);
-      }
-    };
-  });
+  // Delegación: menos riesgo de handlers colgando
+  box.onchange = async (ev) => {
+    const t = ev.target;
+    if (!t || !t.matches('select[data-field="channel_id"]')) return;
 
-  // Change message => update outbox row (on blur)
-  box.querySelectorAll('textarea[data-field="mensaje"]').forEach(tx => {
-    tx.onblur = async (ev) => {
-      const row = Number(ev.target.dataset.outboxRow);
-      const mensaje = ev.target.value || "";
-      const current = STATE.outbox.find(x => x.row === row);
-      const channel_id = String(current?.channel_id || "");
-      const canal = String(current?.canal || "");
-      try {
-        setBusy(true);
-        await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
-        toast("Mensaje guardado");
-      } catch (e) {
-        toast(e.message, true);
-      } finally {
-        setBusy(false);
-      }
-    };
-  });
+    const row = Number(t.dataset.outboxRow || 0);
+    const channel_id = String(t.value || "").trim();
+    const canal = STATE.canalesById.get(String(channel_id)) || "";
 
-  // Copy
-  box.querySelectorAll('button[data-action="copy"]').forEach(btn => {
-    btn.onclick = async (ev) => {
-      const row = Number(ev.target.dataset.row);
-      const current = STATE.outbox.find(x => x.row === row);
-      const msg = current?.mensaje || "";
+    try {
+      await API.slackOutboxUpdate(row, canal, channel_id, "");
+      toast("Outbox actualizado");
+      await refreshOutboxOnly();
+    } catch (e) {
+      toast(e.message || String(e), true);
+    }
+  };
+
+  box.onblur = async (ev) => {
+    const t = ev.target;
+    if (!t || !t.matches('textarea[data-field="mensaje"]')) return;
+
+    const row = Number(t.dataset.outboxRow || 0);
+    const mensaje = String(t.value || "");
+
+    const current = (STATE.outbox || []).map(normOutboxRow).find((x) => x.row === row);
+    const channel_id = String(current?.channel_id || "");
+    const canal = String(current?.canal || "");
+
+    try {
+      await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
+    } catch (e) {
+      toast(e.message || String(e), true);
+    }
+  };
+
+  box.onclick = async (ev) => {
+    const t = ev.target;
+    if (!t) return;
+
+    // copy
+    if (t.matches('button[data-action="copy"]')) {
+      const row = Number(t.dataset.row || 0);
+      const current = (STATE.outbox || []).map(normOutboxRow).find((x) => x.row === row);
+      const msg = String(current?.mensaje || "");
+
       try {
         await navigator.clipboard.writeText(msg);
         toast("Copiado");
       } catch {
         toast("No se pudo copiar", true);
       }
-    };
-  });
+      return;
+    }
 
-  // Send row
-  box.querySelectorAll('button[data-action="send"]').forEach(btn => {
-    btn.onclick = async (ev) => {
-      const row = Number(ev.target.dataset.row);
+    // send row
+    if (t.matches('button[data-action="send"]')) {
+      const row = Number(t.dataset.row || 0);
       try {
-        setBusy(true);
         await API.slackOutboxEnviar(row);
         toast("Enviado");
         await refreshOutboxOnly();
       } catch (e) {
-        toast(e.message, true);
-      } finally {
-        setBusy(false);
+        toast(e.message || String(e), true);
       }
-    };
-  });
+      return;
+    }
+  };
+
+  // Necesario para onblur en bubbling (textarea)
+  box.addEventListener("blur", box.onblur, true);
 }
 
+/* -----------------------------
+ * Carga de datos
+ * ----------------------------- */
+async function loadAll() {
+  STATE.busy.loading = true;
+  renderButtonsState();
+
+  const [canales, flujos, plan, outbox] = await Promise.all([
+    API.canalesList(),
+    API.flujosList(),
+    API.planificacionList().catch(() => []),
+    API.slackOutboxList().catch(() => []),
+  ]);
+
+  STATE.canales = (canales || []).map(normCanalRow).filter((c) => c.canal || c.channel_id);
+  STATE.canalesById = new Map(STATE.canales.map((c) => [String(c.channel_id), c.canal]));
+
+  STATE.flujos = (flujos || []).map(normFlujoRow).filter((f) => f.flujo);
+
+  STATE.plan = (plan || []).map(normPlanRow);
+  STATE.outbox = (outbox || []).map(normOutboxRow);
+
+  STATE.busy.loading = false;
+  renderButtonsState();
+}
+
+/* -----------------------------
+ * Acciones
+ * ----------------------------- */
 async function onGenerarPlan() {
-  $("#opStatus").textContent = "Generando planificación…";
+  STATE.busy.plan = true;
+  renderButtonsState();
+
   try {
-    setBusy(true);
     await API.planificacionGenerar();
     toast("Planificación generada");
-    STATE.plan = await API.planificacionList();
+
+    STATE.plan = (await API.planificacionList().catch(() => [])).map(normPlanRow);
     renderPlan();
   } catch (e) {
-    toast(e.message, true);
+    toast(e.message || String(e), true);
   } finally {
-    $("#opStatus").textContent = "";
-    setBusy(false);
+    STATE.busy.plan = false;
+    renderButtonsState();
   }
 }
 
 async function onGenerarOutbox() {
-  $("#opStatus").textContent = "Generando Outbox…";
+  STATE.busy.outbox = true;
+  renderButtonsState();
+
   try {
-    setBusy(true);
     await API.slackOutboxGenerar();
     toast("Outbox generado");
     await refreshOutboxOnly();
   } catch (e) {
-    toast(e.message, true);
+    toast(e.message || String(e), true);
   } finally {
-    $("#opStatus").textContent = "";
-    setBusy(false);
+    STATE.busy.outbox = false;
+    renderButtonsState();
   }
 }
 
 async function onEnviarTodos() {
-  $("#opStatus").textContent = "Enviando…";
+  STATE.busy.sendAll = true;
+  renderButtonsState();
+
   try {
-    setBusy(true);
-    await API.slackOutboxEnviar();
+    await API.slackOutboxEnviar(); // sin row => envía todos pendientes
     toast("Envío masivo ejecutado");
     await refreshOutboxOnly();
   } catch (e) {
-    toast(e.message, true);
+    toast(e.message || String(e), true);
   } finally {
-    $("#opStatus").textContent = "";
-    setBusy(false);
+    STATE.busy.sendAll = false;
+    renderButtonsState();
   }
 }
 
 async function refreshFlujosOnly() {
-  STATE.flujos = await API.flujosList();
+  const flujos = await API.flujosList().catch(() => []);
+  STATE.flujos = (flujos || []).map(normFlujoRow).filter((f) => f.flujo);
   renderFlujos();
 }
 
 async function refreshOutboxOnly() {
-  STATE.outbox = await API.slackOutboxList();
+  const outbox = await API.slackOutboxList().catch(() => []);
+  STATE.outbox = (outbox || []).map(normOutboxRow);
   renderOutbox();
 }
 
+/* -----------------------------
+ * Bind general UI (Health / Modo)
+ * ----------------------------- */
+function bindTopButtons() {
+  const btnHealth = qs("#btnHealth");
+  const btnMode = qs("#btnMode");
+
+  if (btnHealth) {
+    btnHealth.onclick = async () => {
+      try {
+        const h = await API.health();
+        toast(`OK: ${h?.ts || "health"}`);
+      } catch (e) {
+        toast(e.message || String(e), true);
+      }
+    };
+  }
+
+  if (btnMode) {
+    btnMode.onclick = () => {
+      toast("Modo: todavía no implementado.");
+    };
+  }
+}
+
+/* -----------------------------
+ * Boot
+ * ----------------------------- */
 async function reloadAndRender() {
   try {
-    setBusy(true);
+    renderShell();
+    bindTopButtons();
+
+    const btnPlan = qs("#btnPlan");
+    const btnOut = qs("#btnOutbox");
+    const btnSend = qs("#btnSendAll");
+
+    if (btnPlan) btnPlan.onclick = onGenerarPlan;
+    if (btnOut) btnOut.onclick = onGenerarOutbox;
+    if (btnSend) btnSend.onclick = onEnviarTodos;
+
+    renderButtonsState();
+
     await loadAll();
-    render();
+    renderFlujos();
+    renderPlan();
+    renderOutbox();
+
+    renderButtonsState();
   } catch (e) {
-    $("#app").innerHTML = `<div class="errorBox">Error: ${escapeHtml(e.message)}</div>`;
-  } finally {
-    setBusy(false);
+    // Si falla incluso render, lo mostramos sin depender de nodos extra
+    const app = qs("#app");
+    if (app) {
+      app.innerHTML = `<div class="errorBox">Error: ${escapeHtml(e.message || String(e))}</div>`;
+    }
+    // y toast también
+    toast(e.message || String(e), true);
   }
 }
 
-async function health() {
-  try {
-    const h = await API.health();
-    $("#healthPill").textContent = `OK • ${h.ts || "health"}`;
-  } catch (e) {
-    $("#healthPill").textContent = `ERROR`;
-    toast(e.message, true);
+function boot() {
+  // Evita correr antes de que exista #app
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", reloadAndRender, { once: true });
+  } else {
+    reloadAndRender();
   }
 }
 
-(async function init() {
-  $("#btnHealth").onclick = health;
-  await reloadAndRender();
-  await health();
-})();
+boot();
