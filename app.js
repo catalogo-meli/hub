@@ -1,419 +1,420 @@
+// app.js (ESM)
 import { API } from "./api.js";
 
-const $ = (sel, root = document) => root.querySelector(sel);
+const $ = (sel) => document.querySelector(sel);
 
-function el(tag, attrs = {}, children = []) {
-  const n = document.createElement(tag);
-  Object.entries(attrs).forEach(([k, v]) => {
-    if (k === "class") n.className = v;
-    else if (k.startsWith("on") && typeof v === "function") n.addEventListener(k.slice(2), v);
-    else n.setAttribute(k, v);
-  });
-  (Array.isArray(children) ? children : [children]).forEach((c) => {
-    if (c === null || c === undefined) return;
-    n.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
-  });
-  return n;
+function toast(msg, isError = false) {
+  const el = $("#toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  el.style.borderColor = isError ? "rgba(255,70,70,.35)" : "rgba(255,255,255,.14)";
+  setTimeout(() => el.classList.remove("show"), isError ? 5200 : 2600);
 }
 
-function toast(msg, type = "info") {
-  const box = el("div", { class: `toast ${type}` }, msg);
-  document.body.appendChild(box);
-  setTimeout(() => box.remove(), 3500);
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+  }[m]));
 }
 
-function groupBy(arr, key) {
+function by(arr, keyFn) {
   const m = new Map();
-  arr.forEach((x) => {
-    const k = x[key] ?? "";
+  for (const x of arr) {
+    const k = keyFn(x);
     if (!m.has(k)) m.set(k, []);
     m.get(k).push(x);
-  });
+  }
   return m;
 }
 
-async function main() {
-  const root = $("#app");
-  root.innerHTML = "";
+let STATE = {
+  canales: [],        // [{canal, channel_id}]
+  canalesById: new Map(),
+  flujos: [],         // [{flujo, perfiles_requeridos, channel_id, canal}]
+  plan: [],           // [{fecha, flujo, nombre, ...}]
+  outbox: [],         // [{row, fecha, canal, channel_id, mensaje, estado, error}]
+};
 
-  const header = el("div", { class: "page-header" }, [
-    el("h1", {}, "Catálogo"),
-    el("div", { class: "sub" }, "HUB Equipo & Planificación"),
+async function loadAll() {
+  const [canales, flujos, plan, outbox] = await Promise.all([
+    API.canalesList(),
+    API.flujosList(),
+    API.planificacionList().catch(() => []),
+    API.slackOutboxList().catch(() => []),
   ]);
 
-  const tabs = ["Operativa diaria"]; // por ahora te dejo solo lo crítico
-  let active = "Operativa diaria";
-
-  const tabBar = el(
-    "div",
-    { class: "tabs" },
-    tabs.map((t) =>
-      el(
-        "button",
-        {
-          class: `tab ${t === active ? "active" : ""}`,
-          onclick: () => {
-            active = t;
-            render();
-          },
-        },
-        t
-      )
-    )
-  );
-
-  const content = el("div", { class: "content" });
-
-  root.append(header, tabBar, content);
-
-  let canales = [];
-  let flujos = [];
-  let plan = [];
-  let outbox = [];
-  let stats = null;
-
-  const debounce = (fn, ms = 350) => {
-    let t = null;
-    return (...args) => {
-      clearTimeout(t);
-      t = setTimeout(() => fn(...args), ms);
-    };
-  };
-
-  async function loadAll() {
-    const [c, f, s] = await Promise.all([API.canalesList(), API.flujosList(), API.presentismoStats()]);
-    canales = c;
-    flujos = f;
-    stats = s;
-    plan = await API.planificacionList().catch(() => []);
-    outbox = await API.slackOutboxList().catch(() => []);
-  }
-
-  const saveFlujo = debounce(async (flujo, perfiles, channel_id) => {
-    try {
-      await API.flujosUpsert({ flujo, perfiles_requeridos: Number(perfiles || 0), channel_id: String(channel_id || "") });
-      toast("Flujo guardado", "ok");
-      flujos = await API.flujosList();
-      render();
-    } catch (e) {
-      toast(e.message || String(e), "err");
-    }
-  }, 400);
-
-  function canalSelect(currentId, onChange) {
-    const select = el(
-      "select",
-      {
-        class: "select",
-        onchange: (ev) => onChange(ev.target.value),
-      },
-      [
-        el("option", { value: "" }, "—"),
-        ...canales.map((c) => el("option", { value: c.channel_id, selected: c.channel_id === currentId ? "selected" : null }, c.canal)),
-      ]
-    );
-    return select;
-  }
-
-  function cardRow(cards) {
-    return el(
-      "div",
-      { class: "cards-row" },
-      cards.map((c) =>
-        el("div", { class: "card" }, [
-          el("div", { class: "card-title" }, c.title),
-          el("div", { class: "card-value" }, String(c.value ?? "0")),
-          c.subtitle ? el("div", { class: "card-sub" }, c.subtitle) : null,
-        ])
-      )
-    );
-  }
-
-  function renderFlujos() {
-    const table = el("div", { class: "box" }, [
-      el("h2", {}, "1) Flujos (Perfiles requeridos)"),
-      el("div", { class: "muted" }, "Autosave: se guarda al cambiar Slack channel o Perfiles requeridos."),
-    ]);
-
-    const hdr = el("div", { class: "grid-hdr" }, [
-      el("div", { class: "col" }, "Flujo"),
-      el("div", { class: "col" }, "Slack channel"),
-      el("div", { class: "col" }, "Perfiles requeridos"),
-      el("div", { class: "col" }, ""),
-    ]);
-
-    const rows = flujos.map((f) => {
-      const flujoName = f.flujo;
-
-      const nameCell = el("div", { class: "cell" }, [
-        el("input", { class: "input", value: flujoName, disabled: "disabled" }),
-      ]);
-
-      const chanCell = el("div", { class: "cell" }, [
-        canalSelect(f.channel_id || "", (v) => saveFlujo(flujoName, f.perfiles_requeridos, v)),
-      ]);
-
-      const reqCell = el("div", { class: "cell" }, [
-        el("input", {
-          class: "input",
-          type: "number",
-          min: "0",
-          value: String(f.perfiles_requeridos ?? 0),
-          onchange: (ev) => saveFlujo(flujoName, ev.target.value, f.channel_id),
-        }),
-      ]);
-
-      const delBtn = el(
-        "button",
-        {
-          class: "btn danger",
-          onclick: async () => {
-            if (!confirm(`Borrar flujo "${flujoName}"?`)) return;
-            try {
-              await API.flujosDelete({ flujo: flujoName });
-              flujos = await API.flujosList();
-              render();
-            } catch (e) {
-              toast(e.message || String(e), "err");
-            }
-          },
-        },
-        "Borrar"
-      );
-
-      return el("div", { class: "grid-row" }, [nameCell, chanCell, reqCell, el("div", { class: "cell" }, delBtn)]);
-    });
-
-    // add row
-    let newFlujo = "";
-    let newReq = 0;
-    let newCh = "";
-
-    const addRow = el("div", { class: "grid-row" }, [
-      el("div", { class: "cell" }, [
-        el("input", {
-          class: "input",
-          placeholder: "+ Nuevo flujo...",
-          oninput: (e) => (newFlujo = e.target.value),
-        }),
-      ]),
-      el("div", { class: "cell" }, [canalSelect("", (v) => (newCh = v))]),
-      el("div", { class: "cell" }, [
-        el("input", {
-          class: "input",
-          type: "number",
-          min: "0",
-          value: "0",
-          onchange: (e) => (newReq = Number(e.target.value || 0)),
-        }),
-      ]),
-      el(
-        "div",
-        { class: "cell" },
-        el(
-          "button",
-          {
-            class: "btn primary",
-            onclick: async () => {
-              try {
-                if (!newFlujo.trim()) return toast("Nuevo flujo vacío", "err");
-                if (!newCh) return toast("Elegí un canal", "err");
-                await API.flujosUpsert({ flujo: newFlujo.trim(), perfiles_requeridos: Number(newReq || 0), channel_id: newCh });
-                flujos = await API.flujosList();
-                render();
-              } catch (e) {
-                toast(e.message || String(e), "err");
-              }
-            },
-          },
-          "Agregar"
-        )
-      ),
-    ]);
-
-    table.append(hdr, ...rows, addRow);
-    return table;
-  }
-
-  function renderPlanificacion() {
-    const box = el("div", { class: "box" }, [
-      el("h2", {}, "2) Planificación (resultado)"),
-      el("div", { class: "muted" }, plan.length ? "Agrupado por flujo." : "Sin planificación cargada."),
-    ]);
-
-    if (!plan.length) return box;
-
-    const byFlujo = groupBy(plan, "flujo");
-    const grid = el("div", { class: "plan-grid" });
-
-    [...byFlujo.keys()].sort().forEach((flujo) => {
-      const items = byFlujo.get(flujo) || [];
-      const card = el("div", { class: "plan-card" }, [
-        el("div", { class: "plan-title" }, flujo),
-        el("ul", { class: "plan-list" }, items.map((x) => el("li", {}, `${x.nombre}${x.es_fijo ? " (F)" : ""}`))),
-      ]);
-      grid.appendChild(card);
-    });
-
-    box.appendChild(grid);
-    return box;
-  }
-
-  function renderOutbox() {
-    const box = el("div", { class: "box" }, [el("h2", {}, "3) Slack Outbox (pendientes)")]);
-    if (!outbox.length) {
-      box.appendChild(el("div", { class: "muted" }, "Sin outbox."));
-      return box;
-    }
-
-    const table = el("div", { class: "outbox" });
-
-    outbox.forEach((r) => {
-      const canalSel = canalSelect(r.channel_id || "", async (v) => {
-        try {
-          await API.slackOutboxUpdate({ row: r.row, channel_id: v });
-          outbox = await API.slackOutboxList();
-          render();
-        } catch (e) {
-          toast(e.message || String(e), "err");
-        }
-      });
-
-      const msg = el("textarea", {
-        class: "textarea",
-        rows: "4",
-        value: r.mensaje || "",
-        onblur: async (e) => {
-          try {
-            await API.slackOutboxUpdate({ row: r.row, mensaje: e.target.value });
-            outbox = await API.slackOutboxList();
-          } catch (err) {
-            toast(err.message || String(err), "err");
-          }
-        },
-      });
-
-      const sendBtn = el(
-        "button",
-        {
-          class: "btn primary",
-          onclick: async () => {
-            try {
-              await API.slackOutboxEnviar({ row: r.row });
-              outbox = await API.slackOutboxList();
-              render();
-              toast("Enviado", "ok");
-            } catch (e) {
-              toast(e.message || String(e), "err");
-            }
-          },
-        },
-        "Enviar"
-      );
-
-      table.appendChild(
-        el("div", { class: "outbox-row" }, [
-          el("div", { class: "ob-date" }, r.fecha || ""),
-          el("div", { class: "ob-canal" }, canalSel),
-          el("div", { class: "ob-msg" }, msg),
-          el("div", { class: "ob-state" }, `${r.estado || ""}${r.error ? ` — ${r.error}` : ""}`),
-          el("div", { class: "ob-actions" }, sendBtn),
-        ])
-      );
-    });
-
-    box.appendChild(table);
-    return box;
-  }
-
-  function renderButtons() {
-    return el("div", { class: "btn-row" }, [
-      el(
-        "button",
-        {
-          class: "btn primary",
-          onclick: async () => {
-            try {
-              const res = await API.planificacionGenerar();
-              toast(`Planificación OK: ${res.asignaciones} asignaciones`, "ok");
-              plan = await API.planificacionList();
-              stats = await API.presentismoStats();
-              render();
-            } catch (e) {
-              toast(e.message || String(e), "err");
-            }
-          },
-        },
-        "Generar planificación"
-      ),
-      el(
-        "button",
-        {
-          class: "btn",
-          onclick: async () => {
-            try {
-              const res = await API.slackOutboxGenerar();
-              toast(`Outbox OK: ${res.filas} filas`, "ok");
-              outbox = await API.slackOutboxList();
-              render();
-            } catch (e) {
-              toast(e.message || String(e), "err");
-            }
-          },
-        },
-        "Generar Outbox"
-      ),
-      el(
-        "button",
-        {
-          class: "btn success",
-          onclick: async () => {
-            try {
-              const res = await API.slackOutboxEnviar({});
-              toast(`Enviados: ${res.sent}`, "ok");
-              outbox = await API.slackOutboxList();
-              render();
-            } catch (e) {
-              toast(e.message || String(e), "err");
-            }
-          },
-        },
-        "Enviar todos"
-      ),
-    ]);
-  }
-
-  function render() {
-    // update tab styles
-    [...tabBar.querySelectorAll("button.tab")].forEach((b) => b.classList.toggle("active", b.textContent === active));
-
-    content.innerHTML = "";
-
-    const analistas = Number(stats?.analistas || 0);
-    const licencias = Number(stats?.licencias || 0);
-    const disponibles = Number(stats?.disponibles || 0);
-
-    content.appendChild(
-      cardRow([
-        { title: "Analistas totales", value: analistas },
-        { title: "Licencias hoy", value: licencias, subtitle: stats?.date || "" },
-        { title: "Perfiles disponibles (hoy)", value: disponibles },
-      ])
-    );
-
-    content.appendChild(renderFlujos());
-    content.appendChild(renderButtons());
-    content.appendChild(renderPlanificacion());
-    content.appendChild(renderOutbox());
-  }
-
-  // Init
-  content.innerHTML = "Cargando...";
-  await loadAll();
-  render();
+  STATE.canales = canales || [];
+  STATE.canalesById = new Map(STATE.canales.map(c => [String(c.channel_id), c.canal]));
+  STATE.flujos = flujos || [];
+  STATE.plan = plan || [];
+  STATE.outbox = outbox || [];
 }
 
-main().catch((e) => {
-  console.error(e);
-  document.querySelector("#app").textContent = `Error: ${e.message || e}`;
-});
+function render() {
+  const app = $("#app");
+  app.innerHTML = `
+    <div class="sectionTitle">1) Flujos (Perfiles requeridos)</div>
+    <div class="muted">Autosave: se guarda al cambiar Slack channel o Perfiles requeridos.</div>
+
+    <div class="grid3 gridFlujosHead" style="margin-top:12px;">
+      <div class="small">Flujo</div>
+      <div class="small">Slack channel</div>
+      <div class="small">Perfiles requeridos</div>
+    </div>
+
+    <div id="flujosList" style="margin-top:10px;"></div>
+
+    <div class="row" style="margin-top:12px;">
+      <button id="btnPlan" class="btn primary">Generar planificación</button>
+      <button id="btnOutbox" class="btn">Generar Outbox</button>
+      <button id="btnSendAll" class="btn success">Enviar todos</button>
+      <div id="opStatus" class="muted"></div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="sectionTitle">2) Planificación (resultado)</div>
+    <div class="muted">Agrupado por flujo.</div>
+    <div id="planBox" style="margin-top:10px;"></div>
+
+    <div class="sep"></div>
+
+    <div class="sectionTitle">3) Slack Outbox (pendientes)</div>
+    <div class="muted">Editá canal/mensaje y enviá por fila o “Enviar todos”.</div>
+    <div id="outboxBox" style="margin-top:10px;"></div>
+  `;
+
+  renderFlujos();
+  renderPlan();
+  renderOutbox();
+
+  $("#btnPlan").onclick = onGenerarPlan;
+  $("#btnOutbox").onclick = onGenerarOutbox;
+  $("#btnSendAll").onclick = onEnviarTodos;
+
+  $("#btnHealth").onclick = async () => {
+    try {
+      const h = await API.health();
+      toast(`OK: ${h.ts || "health"}`);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+
+  $("#btnMode").onclick = () => toast("Modo: no implementado (todavía).");
+}
+
+function canalesOptions(selectedChannelId) {
+  const sel = String(selectedChannelId || "");
+  const opts = [`<option value="">—</option>`]
+    .concat(STATE.canales.map(c => {
+      const v = String(c.channel_id);
+      const label = c.canal;
+      const s = v === sel ? "selected" : "";
+      return `<option value="${escapeHtml(v)}" ${s}>${escapeHtml(label)}</option>`;
+    }));
+  return opts.join("");
+}
+
+function renderFlujos() {
+  const wrap = $("#flujosList");
+  const rows = STATE.flujos.slice().sort((a,b)=>String(a.flujo).localeCompare(String(b.flujo)));
+
+  wrap.innerHTML = rows.map(f => `
+    <div class="grid3" style="gap:10px; margin: 10px 0;">
+      <div class="pill">
+        <strong>${escapeHtml(f.flujo)}</strong>
+      </div>
+
+      <div>
+        <select data-flujo="${escapeHtml(f.flujo)}" data-field="channel_id">
+          ${canalesOptions(f.channel_id)}
+        </select>
+      </div>
+
+      <div class="row" style="gap:10px;">
+        <input data-flujo="${escapeHtml(f.flujo)}" data-field="perfiles" type="number" min="0"
+          value="${Number(f.perfiles_requeridos || 0)}" />
+        <button class="btn danger" data-action="delete" data-flujo="${escapeHtml(f.flujo)}">Borrar</button>
+      </div>
+    </div>
+  `).join("") + `
+    <div class="grid3" style="gap:10px; margin-top: 16px;">
+      <input id="newFlujo" placeholder="+ Nuevo flujo…" />
+      <select id="newChannel">
+        ${canalesOptions("")}
+      </select>
+      <div class="row" style="gap:10px;">
+        <input id="newPerfiles" type="number" min="0" value="0" />
+        <button id="btnAddFlujo" class="btn primary">Agregar</button>
+      </div>
+    </div>
+  `;
+
+  // autosave handlers
+  wrap.querySelectorAll('select[data-field="channel_id"]').forEach(sel => {
+    sel.onchange = async (ev) => {
+      const flujo = ev.target.dataset.flujo;
+      const channel_id = ev.target.value;
+      const current = STATE.flujos.find(x => x.flujo === flujo);
+      const perfiles = Number(current?.perfiles_requeridos || 0);
+
+      try {
+        await API.flujosUpsert(flujo, perfiles, channel_id);
+        toast(`Guardado: ${flujo}`);
+        await refreshFlujosOnly();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
+
+  wrap.querySelectorAll('input[data-field="perfiles"]').forEach(inp => {
+    inp.onchange = async (ev) => {
+      const flujo = ev.target.dataset.flujo;
+      const perfiles = Number(ev.target.value || 0);
+      const current = STATE.flujos.find(x => x.flujo === flujo);
+      const channel_id = String(current?.channel_id || "");
+
+      try {
+        await API.flujosUpsert(flujo, perfiles, channel_id);
+        toast(`Guardado: ${flujo}`);
+        await refreshFlujosOnly();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
+
+  wrap.querySelectorAll('button[data-action="delete"]').forEach(btn => {
+    btn.onclick = async (ev) => {
+      const flujo = ev.target.dataset.flujo;
+      try {
+        await API.flujosDelete(flujo);
+        toast(`Borrado: ${flujo}`);
+        await reloadAndRender();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
+
+  $("#btnAddFlujo").onclick = async () => {
+    const flujo = ($("#newFlujo").value || "").trim();
+    const channel_id = ($("#newChannel").value || "").trim();
+    const perfiles = Number($("#newPerfiles").value || 0);
+
+    if (!flujo) return toast("Flujo requerido", true);
+    if (!channel_id) return toast("Slack channel requerido", true);
+    if (Number.isNaN(perfiles) || perfiles < 0) return toast("Perfiles inválidos", true);
+
+    try {
+      await API.flujosUpsert(flujo, perfiles, channel_id);
+      toast("Flujo agregado");
+      await reloadAndRender();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+}
+
+function renderPlan() {
+  const box = $("#planBox");
+  if (!STATE.plan || STATE.plan.length === 0) {
+    box.innerHTML = `<div class="muted">Sin planificación cargada.</div>`;
+    return;
+  }
+
+  const grouped = by(STATE.plan, x => String(x.flujo || ""));
+  const cards = [];
+
+  const flujosOrden = Array.from(grouped.keys()).sort((a,b)=>a.localeCompare(b));
+
+  for (const flujo of flujosOrden) {
+    const items = grouped.get(flujo) || [];
+    const nombres = items.map(x => x.nombre).filter(Boolean);
+    cards.push(`
+      <div class="card" style="margin: 10px 0;">
+        <div style="font-weight:800; margin-bottom: 8px;">${escapeHtml(flujo)}</div>
+        <div>${nombres.length ? escapeHtml(nombres.join(", ")) : `<span class="muted">•</span>`}</div>
+        <div class="small" style="margin-top:6px;">
+          Total: ${nombres.length}
+        </div>
+      </div>
+    `);
+  }
+
+  box.innerHTML = cards.join("");
+}
+
+function renderOutbox() {
+  const box = $("#outboxBox");
+  const rows = (STATE.outbox || []).filter(x => String(x.estado || "").toUpperCase() !== "ENVIADO");
+
+  if (!rows.length) {
+    box.innerHTML = `<div class="muted">Sin pendientes.</div>`;
+    return;
+  }
+
+  box.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th style="width:170px;">Fecha</th>
+          <th style="width:220px;">Canal</th>
+          <th>Mensaje</th>
+          <th style="width:110px;">Estado</th>
+          <th style="width:220px;">Error</th>
+          <th style="width:120px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td>${escapeHtml(String(r.fecha || ""))}</td>
+            <td>
+              <select data-outbox-row="${r.row}" data-field="channel_id">
+                ${canalesOptions(r.channel_id)}
+              </select>
+            </td>
+            <td>
+              <textarea data-outbox-row="${r.row}" data-field="mensaje">${escapeHtml(r.mensaje || "")}</textarea>
+              <div class="row" style="margin-top:8px; gap:10px;">
+                <button class="btn" data-action="copy" data-row="${r.row}">Copiar</button>
+              </div>
+            </td>
+            <td>${escapeHtml(String(r.estado || ""))}</td>
+            <td>${r.error ? `<div class="errorBox">${escapeHtml(r.error)}</div>` : ""}</td>
+            <td>
+              <button class="btn primary" data-action="send" data-row="${r.row}">Enviar</button>
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+
+  // Change channel => update outbox row
+  box.querySelectorAll('select[data-field="channel_id"]').forEach(sel => {
+    sel.onchange = async (ev) => {
+      const row = Number(ev.target.dataset.outboxRow);
+      const channel_id = ev.target.value;
+      const canal = STATE.canalesById.get(String(channel_id)) || "";
+      try {
+        await API.slackOutboxUpdate(row, canal, channel_id, "");
+        toast("Outbox actualizado");
+        await refreshOutboxOnly();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
+
+  // Change message => update outbox row (on blur)
+  box.querySelectorAll('textarea[data-field="mensaje"]').forEach(tx => {
+    tx.onblur = async (ev) => {
+      const row = Number(ev.target.dataset.outboxRow);
+      const mensaje = ev.target.value || "";
+      const current = STATE.outbox.find(x => x.row === row);
+      const channel_id = String(current?.channel_id || "");
+      const canal = String(current?.canal || "");
+      try {
+        await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
+
+  // Copy
+  box.querySelectorAll('button[data-action="copy"]').forEach(btn => {
+    btn.onclick = async (ev) => {
+      const row = Number(ev.target.dataset.row);
+      const current = STATE.outbox.find(x => x.row === row);
+      const msg = current?.mensaje || "";
+      try {
+        await navigator.clipboard.writeText(msg);
+        toast("Copiado");
+      } catch {
+        toast("No se pudo copiar", true);
+      }
+    };
+  });
+
+  // Send row
+  box.querySelectorAll('button[data-action="send"]').forEach(btn => {
+    btn.onclick = async (ev) => {
+      const row = Number(ev.target.dataset.row);
+      try {
+        await API.slackOutboxEnviar(row);
+        toast("Enviado");
+        await refreshOutboxOnly();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
+}
+
+async function onGenerarPlan() {
+  $("#opStatus").textContent = "Generando planificación…";
+  try {
+    await API.planificacionGenerar();
+    toast("Planificación generada");
+    STATE.plan = await API.planificacionList();
+    renderPlan();
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    $("#opStatus").textContent = "";
+  }
+}
+
+async function onGenerarOutbox() {
+  $("#opStatus").textContent = "Generando Outbox…";
+  try {
+    await API.slackOutboxGenerar();
+    toast("Outbox generado");
+    await refreshOutboxOnly();
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    $("#opStatus").textContent = "";
+  }
+}
+
+async function onEnviarTodos() {
+  $("#opStatus").textContent = "Enviando…";
+  try {
+    await API.slackOutboxEnviar(); // sin row => envía todos pendientes
+    toast("Envío masivo ejecutado");
+    await refreshOutboxOnly();
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    $("#opStatus").textContent = "";
+  }
+}
+
+async function refreshFlujosOnly() {
+  STATE.flujos = await API.flujosList();
+  renderFlujos();
+}
+
+async function refreshOutboxOnly() {
+  STATE.outbox = await API.slackOutboxList();
+  renderOutbox();
+}
+
+async function reloadAndRender() {
+  try {
+    await loadAll();
+    render();
+  } catch (e) {
+    $("#app").innerHTML = `<div class="errorBox">Error: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+(async function init() {
+  await reloadAndRender();
+})();
