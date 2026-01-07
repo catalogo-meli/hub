@@ -1,6 +1,6 @@
 // app.js (ESM) — HUB Catálogo
-// Robusto (no revienta por nodos inexistentes), UX prolija, y sin “parches” de null.
-// Requiere: api.js exporte `API` con los mismos métodos usados acá.
+// Robusto (no revienta por nodos inexistentes), UX prolija, sin null crashes.
+// Requiere: api.js exporte `API` (tu versión ya calza).
 
 import { API } from "./api.js";
 
@@ -8,7 +8,6 @@ import { API } from "./api.js";
  * DOM helpers (seguros)
  * ----------------------------- */
 const qs = (sel, root = document) => root.querySelector(sel);
-const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 function must(sel, root = document) {
   const el = qs(sel, root);
@@ -42,13 +41,12 @@ function groupBy(arr, keyFn) {
 }
 
 /* -----------------------------
- * Toast (crea el contenedor si no existe)
+ * Toast (crea contenedor si no existe)
  * ----------------------------- */
 function ensureToastEl() {
   let el = qs("#toast");
   if (el) return el;
 
-  // Si index.html no tiene #toast, lo creamos (evita el null crash).
   el = document.createElement("div");
   el.id = "toast";
   el.className = "toast";
@@ -72,73 +70,63 @@ function toast(msg, isError = false) {
  * Estado
  * ----------------------------- */
 const STATE = {
-  canales: [], // [{canal, channel_id}]   (front normaliza)
+  canales: [], // [{canal, channel_id}]
   canalesById: new Map(), // channel_id -> canal
-  flujos: [], // [{flujo, perfiles_requeridos, channel_id, canal}] (front normaliza)
-  plan: [], // [{fecha, flujo, nombre, ...}]
+  flujos: [], // [{flujo, perfiles_requeridos, channel_id}]
+  plan: [], // [{fecha, flujo, nombre/id}]
   outbox: [], // [{row, fecha, canal, channel_id, mensaje, estado, error}]
-  busy: {
-    loading: false,
-    plan: false,
-    outbox: false,
-    sendAll: false,
-  },
+  busy: { loading: false, plan: false, outbox: false, sendAll: false },
 };
 
 /* -----------------------------
- * Normalizadores (backend a veces cambia nombres)
+ * Normalizadores
  * ----------------------------- */
 function normCanalRow(r) {
-  if (!r) return { canal: "", channel_id: "" };
   return {
-    canal: String(r.canal ?? r.Canal ?? r.name ?? "").trim(),
-    channel_id: String(r.channel_id ?? r.Channel_ID ?? r.Slack_channel ?? r.Slack_Channel_ID ?? r.id ?? "").trim(),
+    canal: String(r?.canal ?? r?.Canal ?? r?.name ?? "").trim(),
+    channel_id: String(r?.channel_id ?? r?.Channel_ID ?? r?.Slack_channel ?? r?.Slack_Channel_ID ?? r?.id ?? "").trim(),
   };
 }
 
 function normFlujoRow(r) {
-  if (!r) return { flujo: "", perfiles_requeridos: 0, channel_id: "" };
   return {
-    flujo: String(r.flujo ?? r.Flujo ?? "").trim(),
-    perfiles_requeridos: Number(r.perfiles_requeridos ?? r.Perfiles_requeridos ?? r.perfiles ?? 0) || 0,
-    channel_id: String(r.channel_id ?? r.Channel_ID ?? r.Slack_channel ?? r.Slack_Channel_ID ?? "").trim(),
-    canal: String(r.canal ?? r.Canal ?? "").trim(),
+    flujo: String(r?.flujo ?? r?.Flujo ?? "").trim(),
+    perfiles_requeridos: Number(r?.perfiles_requeridos ?? r?.Perfiles_requeridos ?? r?.perfiles ?? 0) || 0,
+    channel_id: String(r?.channel_id ?? r?.Channel_ID ?? r?.Slack_channel ?? r?.Slack_Channel_ID ?? "").trim(),
   };
 }
 
 function normPlanRow(r) {
-  if (!r) return { fecha: "", flujo: "", nombre: "" };
   return {
-    fecha: r.fecha ?? r.Fecha ?? "",
-    flujo: String(r.flujo ?? r.Flujo ?? "").trim(),
-    nombre: String(r.nombre ?? r.Nombre ?? r.ID_MELI ?? "").trim(),
-    id_meli: String(r.id_meli ?? r.ID_MELI ?? "").trim(),
-    es_fijo: String(r.es_fijo ?? r.Es_Fijo ?? "").trim(),
+    fecha: r?.fecha ?? r?.Fecha ?? "",
+    flujo: String(r?.flujo ?? r?.Flujo ?? "").trim(),
+    nombre: String(r?.nombre ?? r?.Nombre ?? r?.ID_MELI ?? "").trim(),
+    id_meli: String(r?.id_meli ?? r?.ID_MELI ?? "").trim(),
+    es_fijo: String(r?.es_fijo ?? r?.Es_Fijo ?? "").trim(),
   };
 }
 
 function normOutboxRow(r) {
-  if (!r) return { row: 0, fecha: "", canal: "", channel_id: "", mensaje: "", estado: "", error: "" };
   return {
-    row: Number(r.row ?? r.Row ?? r.fila ?? r.Fila ?? 0) || 0,
-    fecha: r.fecha ?? r.Fecha ?? "",
-    canal: String(r.canal ?? r.Canal ?? "").trim(),
-    channel_id: String(r.channel_id ?? r.Channel_ID ?? r.Slack_channel_id ?? r.Slack_Channel_ID ?? "").trim(),
-    mensaje: String(r.mensaje ?? r.Mensaje ?? "").trim(),
-    estado: String(r.estado ?? r.Estado ?? "").trim(),
-    error: String(r.error ?? r.Error ?? "").trim(),
+    row: Number(r?.row ?? r?.Row ?? r?.fila ?? r?.Fila ?? 0) || 0,
+    fecha: r?.fecha ?? r?.Fecha ?? "",
+    canal: String(r?.canal ?? r?.Canal ?? "").trim(),
+    channel_id: String(r?.channel_id ?? r?.Channel_ID ?? r?.Slack_channel_id ?? r?.Slack_Channel_ID ?? "").trim(),
+    mensaje: String(r?.mensaje ?? r?.Mensaje ?? "").trim(),
+    estado: String(r?.estado ?? r?.Estado ?? "").trim(),
+    error: String(r?.error ?? r?.Error ?? "").trim(),
   };
 }
 
 /* -----------------------------
- * Render
+ * Render base
  * ----------------------------- */
 function renderShell() {
   const app = must("#app");
 
   app.innerHTML = `
     <div class="sectionTitle">1) Flujos (Perfiles requeridos)</div>
-    <div class="muted">Autosave: se guarda al cambiar Slack channel o Perfiles requeridos.</div>
+    <div class="muted">Se guarda al cambiar Slack channel o Perfiles requeridos.</div>
 
     <div class="grid3 gridFlujosHead" style="margin-top:12px;">
       <div class="small">Flujo</div>
@@ -148,11 +136,11 @@ function renderShell() {
 
     <div id="flujosList" style="margin-top:10px;"></div>
 
-    <div class="row" style="margin-top:12px; align-items:center;">
+    <div class="row" style="margin-top:12px; align-items:center; flex-wrap:wrap; gap:10px;">
       <button id="btnPlan" class="btn primary">Generar planificación</button>
       <button id="btnOutbox" class="btn">Generar Outbox</button>
       <button id="btnSendAll" class="btn success">Enviar todos</button>
-      <div id="opStatus" class="muted" style="margin-left:10px;"></div>
+      <div id="opStatus" class="muted" style="margin-left:6px;"></div>
     </div>
 
     <div class="sep"></div>
@@ -175,17 +163,17 @@ function renderButtonsState() {
   const btnSend = qs("#btnSendAll");
   const op = qs("#opStatus");
 
-  if (btnPlan) btnPlan.disabled = !!STATE.busy.plan || !!STATE.busy.loading;
-  if (btnOut) btnOut.disabled = !!STATE.busy.outbox || !!STATE.busy.loading;
-  if (btnSend) btnSend.disabled = !!STATE.busy.sendAll || !!STATE.busy.loading;
+  if (btnPlan) btnPlan.disabled = STATE.busy.plan || STATE.busy.loading;
+  if (btnOut) btnOut.disabled = STATE.busy.outbox || STATE.busy.loading;
+  if (btnSend) btnSend.disabled = STATE.busy.sendAll || STATE.busy.loading;
 
-  if (op) {
-    if (STATE.busy.loading) safeText(op, "Cargando…");
-    else if (STATE.busy.plan) safeText(op, "Generando planificación…");
-    else if (STATE.busy.outbox) safeText(op, "Generando Outbox…");
-    else if (STATE.busy.sendAll) safeText(op, "Enviando…");
-    else safeText(op, "");
-  }
+  if (!op) return;
+
+  if (STATE.busy.loading) safeText(op, "Cargando…");
+  else if (STATE.busy.plan) safeText(op, "Generando planificación…");
+  else if (STATE.busy.outbox) safeText(op, "Generando Outbox…");
+  else if (STATE.busy.sendAll) safeText(op, "Enviando…");
+  else safeText(op, "");
 }
 
 function canalesOptions(selectedChannelId) {
@@ -201,6 +189,9 @@ function canalesOptions(selectedChannelId) {
   return opts.join("");
 }
 
+/* -----------------------------
+ * Flujos
+ * ----------------------------- */
 function renderFlujos() {
   const wrap = must("#flujosList");
   const rows = (STATE.flujos || [])
@@ -213,9 +204,7 @@ function renderFlujos() {
       .map(
         (f) => `
       <div class="grid3" style="gap:10px; margin: 10px 0;">
-        <div class="pill">
-          <strong>${escapeHtml(f.flujo)}</strong>
-        </div>
+        <div class="pill"><strong>${escapeHtml(f.flujo)}</strong></div>
 
         <div>
           <select data-flujo="${escapeHtml(f.flujo)}" data-field="channel_id">
@@ -223,8 +212,8 @@ function renderFlujos() {
           </select>
         </div>
 
-        <div class="row" style="gap:10px;">
-          <input data-flujo="${escapeHtml(f.flujo)}" data-field="perfiles" type="number" min="0"
+        <div class="row" style="gap:10px; flex-wrap:wrap;">
+          <input data-flujo="${escapeHtml(f.flujo)}" data-field="perfiles_requeridos" type="number" min="0"
             value="${Number(f.perfiles_requeridos || 0)}" />
           <button class="btn danger" data-action="delete" data-flujo="${escapeHtml(f.flujo)}">Borrar</button>
         </div>
@@ -238,26 +227,25 @@ function renderFlujos() {
       <select id="newChannel">
         ${canalesOptions("")}
       </select>
-      <div class="row" style="gap:10px;">
+      <div class="row" style="gap:10px; flex-wrap:wrap;">
         <input id="newPerfiles" type="number" min="0" value="0" />
         <button id="btnAddFlujo" class="btn primary">Agregar</button>
       </div>
     </div>
   `;
 
-  // Delegación (menos handlers sueltos, menos posibilidades de “null”)
   wrap.onchange = async (ev) => {
     const t = ev.target;
 
-    // change channel select
+    // change channel
     if (t && t.matches('select[data-field="channel_id"]')) {
       const flujo = t.dataset.flujo;
       const channel_id = String(t.value || "").trim();
       const current = (STATE.flujos || []).find((x) => x.flujo === flujo);
-      const perfiles = Number(current?.perfiles_requeridos || 0);
+      const perfiles_requeridos = Number(current?.perfiles_requeridos || 0);
 
       try {
-        await API.flujosUpsert(flujo, perfiles, channel_id);
+        await API.flujosUpsert(flujo, perfiles_requeridos, channel_id);
         toast(`Guardado: ${flujo}`);
         await refreshFlujosOnly();
       } catch (e) {
@@ -265,17 +253,17 @@ function renderFlujos() {
       }
     }
 
-    // change perfiles input
-    if (t && t.matches('input[data-field="perfiles"]')) {
+    // change perfiles_requeridos
+    if (t && t.matches('input[data-field="perfiles_requeridos"]')) {
       const flujo = t.dataset.flujo;
-      const perfiles = Number(t.value || 0);
+      const perfiles_requeridos = Number(t.value || 0);
       const current = (STATE.flujos || []).find((x) => x.flujo === flujo);
       const channel_id = String(current?.channel_id || "");
 
-      if (Number.isNaN(perfiles) || perfiles < 0) return toast("Perfiles inválidos", true);
+      if (Number.isNaN(perfiles_requeridos) || perfiles_requeridos < 0) return toast("Perfiles inválidos", true);
 
       try {
-        await API.flujosUpsert(flujo, perfiles, channel_id);
+        await API.flujosUpsert(flujo, perfiles_requeridos, channel_id);
         toast(`Guardado: ${flujo}`);
         await refreshFlujosOnly();
       } catch (e) {
@@ -287,7 +275,7 @@ function renderFlujos() {
   wrap.onclick = async (ev) => {
     const t = ev.target;
 
-    // delete flujo
+    // delete
     if (t && t.matches('button[data-action="delete"]')) {
       const flujo = t.dataset.flujo;
       try {
@@ -300,18 +288,18 @@ function renderFlujos() {
       return;
     }
 
-    // add flujo
+    // add
     if (t && t.id === "btnAddFlujo") {
       const flujo = String(qs("#newFlujo")?.value || "").trim();
       const channel_id = String(qs("#newChannel")?.value || "").trim();
-      const perfiles = Number(qs("#newPerfiles")?.value || 0);
+      const perfiles_requeridos = Number(qs("#newPerfiles")?.value || 0);
 
       if (!flujo) return toast("Flujo requerido", true);
       if (!channel_id) return toast("Slack channel requerido", true);
-      if (Number.isNaN(perfiles) || perfiles < 0) return toast("Perfiles inválidos", true);
+      if (Number.isNaN(perfiles_requeridos) || perfiles_requeridos < 0) return toast("Perfiles inválidos", true);
 
       try {
-        await API.flujosUpsert(flujo, perfiles, channel_id);
+        await API.flujosUpsert(flujo, perfiles_requeridos, channel_id);
         toast("Flujo agregado");
         await reloadAndRender();
       } catch (e) {
@@ -321,6 +309,9 @@ function renderFlujos() {
   };
 }
 
+/* -----------------------------
+ * Planificación
+ * ----------------------------- */
 function renderPlan() {
   const box = must("#planBox");
   const plan = (STATE.plan || []).map(normPlanRow).filter((r) => r.flujo);
@@ -335,8 +326,6 @@ function renderPlan() {
 
   const cards = flujosOrden.map((flujo) => {
     const items = grouped.get(flujo) || [];
-
-    // Preferimos nombre si existe; si no, ID
     const list = items
       .map((x) => x.nombre || x.id_meli || "")
       .map((s) => String(s).trim())
@@ -345,7 +334,7 @@ function renderPlan() {
     return `
       <div class="card" style="margin: 10px 0;">
         <div style="font-weight:800; margin-bottom: 8px;">${escapeHtml(flujo)}</div>
-        <div>${list.length ? escapeHtml(list.join(", ")) : `<span class="muted">•</span>`}</div>
+        <div style="word-break: break-word;">${list.length ? escapeHtml(list.join(", ")) : `<span class="muted">•</span>`}</div>
         <div class="small" style="margin-top:6px;">Total: ${list.length}</div>
       </div>
     `;
@@ -354,6 +343,9 @@ function renderPlan() {
   box.innerHTML = cards.join("");
 }
 
+/* -----------------------------
+ * Outbox
+ * ----------------------------- */
 function renderOutbox() {
   const box = must("#outboxBox");
 
@@ -367,53 +359,54 @@ function renderOutbox() {
   }
 
   box.innerHTML = `
-    <table>
-      <thead>
-        <tr>
-          <th style="width:170px;">Fecha</th>
-          <th style="width:220px;">Canal</th>
-          <th>Mensaje</th>
-          <th style="width:110px;">Estado</th>
-          <th style="width:240px;">Error</th>
-          <th style="width:120px;"></th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows
-          .map(
-            (r) => `
+    <div style="overflow:auto; border:1px solid rgba(255,255,255,.08); border-radius:14px;">
+      <table style="min-width: 980px; margin:0;">
+        <thead>
           <tr>
-            <td>${escapeHtml(String(r.fecha || ""))}</td>
-
-            <td>
-              <select data-outbox-row="${r.row}" data-field="channel_id">
-                ${canalesOptions(r.channel_id)}
-              </select>
-            </td>
-
-            <td>
-              <textarea data-outbox-row="${r.row}" data-field="mensaje">${escapeHtml(r.mensaje || "")}</textarea>
-              <div class="row" style="margin-top:8px; gap:10px;">
-                <button class="btn" data-action="copy" data-row="${r.row}">Copiar</button>
-              </div>
-            </td>
-
-            <td>${escapeHtml(String(r.estado || ""))}</td>
-
-            <td>${r.error ? `<div class="errorBox">${escapeHtml(r.error)}</div>` : ""}</td>
-
-            <td>
-              <button class="btn primary" data-action="send" data-row="${r.row}">Enviar</button>
-            </td>
+            <th style="width:170px;">Fecha</th>
+            <th style="width:220px;">Canal</th>
+            <th>Mensaje</th>
+            <th style="width:110px;">Estado</th>
+            <th style="width:240px;">Error</th>
+            <th style="width:120px;"></th>
           </tr>
-        `
-          )
-          .join("")}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (r) => `
+            <tr>
+              <td>${escapeHtml(String(r.fecha || ""))}</td>
+
+              <td>
+                <select data-outbox-row="${r.row}" data-field="channel_id">
+                  ${canalesOptions(r.channel_id)}
+                </select>
+              </td>
+
+              <td>
+                <textarea data-outbox-row="${r.row}" data-field="mensaje">${escapeHtml(r.mensaje || "")}</textarea>
+                <div class="row" style="margin-top:8px; gap:10px; flex-wrap:wrap;">
+                  <button class="btn" data-action="copy" data-row="${r.row}">Copiar</button>
+                </div>
+              </td>
+
+              <td>${escapeHtml(String(r.estado || ""))}</td>
+
+              <td>${r.error ? `<div class="errorBox">${escapeHtml(r.error)}</div>` : ""}</td>
+
+              <td>
+                <button class="btn primary" data-action="send" data-row="${r.row}">Enviar</button>
+              </td>
+            </tr>
+          `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
   `;
 
-  // Delegación: menos riesgo de handlers colgando
   box.onchange = async (ev) => {
     const t = ev.target;
     if (!t || !t.matches('select[data-field="channel_id"]')) return;
@@ -431,29 +424,32 @@ function renderOutbox() {
     }
   };
 
-  box.onblur = async (ev) => {
-    const t = ev.target;
-    if (!t || !t.matches('textarea[data-field="mensaje"]')) return;
+  box.addEventListener(
+    "blur",
+    async (ev) => {
+      const t = ev.target;
+      if (!t || !t.matches('textarea[data-field="mensaje"]')) return;
 
-    const row = Number(t.dataset.outboxRow || 0);
-    const mensaje = String(t.value || "");
+      const row = Number(t.dataset.outboxRow || 0);
+      const mensaje = String(t.value || "");
 
-    const current = (STATE.outbox || []).map(normOutboxRow).find((x) => x.row === row);
-    const channel_id = String(current?.channel_id || "");
-    const canal = String(current?.canal || "");
+      const current = (STATE.outbox || []).map(normOutboxRow).find((x) => x.row === row);
+      const channel_id = String(current?.channel_id || "");
+      const canal = String(current?.canal || "");
 
-    try {
-      await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
-    } catch (e) {
-      toast(e.message || String(e), true);
-    }
-  };
+      try {
+        await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
+      } catch (e) {
+        toast(e.message || String(e), true);
+      }
+    },
+    true
+  );
 
   box.onclick = async (ev) => {
     const t = ev.target;
     if (!t) return;
 
-    // copy
     if (t.matches('button[data-action="copy"]')) {
       const row = Number(t.dataset.row || 0);
       const current = (STATE.outbox || []).map(normOutboxRow).find((x) => x.row === row);
@@ -468,7 +464,6 @@ function renderOutbox() {
       return;
     }
 
-    // send row
     if (t.matches('button[data-action="send"]')) {
       const row = Number(t.dataset.row || 0);
       try {
@@ -481,13 +476,10 @@ function renderOutbox() {
       return;
     }
   };
-
-  // Necesario para onblur en bubbling (textarea)
-  box.addEventListener("blur", box.onblur, true);
 }
 
 /* -----------------------------
- * Carga de datos
+ * Loaders
  * ----------------------------- */
 async function loadAll() {
   STATE.busy.loading = true;
@@ -518,11 +510,9 @@ async function loadAll() {
 async function onGenerarPlan() {
   STATE.busy.plan = true;
   renderButtonsState();
-
   try {
     await API.planificacionGenerar();
     toast("Planificación generada");
-
     STATE.plan = (await API.planificacionList().catch(() => [])).map(normPlanRow);
     renderPlan();
   } catch (e) {
@@ -536,7 +526,6 @@ async function onGenerarPlan() {
 async function onGenerarOutbox() {
   STATE.busy.outbox = true;
   renderButtonsState();
-
   try {
     await API.slackOutboxGenerar();
     toast("Outbox generado");
@@ -552,9 +541,8 @@ async function onGenerarOutbox() {
 async function onEnviarTodos() {
   STATE.busy.sendAll = true;
   renderButtonsState();
-
   try {
-    await API.slackOutboxEnviar(); // sin row => envía todos pendientes
+    await API.slackOutboxEnviar();
     toast("Envío masivo ejecutado");
     await refreshOutboxOnly();
   } catch (e) {
@@ -578,7 +566,7 @@ async function refreshOutboxOnly() {
 }
 
 /* -----------------------------
- * Bind general UI (Health / Modo)
+ * Bind top buttons (si existen)
  * ----------------------------- */
 function bindTopButtons() {
   const btnHealth = qs("#btnHealth");
@@ -596,9 +584,7 @@ function bindTopButtons() {
   }
 
   if (btnMode) {
-    btnMode.onclick = () => {
-      toast("Modo: todavía no implementado.");
-    };
+    btnMode.onclick = () => toast("Modo: pendiente.", false);
   }
 }
 
@@ -621,24 +607,20 @@ async function reloadAndRender() {
     renderButtonsState();
 
     await loadAll();
+
     renderFlujos();
     renderPlan();
     renderOutbox();
 
     renderButtonsState();
   } catch (e) {
-    // Si falla incluso render, lo mostramos sin depender de nodos extra
     const app = qs("#app");
-    if (app) {
-      app.innerHTML = `<div class="errorBox">Error: ${escapeHtml(e.message || String(e))}</div>`;
-    }
-    // y toast también
+    if (app) app.innerHTML = `<div class="errorBox">Error: ${escapeHtml(e.message || String(e))}</div>`;
     toast(e.message || String(e), true);
   }
 }
 
 function boot() {
-  // Evita correr antes de que exista #app
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", reloadAndRender, { once: true });
   } else {
