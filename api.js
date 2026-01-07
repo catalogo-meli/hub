@@ -1,55 +1,62 @@
+// api.js (ESM)
+
 const BASE = "/.netlify/functions/gas";
 
-async function http(method, action, body, query = {}) {
-  const url = new URL(BASE, window.location.origin);
-
-  if (action) url.searchParams.set("action", action);
-  Object.entries(query || {}).forEach(([k, v]) => {
-    if (v === undefined || v === null || v === "") return;
-    url.searchParams.set(k, String(v));
-  });
-
-  const opt = { method, headers: { "content-type": "application/json" } };
-  if (method === "POST") opt.body = JSON.stringify(body || {});
-
-  const r = await fetch(url.toString(), opt);
-  const txt = await r.text();
-
-  let data;
+async function safeJson(resp) {
+  const text = await resp.text();
   try {
-    data = JSON.parse(txt);
+    return JSON.parse(text);
   } catch {
-    throw new Error(`Respuesta no JSON (${r.status}): ${txt.slice(0, 200)}`);
+    return { ok: false, error: `Non-JSON response (${resp.status}): ${text.slice(0, 200)}` };
   }
+}
 
-  if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
-  if (!data.ok) throw new Error(data?.error || "Error");
+async function get(action, params = {}) {
+  const qs = new URLSearchParams({ action, ...params });
+  const resp = await fetch(`${BASE}?${qs.toString()}`, {
+    method: "GET",
+    headers: { "Accept": "application/json" },
+  });
+  const data = await safeJson(resp);
+  if (!resp.ok || data?.ok === false) {
+    throw new Error(data?.error || `GET ${action} failed (${resp.status})`);
+  }
+  return data.data;
+}
 
+async function post(action, payload = {}) {
+  const resp = await fetch(BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Accept": "application/json" },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const data = await safeJson(resp);
+  if (!resp.ok || data?.ok === false) {
+    throw new Error(data?.error || `POST ${action} failed (${resp.status})`);
+  }
   return data.data;
 }
 
 export const API = {
-  health: () => http("GET", "health"),
+  health: () => get("health"),
+  colaboradoresList: () => get("colaboradores.list"),
+  canalesList: () => get("canales.list"),
+  flujosList: () => get("flujos.list"),
+  flujosUpsert: (flujo, perfiles_requeridos, channel_id) =>
+    post("flujos.upsert", { flujo, perfiles_requeridos, channel_id }),
+  flujosDelete: (flujo) => post("flujos.delete", { flujo }),
 
-  colaboradoresList: () => http("GET", "colaboradores.list"),
-  canalesList: () => http("GET", "canales.list"),
-  flujosList: () => http("GET", "flujos.list"),
-  habilitacionesList: () => http("GET", "habilitaciones.list"),
+  habilitacionesList: () => get("habilitaciones.list"),
+  habilitacionesSet: (idMeli, flujo, habilitado, fijo) =>
+    post("habilitaciones.set", { idMeli, flujo, habilitado, fijo }),
 
-  presentismoWeek: (dateYmd = "") => http("GET", "presentismo.week", null, dateYmd ? { date: dateYmd } : {}),
-  presentismoStats: (dateYmd = "") => http("GET", "presentismo.stats", null, dateYmd ? { date: dateYmd } : {}),
-  presentismoLicenciasSet: (payload) => http("POST", null, { action: "presentismo.licencias.set", ...payload }),
+  planificacionGenerar: () => post("planificacion.generar", {}),
+  planificacionList: () => get("planificacion.list"),
 
-  flujosUpsert: (payload) => http("POST", null, { action: "flujos.upsert", ...payload }),
-  flujosDelete: (payload) => http("POST", null, { action: "flujos.delete", ...payload }),
-
-  habilitacionesSet: (payload) => http("POST", null, { action: "habilitaciones.set", ...payload }),
-
-  planificacionGenerar: () => http("POST", null, { action: "planificacion.generar" }),
-  planificacionList: () => http("GET", "planificacion.list"),
-
-  slackOutboxList: () => http("GET", "slack.outbox.list"),
-  slackOutboxGenerar: () => http("POST", null, { action: "slack.outbox.generar" }),
-  slackOutboxUpdate: (payload) => http("POST", null, { action: "slack.outbox.update", ...payload }),
-  slackOutboxEnviar: (payload) => http("POST", null, { action: "slack.outbox.enviar", ...payload }), // {row} o {}
+  slackOutboxGenerar: () => post("slack.outbox.generar", {}),
+  slackOutboxList: () => get("slack.outbox.list"),
+  slackOutboxUpdate: (row, canal, channel_id, mensaje) =>
+    post("slack.outbox.update", { row, canal, channel_id, mensaje }),
+  slackOutboxEnviar: (row) =>
+    post("slack.outbox.enviar", row ? { row } : {}),
 };
