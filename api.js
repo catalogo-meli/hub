@@ -1,92 +1,55 @@
-// api.js (ESM) — contrato estable con /.netlify/functions/gas
-// IMPORTANTE: exporta API (tu app.js hace: import { API } from "./api.js")
+const BASE = "/.netlify/functions/gas";
 
-export const API = (() => {
-  const BASE = "/.netlify/functions/gas";
+async function http(method, action, body, query = {}) {
+  const url = new URL(BASE, window.location.origin);
 
-  async function request(action, { method = "GET", query, body } = {}) {
-    let url = BASE;
+  if (action) url.searchParams.set("action", action);
+  Object.entries(query || {}).forEach(([k, v]) => {
+    if (v === undefined || v === null || v === "") return;
+    url.searchParams.set(k, String(v));
+  });
 
-    if (method === "GET") {
-      const qs = new URLSearchParams();
-      if (action) qs.set("action", action);
-      if (query) {
-        Object.entries(query).forEach(([k, v]) => {
-          if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
-        });
-      }
-      url += "?" + qs.toString();
+  const opt = { method, headers: { "content-type": "application/json" } };
+  if (method === "POST") opt.body = JSON.stringify(body || {});
 
-      const r = await fetch(url, { method: "GET" });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.ok) throw new Error(j.error || `API error (${r.status})`);
-      return j.data;
-    }
+  const r = await fetch(url.toString(), opt);
+  const txt = await r.text();
 
-    // POST
-    const payload = { action, ...(body || {}) };
-
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || !j.ok) throw new Error(j.error || `API error (${r.status})`);
-    return j.data;
+  let data;
+  try {
+    data = JSON.parse(txt);
+  } catch {
+    throw new Error(`Respuesta no JSON (${r.status}): ${txt.slice(0, 200)}`);
   }
 
-  return {
-    // Health
-    health: () => request("health"),
+  if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
+  if (!data.ok) throw new Error(data?.error || "Error");
 
-    // Base data
-    colaboradoresList: () => request("colaboradores.list"),
-    canalesList: () => request("canales.list"),
-    flujosList: () => request("flujos.list"),
-    habilitacionesList: () => request("habilitaciones.list"),
-    feriadosList: () => request("feriados.list"),
+  return data.data;
+}
 
-    // Presentismo
-    presentismoWeek: (date /* yyyy-mm-dd opcional */) =>
-      request("presentismo.week", { query: date ? { date } : undefined }),
-    presentismoStats: (date /* yyyy-mm-dd opcional */) =>
-      request("presentismo.stats", { query: date ? { date } : undefined }),
-    presentismoLicenciasSet: ({ idMeli, desde, hasta, tipo }) =>
-      request("presentismo.licencias.set", {
-        method: "POST",
-        body: { idMeli, desde, hasta, tipo },
-      }),
+export const API = {
+  health: () => http("GET", "health"),
 
-    // Flujos autosave (CRUD)
-    flujosUpsert: ({ flujo, perfiles_requeridos, slack_channel }) =>
-      request("flujos.upsert", {
-        method: "POST",
-        body: { flujo, perfiles_requeridos, slack_channel },
-      }),
-    flujosDelete: (flujo) =>
-      request("flujos.delete", { method: "POST", body: { flujo } }),
+  colaboradoresList: () => http("GET", "colaboradores.list"),
+  canalesList: () => http("GET", "canales.list"),
+  flujosList: () => http("GET", "flujos.list"),
+  habilitacionesList: () => http("GET", "habilitaciones.list"),
 
-    // Habilitaciones
-    habilitacionesSet: (idMeli, flujo, { habilitado, fijo } = {}) =>
-      request("habilitaciones.set", {
-        method: "POST",
-        body: { idMeli, flujo, habilitado, fijo },
-      }),
+  presentismoWeek: (dateYmd = "") => http("GET", "presentismo.week", null, dateYmd ? { date: dateYmd } : {}),
+  presentismoStats: (dateYmd = "") => http("GET", "presentismo.stats", null, dateYmd ? { date: dateYmd } : {}),
+  presentismoLicenciasSet: (payload) => http("POST", null, { action: "presentismo.licencias.set", ...payload }),
 
-    // Planificación + Slack outbox
-    planificacionList: () => request("planificacion.list"),
-    planificacionGenerar: () => request("planificacion.generar", { method: "POST" }),
+  flujosUpsert: (payload) => http("POST", null, { action: "flujos.upsert", ...payload }),
+  flujosDelete: (payload) => http("POST", null, { action: "flujos.delete", ...payload }),
 
-    slackOutboxList: () => request("slack.outbox.list"),
-    slackOutboxGenerar: () => request("slack.outbox.generar", { method: "POST" }),
-    slackOutboxEnviarTodos: () =>
-      request("slack.outbox.enviar", { method: "POST", body: { all: true } }),
-    slackOutboxEnviarFila: (row /* number */) =>
-      request("slack.outbox.enviar", { method: "POST", body: { row } }),
-  };
-})();
+  habilitacionesSet: (payload) => http("POST", null, { action: "habilitaciones.set", ...payload }),
 
-// Si en algún punto tuviste "HUB" en el front, te lo dejo alias:
-export const HUB = API;
+  planificacionGenerar: () => http("POST", null, { action: "planificacion.generar" }),
+  planificacionList: () => http("GET", "planificacion.list"),
+
+  slackOutboxList: () => http("GET", "slack.outbox.list"),
+  slackOutboxGenerar: () => http("POST", null, { action: "slack.outbox.generar" }),
+  slackOutboxUpdate: (payload) => http("POST", null, { action: "slack.outbox.update", ...payload }),
+  slackOutboxEnviar: (payload) => http("POST", null, { action: "slack.outbox.enviar", ...payload }), // {row} o {}
+};
