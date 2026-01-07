@@ -7,7 +7,8 @@ async function safeJson(resp) {
   try {
     return JSON.parse(text);
   } catch {
-    return { ok: false, error: `Non-JSON response (${resp.status}): ${text.slice(0, 200)}` };
+    const hint = text?.includes("<!doctype") || text?.includes("<html") ? " (HTML/redirect)" : "";
+    return { ok: false, error: `Non-JSON response${hint} (${resp.status}): ${text.slice(0, 300)}` };
   }
 }
 
@@ -15,7 +16,7 @@ async function get(action, params = {}) {
   const qs = new URLSearchParams({ action, ...params });
   const resp = await fetch(`${BASE}?${qs.toString()}`, {
     method: "GET",
-    headers: { "Accept": "application/json" },
+    headers: { Accept: "application/json" },
   });
   const data = await safeJson(resp);
   if (!resp.ok || data?.ok === false) {
@@ -27,7 +28,7 @@ async function get(action, params = {}) {
 async function post(action, payload = {}) {
   const resp = await fetch(BASE, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Accept": "application/json" },
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ action, ...payload }),
   });
   const data = await safeJson(resp);
@@ -39,8 +40,10 @@ async function post(action, payload = {}) {
 
 export const API = {
   health: () => get("health"),
+
   colaboradoresList: () => get("colaboradores.list"),
   canalesList: () => get("canales.list"),
+
   flujosList: () => get("flujos.list"),
   flujosUpsert: (flujo, perfiles_requeridos, channel_id) =>
     post("flujos.upsert", { flujo, perfiles_requeridos, channel_id }),
