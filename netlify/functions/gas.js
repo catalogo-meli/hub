@@ -8,6 +8,7 @@ export async function handler(event) {
     if (!GAS_URL) return json(500, { ok: false, error: "Missing env GAS_URL" });
     if (!API_TOKEN) return json(500, { ok: false, error: "Missing env API_TOKEN" });
 
+    // CORS
     if (event.httpMethod === "OPTIONS") {
       return { statusCode: 204, headers: corsHeaders(), body: "" };
     }
