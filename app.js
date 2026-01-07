@@ -3,6 +3,12 @@ import { API } from "./api.js";
 
 const $ = (sel) => document.querySelector(sel);
 
+let BUSY = false;
+function setBusy(v) {
+  BUSY = !!v;
+  document.querySelectorAll("button").forEach(b => (b.disabled = BUSY));
+}
+
 function toast(msg, isError = false) {
   const el = $("#toast");
   el.textContent = msg;
@@ -28,11 +34,11 @@ function by(arr, keyFn) {
 }
 
 let STATE = {
-  canales: [],        // [{canal, channel_id}]
+  canales: [],
   canalesById: new Map(),
-  flujos: [],         // [{flujo, perfiles_requeridos, channel_id, canal}]
-  plan: [],           // [{fecha, flujo, nombre, ...}]
-  outbox: [],         // [{row, fecha, canal, channel_id, mensaje, estado, error}]
+  flujos: [],
+  plan: [],
+  outbox: [],
 };
 
 async function loadAll() {
@@ -48,13 +54,15 @@ async function loadAll() {
   STATE.flujos = flujos || [];
   STATE.plan = plan || [];
   STATE.outbox = outbox || [];
+
+  $("#lastLoad").textContent = new Date().toLocaleString();
 }
 
 function render() {
   const app = $("#app");
   app.innerHTML = `
     <div class="sectionTitle">1) Flujos (Perfiles requeridos)</div>
-    <div class="muted">Autosave: se guarda al cambiar Slack channel o Perfiles requeridos.</div>
+    <div class="muted">Se guarda al cambiar Slack channel o Perfiles requeridos.</div>
 
     <div class="grid3 gridFlujosHead" style="margin-top:12px;">
       <div class="small">Flujo</div>
@@ -91,17 +99,6 @@ function render() {
   $("#btnPlan").onclick = onGenerarPlan;
   $("#btnOutbox").onclick = onGenerarOutbox;
   $("#btnSendAll").onclick = onEnviarTodos;
-
-  $("#btnHealth").onclick = async () => {
-    try {
-      const h = await API.health();
-      toast(`OK: ${h.ts || "health"}`);
-    } catch (e) {
-      toast(e.message, true);
-    }
-  };
-
-  $("#btnMode").onclick = () => toast("Modo: no implementado (todavía).");
 }
 
 function canalesOptions(selectedChannelId) {
@@ -160,11 +157,14 @@ function renderFlujos() {
       const perfiles = Number(current?.perfiles_requeridos || 0);
 
       try {
+        setBusy(true);
         await API.flujosUpsert(flujo, perfiles, channel_id);
         toast(`Guardado: ${flujo}`);
         await refreshFlujosOnly();
       } catch (e) {
         toast(e.message, true);
+      } finally {
+        setBusy(false);
       }
     };
   });
@@ -177,11 +177,14 @@ function renderFlujos() {
       const channel_id = String(current?.channel_id || "");
 
       try {
+        setBusy(true);
         await API.flujosUpsert(flujo, perfiles, channel_id);
         toast(`Guardado: ${flujo}`);
         await refreshFlujosOnly();
       } catch (e) {
         toast(e.message, true);
+      } finally {
+        setBusy(false);
       }
     };
   });
@@ -190,11 +193,14 @@ function renderFlujos() {
     btn.onclick = async (ev) => {
       const flujo = ev.target.dataset.flujo;
       try {
+        setBusy(true);
         await API.flujosDelete(flujo);
         toast(`Borrado: ${flujo}`);
         await reloadAndRender();
       } catch (e) {
         toast(e.message, true);
+      } finally {
+        setBusy(false);
       }
     };
   });
@@ -209,11 +215,14 @@ function renderFlujos() {
     if (Number.isNaN(perfiles) || perfiles < 0) return toast("Perfiles inválidos", true);
 
     try {
+      setBusy(true);
       await API.flujosUpsert(flujo, perfiles, channel_id);
       toast("Flujo agregado");
       await reloadAndRender();
     } catch (e) {
       toast(e.message, true);
+    } finally {
+      setBusy(false);
     }
   };
 }
@@ -233,12 +242,14 @@ function renderPlan() {
   for (const flujo of flujosOrden) {
     const items = grouped.get(flujo) || [];
     const nombres = items.map(x => x.nombre).filter(Boolean);
+    const fijos = items.filter(x => x.es_fijo).map(x => x.nombre).filter(Boolean);
+
     cards.push(`
       <div class="card" style="margin: 10px 0;">
-        <div style="font-weight:800; margin-bottom: 8px;">${escapeHtml(flujo)}</div>
+        <div style="font-weight:900; margin-bottom: 8px;">${escapeHtml(flujo)}</div>
         <div>${nombres.length ? escapeHtml(nombres.join(", ")) : `<span class="muted">•</span>`}</div>
         <div class="small" style="margin-top:6px;">
-          Total: ${nombres.length}
+          Total: ${nombres.length}${fijos.length ? ` • Fijos: ${fijos.length}` : ""}
         </div>
       </div>
     `);
@@ -247,9 +258,14 @@ function renderPlan() {
   box.innerHTML = cards.join("");
 }
 
+function isEnviado(estado) {
+  const s = String(estado || "").toUpperCase();
+  return s.startsWith("ENVIADO");
+}
+
 function renderOutbox() {
   const box = $("#outboxBox");
-  const rows = (STATE.outbox || []).filter(x => String(x.estado || "").toUpperCase() !== "ENVIADO");
+  const rows = (STATE.outbox || []).filter(x => !isEnviado(x.estado));
 
   if (!rows.length) {
     box.innerHTML = `<div class="muted">Sin pendientes.</div>`;
@@ -301,11 +317,14 @@ function renderOutbox() {
       const channel_id = ev.target.value;
       const canal = STATE.canalesById.get(String(channel_id)) || "";
       try {
+        setBusy(true);
         await API.slackOutboxUpdate(row, canal, channel_id, "");
         toast("Outbox actualizado");
         await refreshOutboxOnly();
       } catch (e) {
         toast(e.message, true);
+      } finally {
+        setBusy(false);
       }
     };
   });
@@ -319,9 +338,13 @@ function renderOutbox() {
       const channel_id = String(current?.channel_id || "");
       const canal = String(current?.canal || "");
       try {
+        setBusy(true);
         await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
+        toast("Mensaje guardado");
       } catch (e) {
         toast(e.message, true);
+      } finally {
+        setBusy(false);
       }
     };
   });
@@ -346,11 +369,14 @@ function renderOutbox() {
     btn.onclick = async (ev) => {
       const row = Number(ev.target.dataset.row);
       try {
+        setBusy(true);
         await API.slackOutboxEnviar(row);
         toast("Enviado");
         await refreshOutboxOnly();
       } catch (e) {
         toast(e.message, true);
+      } finally {
+        setBusy(false);
       }
     };
   });
@@ -359,6 +385,7 @@ function renderOutbox() {
 async function onGenerarPlan() {
   $("#opStatus").textContent = "Generando planificación…";
   try {
+    setBusy(true);
     await API.planificacionGenerar();
     toast("Planificación generada");
     STATE.plan = await API.planificacionList();
@@ -367,12 +394,14 @@ async function onGenerarPlan() {
     toast(e.message, true);
   } finally {
     $("#opStatus").textContent = "";
+    setBusy(false);
   }
 }
 
 async function onGenerarOutbox() {
   $("#opStatus").textContent = "Generando Outbox…";
   try {
+    setBusy(true);
     await API.slackOutboxGenerar();
     toast("Outbox generado");
     await refreshOutboxOnly();
@@ -380,19 +409,22 @@ async function onGenerarOutbox() {
     toast(e.message, true);
   } finally {
     $("#opStatus").textContent = "";
+    setBusy(false);
   }
 }
 
 async function onEnviarTodos() {
   $("#opStatus").textContent = "Enviando…";
   try {
-    await API.slackOutboxEnviar(); // sin row => envía todos pendientes
+    setBusy(true);
+    await API.slackOutboxEnviar();
     toast("Envío masivo ejecutado");
     await refreshOutboxOnly();
   } catch (e) {
     toast(e.message, true);
   } finally {
     $("#opStatus").textContent = "";
+    setBusy(false);
   }
 }
 
@@ -408,13 +440,28 @@ async function refreshOutboxOnly() {
 
 async function reloadAndRender() {
   try {
+    setBusy(true);
     await loadAll();
     render();
   } catch (e) {
     $("#app").innerHTML = `<div class="errorBox">Error: ${escapeHtml(e.message)}</div>`;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function health() {
+  try {
+    const h = await API.health();
+    $("#healthPill").textContent = `OK • ${h.ts || "health"}`;
+  } catch (e) {
+    $("#healthPill").textContent = `ERROR`;
+    toast(e.message, true);
   }
 }
 
 (async function init() {
+  $("#btnHealth").onclick = health;
   await reloadAndRender();
+  await health();
 })();
