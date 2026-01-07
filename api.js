@@ -7,8 +7,7 @@ async function safeJson(resp) {
   try {
     return JSON.parse(text);
   } catch {
-    const hint = text?.includes("<!doctype") || text?.includes("<html") ? " (HTML/redirect)" : "";
-    return { ok: false, error: `Non-JSON response${hint} (${resp.status}): ${text.slice(0, 300)}` };
+    return { ok: false, error: `Non-JSON response (${resp.status}): ${text.slice(0, 200)}` };
   }
 }
 
@@ -19,9 +18,7 @@ async function get(action, params = {}) {
     headers: { Accept: "application/json" },
   });
   const data = await safeJson(resp);
-  if (!resp.ok || data?.ok === false) {
-    throw new Error(data?.error || `GET ${action} failed (${resp.status})`);
-  }
+  if (!resp.ok || data?.ok === false) throw new Error(data?.error || `GET ${action} failed (${resp.status})`);
   return data.data;
 }
 
@@ -32,9 +29,7 @@ async function post(action, payload = {}) {
     body: JSON.stringify({ action, ...payload }),
   });
   const data = await safeJson(resp);
-  if (!resp.ok || data?.ok === false) {
-    throw new Error(data?.error || `POST ${action} failed (${resp.status})`);
-  }
+  if (!resp.ok || data?.ok === false) throw new Error(data?.error || `POST ${action} failed (${resp.status})`);
   return data.data;
 }
 
@@ -43,7 +38,6 @@ export const API = {
 
   colaboradoresList: () => get("colaboradores.list"),
   canalesList: () => get("canales.list"),
-
   flujosList: () => get("flujos.list"),
   flujosUpsert: (flujo, perfiles_requeridos, channel_id) =>
     post("flujos.upsert", { flujo, perfiles_requeridos, channel_id }),
