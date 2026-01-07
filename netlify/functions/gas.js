@@ -1,71 +1,92 @@
+// netlify/functions/gas.js
+
 export async function handler(event) {
-  const GAS_URL = process.env.GAS_URL;
-  const API_TOKEN = process.env.API_TOKEN;
-
-  if (!GAS_URL) return resp(500, { ok: false, error: "Missing GAS_URL env var" });
-  if (!API_TOKEN) return resp(500, { ok: false, error: "Missing API_TOKEN env var" });
-
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: cors(), body: "" };
-  }
-
   try {
-    if (event.httpMethod === "GET") {
-      const qs = event.queryStringParameters || {};
-      const url = new URL(GAS_URL);
-      url.search = new URLSearchParams({ ...qs, token: API_TOKEN }).toString();
+    const GAS_URL = process.env.GAS_URL;
+    const API_TOKEN = process.env.API_TOKEN;
 
-      const r = await fetch(url.toString(), { method: "GET" });
-      const txt = await r.text();
+    if (!GAS_URL) {
+      return json(500, { ok: false, error: "Missing env GAS_URL" });
+    }
+    if (!API_TOKEN) {
+      return json(500, { ok: false, error: "Missing env API_TOKEN" });
+    }
 
+    // CORS (por si lo llamás desde otro origen)
+    if (event.httpMethod === "OPTIONS") {
       return {
-        statusCode: r.status,
-        headers: { ...cors(), "content-type": r.headers.get("content-type") || "application/json" },
-        body: txt,
+        statusCode: 204,
+        headers: corsHeaders(),
+        body: "",
+      };
+    }
+
+    const url = new URL(GAS_URL);
+
+    if (event.httpMethod === "GET") {
+      const qs = new URLSearchParams(event.queryStringParameters || {});
+      // inyecta token siempre
+      qs.set("token", API_TOKEN);
+
+      // preserva action
+      for (const [k, v] of qs.entries()) url.searchParams.set(k, v);
+
+      const resp = await fetch(url.toString(), {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+      });
+
+      const text = await resp.text();
+      return {
+        statusCode: resp.status,
+        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+        body: text,
       };
     }
 
     if (event.httpMethod === "POST") {
-      let bodyIn = {};
-      if (event.body) {
-        try {
-          bodyIn = JSON.parse(event.body);
-        } catch {
-          return resp(400, { ok: false, error: "Invalid JSON body" });
-        }
+      let body = {};
+      try {
+        body = event.body ? JSON.parse(event.body) : {};
+      } catch {
+        return json(400, { ok: false, error: "Invalid JSON body" });
       }
 
-      const bodyOut = { ...bodyIn, token: API_TOKEN };
+      // inyecta token siempre
+      body.token = API_TOKEN;
 
-      const r = await fetch(GAS_URL, {
+      const resp = await fetch(url.toString(), {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(bodyOut),
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(body),
       });
 
-      const txt = await r.text();
-
+      const text = await resp.text();
       return {
-        statusCode: r.status,
-        headers: { ...cors(), "content-type": r.headers.get("content-type") || "application/json" },
-        body: txt,
+        statusCode: resp.status,
+        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+        body: text,
       };
     }
 
-    return resp(405, { ok: false, error: `Method not allowed: ${event.httpMethod}` });
-  } catch (err) {
-    return resp(500, { ok: false, error: err?.message || String(err) });
+    return json(405, { ok: false, error: `Method not allowed: ${event.httpMethod}` });
+  } catch (e) {
+    return json(500, { ok: false, error: e?.message || String(e) });
   }
 }
 
-function cors() {
+function json(statusCode, obj) {
   return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "content-type",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    statusCode,
+    headers: { ...corsHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(obj),
   };
 }
 
-function resp(code, obj) {
-  return { statusCode: code, headers: { ...cors(), "content-type": "application/json" }, body: JSON.stringify(obj) };
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  };
 }
