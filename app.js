@@ -1,1145 +1,1040 @@
-// app.js (ESM) — HUB Catálogo (Full)
-// Secciones: Operativa diaria, Colaboradores, Habilitaciones, Presentismo, Dashboard (placeholder)
-// Compatible con tu index.html actual (dark UI) + tu Netlify function gas.js (token inyectado).
+// app.js (ESM)
 import { API } from "./api.js";
 
-const BASE = "/.netlify/functions/gas";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-/* -----------------------------
-   UI helpers
------------------------------- */
-function toast(msg, isError = false) {
-  const el = $("#toast");
-  if (!el) return;
-  el.textContent = msg;
-  el.classList.add("show");
-  el.style.borderColor = isError ? "rgba(255,70,70,.35)" : "rgba(255,255,255,.14)";
-  setTimeout(() => el.classList.remove("show"), isError ? 5200 : 2600);
-}
-function escapeHtml(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (m) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
-  }[m]));
-}
-function norm(s) { return String(s ?? "").trim().toLowerCase(); }
-function fmtYMD(d = new Date()) {
-  const x = new Date(d);
-  const y = x.getFullYear();
-  const m = String(x.getMonth() + 1).padStart(2, "0");
-  const dd = String(x.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-}
-function safeInt(v, dflt = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : dflt;
-}
-function debounce(fn, ms = 350) {
-  let t;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
-  };
-}
-
-/* -----------------------------
-   Raw calls (para acciones que no están en api.js)
------------------------------- */
-async function safeJson(resp) {
-  const text = await resp.text();
-  try { return JSON.parse(text); }
-  catch { return { ok: false, error: `Non-JSON response (${resp.status}): ${text.slice(0, 200)}` }; }
-}
-async function rawGet(action, params = {}) {
-  const qs = new URLSearchParams({ action, ...params });
-  const resp = await fetch(`${BASE}?${qs.toString()}`, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-  });
-  const data = await safeJson(resp);
-  if (!resp.ok || data?.ok === false) throw new Error(data?.error || `GET ${action} failed (${resp.status})`);
-  return data.data;
-}
-async function rawPost(action, payload = {}) {
-  const resp = await fetch(BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ action, ...payload }),
-  });
-  const data = await safeJson(resp);
-  if (!resp.ok || data?.ok === false) throw new Error(data?.error || `POST ${action} failed (${resp.status})`);
-  return data.data;
-}
-
-/* -----------------------------
-   State
------------------------------- */
 const VIEWS = [
+  { id: "dashboard", label: "Dashboard" },
   { id: "operativa", label: "Operativa diaria" },
   { id: "colaboradores", label: "Colaboradores" },
   { id: "habilitaciones", label: "Habilitaciones" },
   { id: "presentismo", label: "Presentismo" },
-  { id: "dashboard", label: "Dashboard" },
+  { id: "productividad", label: "Productividad" },
+  { id: "calidad", label: "Calidad" },
 ];
 
-let STATE = {
-  view: (localStorage.getItem("hub_view") || "operativa"),
+const state = {
+  view: "dashboard",
   loading: false,
-
-  canales: [],
-  canalesById: new Map(),
-
-  flujos: [],
-
-  colaboradores: [],
-
-  // operativa
-  plan: [],
-  outbox: [],
-
-  // habilitaciones
-  hab: null, // {flujos, rows}
-
-  // presentismo
-  pres: {
-    date: fmtYMD(new Date()),
-    week: null,  // {from,to,labels,rows}
-    stats: null, // {date, counts...}
+  cache: {
+    colaboradores: null,
+    flujos: null,
+    canales: null,
+    habilitaciones: null,
+    planificacion: null,
+    outbox: null,
+    presentismoWeek: null,
+    dashboard: null,
+    productividad: null,
+    calidad: null,
   },
 };
 
-/* -----------------------------
-   Boot + layout
------------------------------- */
-function ensureLocalStyles() {
-  // Evita “todo superpuesto” por layouts mal anidados: fuerza contención y scroll horizontal en tablas.
-  const app = $("#app");
-  if (!app) return;
-  const styleId = "hub-inline-style";
-  if ($(`#${styleId}`)) return;
+init();
 
-  const st = document.createElement("style");
-  st.id = styleId;
-  st.textContent = `
-    .hubNav { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin: 6px 0 12px; }
-    .hubNav .tab { padding:10px 12px; border-radius: 14px; border:1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); cursor:pointer; user-select:none; }
-    .hubNav .tab.active { background:#2d63ff; border-color:#2d63ff; }
-    .hubGrid2 { display:grid; grid-template-columns: 1.1fr .9fr; gap: 12px; }
-    @media (max-width: 980px){ .hubGrid2{ grid-template-columns: 1fr; } }
-    .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    .tableWrap { width:100%; overflow:auto; border-radius: 14px; }
-    .kpi { display:grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 10px; }
-    @media (max-width: 980px){ .kpi{ grid-template-columns: repeat(2, minmax(140px, 1fr)); } }
-    .kpi .k { border:1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.03); border-radius: 16px; padding: 12px; }
-    .k .v { font-size: 22px; font-weight: 800; margin-top: 4px; }
-    .pillMini { display:inline-flex; gap:8px; align-items:center; padding: 8px 10px; border-radius: 999px; border:1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.03); }
-    .switch { display:inline-flex; gap:8px; align-items:center; }
-    .switch input { width: 18px; height: 18px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; }
-    .right { margin-left:auto; }
-    .muted2 { opacity:.6; font-size:12px; }
-    .dangerText { color:#ffd2d2; }
-  `;
-  app.prepend(st);
-}
+function init() {
+  const fromHash = (location.hash || "").replace("#/", "");
+  state.view = VIEWS.some(v => v.id === fromHash) ? fromHash : "dashboard";
 
-function setView(viewId) {
-  STATE.view = viewId;
-  localStorage.setItem("hub_view", viewId);
-  render();
-}
-
-function renderShell() {
-  const app = $("#app");
-  app.innerHTML = `
-    <div class="hubNav">
-      ${VIEWS.map(v => `
-        <div class="tab ${v.id === STATE.view ? "active" : ""}" data-view="${escapeHtml(v.id)}">
-          ${escapeHtml(v.label)}
-        </div>
-      `).join("")}
-
-      <div class="right toolbar">
-        <button id="btnReload" class="btn">Recargar</button>
-        <button id="btnHealth" class="btn">Health</button>
-      </div>
-    </div>
-
-    <div id="viewHost"></div>
-  `;
-
-  $$(".hubNav .tab", app).forEach(t => {
-    t.onclick = () => setView(t.dataset.view);
+  window.addEventListener("hashchange", () => {
+    const v = (location.hash || "").replace("#/", "");
+    state.view = VIEWS.some(x => x.id === v) ? v : "dashboard";
+    render();
+    bootView();
   });
 
-  $("#btnReload").onclick = async () => {
-    await reloadAll();
-    toast("Recargado");
-  };
+  render();
+  bootView();
+}
 
-  $("#btnHealth").onclick = async () => {
-    try {
-      const h = await API.health();
-      toast(`OK: ${h.ts || "health"}`);
-    } catch (e) {
-      toast(e.message, true);
+function setView(id) {
+  location.hash = `#/${id}`;
+}
+
+function ymdLocal(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function toast(title, msg = "") {
+  const host = $("#toast");
+  const el = document.createElement("div");
+  el.className = "t";
+  el.innerHTML = `<b>${escapeHtml(title)}</b>${msg ? `<div>${escapeHtml(msg)}</div>` : ""}`;
+  host.appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+}
+
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function setLoading(on, label = "Cargando…") {
+  state.loading = on;
+  const app = $("#app");
+  const old = $("#_loading");
+  if (on) {
+    if (!old) {
+      const div = document.createElement("div");
+      div.id = "_loading";
+      div.className = "pill";
+      div.style.position = "fixed";
+      div.style.left = "18px";
+      div.style.bottom = "18px";
+      div.style.zIndex = "55";
+      div.innerHTML = `⏳ <span>${escapeHtml(label)}</span>`;
+      document.body.appendChild(div);
+    } else {
+      old.innerHTML = `⏳ <span>${escapeHtml(label)}</span>`;
     }
-  };
+  } else {
+    if (old) old.remove();
+  }
+  if (!app) return;
+}
+
+function openModal(title, bodyHtml, onMount) {
+  const overlay = $("#overlay");
+  const modal = $("#modal");
+  modal.innerHTML = `
+    <div class="h">
+      <h2>${escapeHtml(title)}</h2>
+      <button class="btn" id="_closeModal">Cerrar</button>
+    </div>
+    <div>${bodyHtml}</div>
+  `;
+  overlay.classList.add("show");
+  $("#_closeModal").addEventListener("click", closeModal);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeModal();
+  }, { once: true });
+  if (onMount) onMount(modal);
+}
+
+function closeModal() {
+  $("#overlay").classList.remove("show");
+  $("#modal").innerHTML = "";
 }
 
 function render() {
-  ensureLocalStyles();
-  renderShell();
-
-  const host = $("#viewHost");
-  if (!host) return;
-
-  if (STATE.loading) {
-    host.innerHTML = `<div class="muted">Cargando…</div>`;
-    return;
-  }
-
-  switch (STATE.view) {
-    case "operativa": host.innerHTML = viewOperativa(); wireOperativa(); break;
-    case "colaboradores": host.innerHTML = viewColaboradores(); wireColaboradores(); break;
-    case "habilitaciones": host.innerHTML = viewHabilitaciones(); wireHabilitaciones(); break;
-    case "presentismo": host.innerHTML = viewPresentismo(); wirePresentismo(); break;
-    case "dashboard": host.innerHTML = viewDashboard(); wireDashboard(); break;
-    default: host.innerHTML = `<div class="errorBox">Vista inválida</div>`;
-  }
-}
-
-/* -----------------------------
-   Loaders
------------------------------- */
-async function loadCommon() {
-  const [canales, flujos, colaboradores] = await Promise.all([
-    API.canalesList(),
-    API.flujosList(),
-    API.colaboradoresList(),
-  ]);
-
-  STATE.canales = canales || [];
-  STATE.canalesById = new Map(STATE.canales.map(c => [String(c.channel_id), c.canal]));
-  STATE.flujos = flujos || [];
-  STATE.colaboradores = (colaboradores || []).slice().sort((a, b) =>
-    String(a.nombre || a.id_meli || "").localeCompare(String(b.nombre || b.id_meli || ""))
-  );
-}
-
-async function loadOperativa() {
-  const [plan, outbox] = await Promise.all([
-    API.planificacionList().catch(() => []),
-    API.slackOutboxList().catch(() => []),
-  ]);
-  STATE.plan = plan || [];
-  STATE.outbox = outbox || [];
-}
-
-async function loadHabilitaciones() {
-  STATE.hab = await API.habilitacionesList();
-}
-
-async function loadPresentismo(dateYMD) {
-  const date = (dateYMD || STATE.pres.date || fmtYMD(new Date())).trim();
-  STATE.pres.date = date;
-
-  const [week, stats] = await Promise.all([
-    rawGet("presentismo.week", { date }).catch((e) => ({ _error: e.message })),
-    rawGet("presentismo.stats", { date }).catch((e) => ({ _error: e.message })),
-  ]);
-
-  STATE.pres.week = week;
-  STATE.pres.stats = stats;
-}
-
-async function reloadAll() {
-  STATE.loading = true;
-  render();
-  try {
-    await loadCommon();
-    await Promise.all([
-      loadOperativa(),
-      loadHabilitaciones().catch(() => null),
-      loadPresentismo(STATE.pres.date).catch(() => null),
-    ]);
-  } finally {
-    STATE.loading = false;
-    render();
-  }
-}
-
-/* -----------------------------
-   Components: Operativa diaria
------------------------------- */
-function canalesOptions(selectedChannelId) {
-  const sel = String(selectedChannelId || "");
-  const opts = [`<option value="">—</option>`]
-    .concat(STATE.canales.map(c => {
-      const v = String(c.channel_id);
-      const label = c.canal;
-      const s = v === sel ? "selected" : "";
-      return `<option value="${escapeHtml(v)}" ${s}>${escapeHtml(label)}</option>`;
-    }));
-  return opts.join("");
-}
-
-function viewOperativa() {
-  return `
-    <div class="hubGrid2">
-      <div class="card">
-        <div class="sectionTitle">Operativa diaria</div>
-        <div class="muted">Flujos, planificación y Slack Outbox.</div>
-
-        <div class="sep"></div>
-
-        <div class="sectionTitle">Flujos</div>
-        <div class="muted2">Se guarda al cambiar el canal o la cantidad de perfiles.</div>
-
-        <div class="grid3 gridFlujosHead" style="margin-top:12px;">
-          <div class="small">Flujo</div>
-          <div class="small">Slack channel</div>
-          <div class="small">Perfiles requeridos</div>
+  const app = $("#app");
+  app.innerHTML = `
+    <div class="wrap">
+      <div class="top">
+        <div class="brand">
+          <div class="dot"></div>
+          <div class="title">
+            <b>HUB Catálogo</b>
+            <span>Netlify + Front JS + Apps Script</span>
+          </div>
         </div>
 
-        <div id="flujosList" style="margin-top:10px;"></div>
-
-        <div class="sep"></div>
-
-        <div class="toolbar">
-          <button id="btnPlan" class="btn primary">Generar planificación</button>
-          <button id="btnOutbox" class="btn">Generar Outbox</button>
-          <button id="btnSendAll" class="btn success">Enviar pendientes</button>
-          <div id="opStatus" class="muted right"></div>
+        <div class="nav">
+          ${VIEWS.map(v => `
+            <button class="tab" data-view="${v.id}" aria-current="${state.view === v.id ? "page" : "false"}">
+              ${escapeHtml(v.label)}
+            </button>
+          `).join("")}
         </div>
       </div>
 
-      <div class="card">
-        <div class="sectionTitle">Resultado</div>
-        <div class="muted2">Planificación (por flujo) + pendientes de Slack.</div>
+      <div id="content"></div>
+    </div>
+  `;
 
-        <div class="sep"></div>
+  $$(".tab", app).forEach(btn => {
+    btn.addEventListener("click", () => setView(btn.dataset.view));
+  });
 
-        <div class="sectionTitle">Planificación</div>
-        <div id="planBox" style="margin-top:10px;"></div>
+  const content = $("#content", app);
+  content.innerHTML = viewHtml(state.view);
+}
 
-        <div class="sep"></div>
+function viewHtml(view) {
+  switch (view) {
+    case "dashboard": return dashboardHtml();
+    case "operativa": return operativaHtml();
+    case "colaboradores": return colaboradoresHtml();
+    case "habilitaciones": return habilitacionesHtml();
+    case "presentismo": return presentismoHtml();
+    case "productividad": return productividadHtml();
+    case "calidad": return calidadHtml();
+    default: return `<div class="panel">Vista inválida.</div>`;
+  }
+}
 
-        <div class="sectionTitle">Slack Outbox (pendientes)</div>
-        <div class="muted2">Editá canal y mensaje, enviá por fila o masivo.</div>
-        <div id="outboxBox" style="margin-top:10px;"></div>
+async function bootView() {
+  try {
+    if (state.view === "dashboard") return bootDashboard();
+    if (state.view === "operativa") return bootOperativa();
+    if (state.view === "colaboradores") return bootColaboradores();
+    if (state.view === "habilitaciones") return bootHabilitaciones();
+    if (state.view === "presentismo") return bootPresentismo();
+    if (state.view === "productividad") return bootProductividad();
+    if (state.view === "calidad") return bootCalidad();
+  } catch (e) {
+    toast("Error", e?.message || String(e));
+  }
+}
+
+/* =========================
+   DASHBOARD
+========================= */
+
+function dashboardHtml() {
+  return `
+    <div class="grid grid-3">
+      <div class="panel">
+        <div class="h"><h2>Estado</h2><span class="muted" id="db_ts"></span></div>
+        <div id="db_health" class="muted">—</div>
+      </div>
+
+      <div class="panel">
+        <div class="h"><h2>Presentismo (hoy)</h2><span class="muted">${escapeHtml(ymdLocal())}</span></div>
+        <div id="db_pres" class="muted">—</div>
+      </div>
+
+      <div class="panel">
+        <div class="h"><h2>Slack Outbox</h2><span class="muted">pendientes</span></div>
+        <div id="db_outbox" class="muted">—</div>
+      </div>
+    </div>
+
+    <div class="grid grid-2" style="margin-top:12px">
+      <div class="panel">
+        <div class="h"><h2>Planificación</h2><span class="muted">última</span></div>
+        <div id="db_plan" class="muted">—</div>
+      </div>
+
+      <div class="panel">
+        <div class="h"><h2>Configuración</h2><span class="muted">flujos</span></div>
+        <div id="db_cfg" class="muted">—</div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:12px">
+      <div class="h">
+        <h2>Acciones rápidas</h2>
+        <div class="row">
+          <button class="btn primary" id="db_gen_plan">Generar planificación</button>
+          <button class="btn" id="db_gen_outbox">Generar Slack Outbox</button>
+          <button class="btn" id="db_send_outbox">Enviar pendientes</button>
+        </div>
+      </div>
+      <div class="muted">Si esto falla, no “toca botones”: arreglá datos (Presentismo/Habilitaciones/Flujos) o el backend.</div>
+    </div>
+  `;
+}
+
+async function bootDashboard() {
+  setLoading(true, "Cargando dashboard…");
+
+  const [health, stats] = await Promise.all([
+    API.health().catch(e => ({ status: "error", error: e?.message || String(e) })),
+    API.dashboardStats().catch(e => ({ ok: false, error: e?.message || String(e) })),
+  ]);
+
+  $("#db_ts").textContent = new Date().toLocaleString();
+
+  $("#db_health").innerHTML = health?.status === "ok"
+    ? `<span class="ok">OK</span> <span class="muted">(${escapeHtml(health.ts || "")})</span>`
+    : `<span class="bad">ERROR</span> <span class="muted">${escapeHtml(health?.error || "")}</span>`;
+
+  const pres = stats.presentismo || {};
+  $("#db_pres").innerHTML = `
+    <div class="kpi"><b>${escapeHtml(pres.presentes ?? "—")}</b><span class="muted">presentes</span></div>
+    <div class="kpi" style="margin-top:8px"><b>${escapeHtml(pres.ausentes ?? "—")}</b><span class="muted">no presentes</span></div>
+  `;
+
+  const ob = stats.outbox || {};
+  $("#db_outbox").innerHTML = `
+    <div class="kpi"><b>${escapeHtml(ob.pendientes ?? "—")}</b><span class="muted">pendientes</span></div>
+    <div class="kpi" style="margin-top:8px"><b>${escapeHtml(ob.errores ?? "—")}</b><span class="muted">errores</span></div>
+  `;
+
+  const pl = stats.planificacion || {};
+  $("#db_plan").innerHTML = `
+    <div class="kpi"><b>${escapeHtml(pl.asignaciones ?? "—")}</b><span class="muted">asignaciones</span></div>
+    <div class="muted" style="margin-top:8px">${escapeHtml(pl.fecha || "")}</div>
+  `;
+
+  const cfg = stats.config || {};
+  $("#db_cfg").innerHTML = `
+    <div class="kpi"><b>${escapeHtml(cfg.flujos ?? "—")}</b><span class="muted">flujos</span></div>
+    <div class="kpi" style="margin-top:8px"><b>${escapeHtml(cfg.colaboradores ?? "—")}</b><span class="muted">colaboradores</span></div>
+  `;
+
+  $("#db_gen_plan").addEventListener("click", async () => {
+    setLoading(true, "Generando planificación…");
+    try {
+      const r = await API.planificacionGenerar();
+      toast("Planificación generada", `Asignaciones: ${r?.asignaciones ?? "—"}`);
+      await bootDashboard();
+    } catch (e) {
+      toast("Error", e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  $("#db_gen_outbox").addEventListener("click", async () => {
+    setLoading(true, "Generando Slack Outbox…");
+    try {
+      const r = await API.slackOutboxGenerar();
+      toast("Outbox generado", `Filas: ${r?.rows ?? "—"}`);
+      await bootDashboard();
+    } catch (e) {
+      toast("Error", e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  $("#db_send_outbox").addEventListener("click", async () => {
+    setLoading(true, "Enviando pendientes…");
+    try {
+      const r = await API.slackOutboxEnviar();
+      toast("Slack Outbox", `Enviados: ${r?.sent ?? "—"}`);
+      await bootDashboard();
+    } catch (e) {
+      toast("Error", e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  setLoading(false);
+}
+
+/* =========================
+   OPERATIVA
+========================= */
+
+function operativaHtml() {
+  return `
+    <div class="grid grid-2">
+      <div class="panel">
+        <div class="h">
+          <h2>Planificación</h2>
+          <div class="row">
+            <button class="btn primary" id="op_gen_plan">Generar</button>
+            <button class="btn" id="op_refresh_plan">Actualizar</button>
+          </div>
+        </div>
+        <div class="muted" id="op_plan_meta">—</div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th><th>Flujo</th><th>ID</th><th>Nombre</th><th>Fijo</th><th>Canal</th>
+              </tr>
+            </thead>
+            <tbody id="op_plan_rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="h">
+          <h2>Slack Outbox</h2>
+          <div class="row">
+            <button class="btn" id="op_gen_outbox">Generar</button>
+            <button class="btn primary" id="op_send_all">Enviar pendientes</button>
+            <button class="btn" id="op_refresh_outbox">Actualizar</button>
+          </div>
+        </div>
+        <div class="muted" id="op_outbox_meta">—</div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th><th>Tipo</th><th>Canal</th><th>Channel ID</th><th>Estado</th><th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="op_outbox_rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:12px">
+      <div class="h">
+        <h2>Flujos</h2>
+        <div class="row">
+          <button class="btn" id="op_refresh_flujos">Actualizar</button>
+          <button class="btn primary" id="op_add_flujo">Agregar flujo</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Flujo</th><th>Perfiles requeridos</th><th>Slack channel</th><th>Notas</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="op_flujos_rows"></tbody>
+        </table>
       </div>
     </div>
   `;
+}
+
+async function bootOperativa() {
+  setLoading(true, "Cargando operativa…");
+  await Promise.all([loadPlanificacionOperativa(), loadOutboxOperativa(), loadFlujosOperativa()]);
+  wireOperativa();
+  setLoading(false);
 }
 
 function wireOperativa() {
-  renderFlujos();
-  renderPlan();
-  renderOutbox();
-
-  $("#btnPlan").onclick = onGenerarPlan;
-  $("#btnOutbox").onclick = onGenerarOutbox;
-  $("#btnSendAll").onclick = onEnviarTodos;
-}
-
-function renderFlujos() {
-  const wrap = $("#flujosList");
-  if (!wrap) return;
-
-  const rows = STATE.flujos.slice().sort((a, b) => String(a.flujo).localeCompare(String(b.flujo)));
-
-  wrap.innerHTML = rows.map(f => `
-    <div class="grid3" style="gap:10px; margin: 10px 0;">
-      <div class="pill">
-        <strong>${escapeHtml(f.flujo)}</strong>
-      </div>
-
-      <div>
-        <select data-flujo="${escapeHtml(f.flujo)}" data-field="channel_id">
-          ${canalesOptions(f.channel_id)}
-        </select>
-      </div>
-
-      <div class="row" style="gap:10px;">
-        <input data-flujo="${escapeHtml(f.flujo)}" data-field="perfiles" type="number" min="0"
-          value="${safeInt(f.perfiles_requeridos, 0)}" />
-        <button class="btn danger" data-action="delete" data-flujo="${escapeHtml(f.flujo)}">Borrar</button>
-      </div>
-    </div>
-  `).join("") + `
-    <div class="grid3" style="gap:10px; margin-top: 16px;">
-      <input id="newFlujo" placeholder="+ Nuevo flujo…" />
-      <select id="newChannel">${canalesOptions("")}</select>
-      <div class="row" style="gap:10px;">
-        <input id="newPerfiles" type="number" min="0" value="0" />
-        <button id="btnAddFlujo" class="btn primary">Agregar</button>
-      </div>
-    </div>
-  `;
-
-  // autosave: channel
-  $$('select[data-field="channel_id"]', wrap).forEach(sel => {
-    sel.onchange = async (ev) => {
-      const flujo = ev.target.dataset.flujo;
-      const channel_id = ev.target.value;
-      const current = STATE.flujos.find(x => x.flujo === flujo);
-      const perfiles = safeInt(current?.perfiles_requeridos, 0);
-
-      try {
-        await API.flujosUpsert(flujo, perfiles, channel_id);
-        toast(`Guardado: ${flujo}`);
-        await refreshFlujosOnly();
-      } catch (e) {
-        toast(e.message, true);
-      }
-    };
-  });
-
-  // autosave: perfiles
-  $$('input[data-field="perfiles"]', wrap).forEach(inp => {
-    inp.onchange = async (ev) => {
-      const flujo = ev.target.dataset.flujo;
-      const perfiles = safeInt(ev.target.value, 0);
-      const current = STATE.flujos.find(x => x.flujo === flujo);
-      const channel_id = String(current?.channel_id || "");
-
-      try {
-        await API.flujosUpsert(flujo, perfiles, channel_id);
-        toast(`Guardado: ${flujo}`);
-        await refreshFlujosOnly();
-      } catch (e) {
-        toast(e.message, true);
-      }
-    };
-  });
-
-  // delete
-  $$('button[data-action="delete"]', wrap).forEach(btn => {
-    btn.onclick = async (ev) => {
-      const flujo = ev.target.dataset.flujo;
-      try {
-        await API.flujosDelete(flujo);
-        toast(`Borrado: ${flujo}`);
-        await refreshFlujosOnly();
-        await refreshHabilitacionesOnly(); // flujos impactan matriz
-      } catch (e) {
-        toast(e.message, true);
-      }
-    };
-  });
-
-  // add
-  $("#btnAddFlujo").onclick = async () => {
-    const flujo = ($("#newFlujo").value || "").trim();
-    const channel_id = ($("#newChannel").value || "").trim();
-    const perfiles = safeInt($("#newPerfiles").value, 0);
-
-    if (!flujo) return toast("Flujo requerido", true);
-    if (!channel_id) return toast("Slack channel requerido", true);
-    if (perfiles < 0) return toast("Perfiles inválidos", true);
-
+  $("#op_gen_plan").onclick = async () => {
+    setLoading(true, "Generando planificación…");
     try {
-      await API.flujosUpsert(flujo, perfiles, channel_id);
-      toast("Flujo agregado");
-      await refreshFlujosOnly();
-      await refreshHabilitacionesOnly();
+      const r = await API.planificacionGenerar();
+      toast("Planificación generada", `Asignaciones: ${r?.asignaciones ?? "—"}`);
+      await loadPlanificacionOperativa();
     } catch (e) {
-      toast(e.message, true);
-    }
-  };
-}
-
-function renderPlan() {
-  const box = $("#planBox");
-  if (!box) return;
-
-  const plan = STATE.plan || [];
-  if (!plan.length) {
-    box.innerHTML = `<div class="muted">Sin planificación cargada.</div>`;
-    return;
-  }
-
-  const byFlujo = new Map();
-  for (const r of plan) {
-    const f = String(r.flujo || "").trim();
-    if (!f) continue;
-    if (!byFlujo.has(f)) byFlujo.set(f, []);
-    byFlujo.get(f).push(r);
-  }
-
-  const flujos = Array.from(byFlujo.keys()).sort((a, b) => a.localeCompare(b));
-  box.innerHTML = flujos.map(flujo => {
-    const items = byFlujo.get(flujo) || [];
-    const nombres = items.map(x => x.nombre).filter(Boolean);
-    return `
-      <div class="card" style="margin: 10px 0;">
-        <div style="font-weight:900; margin-bottom: 6px;">${escapeHtml(flujo)}</div>
-        <div>${nombres.length ? escapeHtml(nombres.join(", ")) : `<span class="muted">—</span>`}</div>
-        <div class="small" style="margin-top:8px;">Total: ${nombres.length}</div>
-      </div>
-    `;
-  }).join("");
-}
-
-function renderOutbox() {
-  const box = $("#outboxBox");
-  if (!box) return;
-
-  const rows = (STATE.outbox || []).filter(x => !String(x.estado || "").toUpperCase().startsWith("ENVIADO"));
-  if (!rows.length) {
-    box.innerHTML = `<div class="muted">Sin pendientes.</div>`;
-    return;
-  }
-
-  box.innerHTML = `
-    <div class="tableWrap">
-      <table>
-        <thead>
-          <tr>
-            <th style="width:150px;">Fecha</th>
-            <th style="width:220px;">Canal</th>
-            <th>Mensaje</th>
-            <th style="width:140px;">Estado</th>
-            <th style="width:260px;">Error</th>
-            <th style="width:120px;"></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map(r => `
-            <tr>
-              <td class="mono">${escapeHtml(String(r.fecha || ""))}</td>
-              <td>
-                <select data-outbox-row="${r.row}" data-field="channel_id">
-                  ${canalesOptions(r.channel_id)}
-                </select>
-              </td>
-              <td>
-                <textarea data-outbox-row="${r.row}" data-field="mensaje">${escapeHtml(r.mensaje || "")}</textarea>
-                <div class="row" style="margin-top:8px; gap:10px;">
-                  <button class="btn" data-action="copy" data-row="${r.row}">Copiar</button>
-                </div>
-              </td>
-              <td>${escapeHtml(String(r.estado || ""))}</td>
-              <td>${r.error ? `<div class="errorBox">${escapeHtml(r.error)}</div>` : ""}</td>
-              <td>
-                <button class="btn primary" data-action="send" data-row="${r.row}">Enviar</button>
-              </td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
-
-  // change channel => update outbox row
-  $$('select[data-field="channel_id"]', box).forEach(sel => {
-    sel.onchange = async (ev) => {
-      const row = safeInt(ev.target.dataset.outboxRow);
-      const channel_id = ev.target.value;
-      const canal = STATE.canalesById.get(String(channel_id)) || "";
-      try {
-        await API.slackOutboxUpdate(row, canal, channel_id, "");
-        toast("Outbox actualizado");
-        await refreshOutboxOnly();
-      } catch (e) {
-        toast(e.message, true);
-      }
-    };
-  });
-
-  // message update (debounced on input + final on blur)
-  const debouncedSave = debounce(async (row, mensaje) => {
-    const current = (STATE.outbox || []).find(x => x.row === row);
-    const channel_id = String(current?.channel_id || "");
-    const canal = String(current?.canal || "");
-    await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
-  }, 420);
-
-  $$('textarea[data-field="mensaje"]', box).forEach(tx => {
-    tx.oninput = async (ev) => {
-      const row = safeInt(ev.target.dataset.outboxRow);
-      try {
-        await debouncedSave(row, ev.target.value || "");
-      } catch (e) {
-        // silencioso para no spamear; se ve en el toast al blur
-      }
-    };
-    tx.onblur = async (ev) => {
-      const row = safeInt(ev.target.dataset.outboxRow);
-      try {
-        await API.slackOutboxUpdate(
-          row,
-          String((STATE.outbox || []).find(x => x.row === row)?.canal || ""),
-          String((STATE.outbox || []).find(x => x.row === row)?.channel_id || ""),
-          ev.target.value || ""
-        );
-        toast("Mensaje guardado");
-        await refreshOutboxOnly();
-      } catch (e) {
-        toast(e.message, true);
-      }
-    };
-  });
-
-  // copy
-  $$('button[data-action="copy"]', box).forEach(btn => {
-    btn.onclick = async (ev) => {
-      const row = safeInt(ev.target.dataset.row);
-      const current = (STATE.outbox || []).find(x => x.row === row);
-      const msg = current?.mensaje || "";
-      try {
-        await navigator.clipboard.writeText(msg);
-        toast("Copiado");
-      } catch {
-        toast("No se pudo copiar", true);
-      }
-    };
-  });
-
-  // send row
-  $$('button[data-action="send"]', box).forEach(btn => {
-    btn.onclick = async (ev) => {
-      const row = safeInt(ev.target.dataset.row);
-      try {
-        await API.slackOutboxEnviar(row);
-        toast("Enviado");
-        await refreshOutboxOnly();
-      } catch (e) {
-        toast(e.message, true);
-      }
-    };
-  });
-}
-
-async function onGenerarPlan() {
-  $("#opStatus").textContent = "Generando planificación…";
-  try {
-    await API.planificacionGenerar();
-    toast("Planificación generada");
-    STATE.plan = await API.planificacionList();
-    renderPlan();
-  } catch (e) {
-    toast(e.message, true);
-  } finally {
-    $("#opStatus").textContent = "";
-  }
-}
-
-async function onGenerarOutbox() {
-  $("#opStatus").textContent = "Generando Outbox…";
-  try {
-    await API.slackOutboxGenerar();
-    toast("Outbox generado");
-    await refreshOutboxOnly();
-  } catch (e) {
-    toast(e.message, true);
-  } finally {
-    $("#opStatus").textContent = "";
-  }
-}
-
-async function onEnviarTodos() {
-  $("#opStatus").textContent = "Enviando…";
-  try {
-    await API.slackOutboxEnviar(); // sin row => envía todos pendientes
-    toast("Envío masivo ejecutado");
-    await refreshOutboxOnly();
-  } catch (e) {
-    toast(e.message, true);
-  } finally {
-    $("#opStatus").textContent = "";
-  }
-}
-
-/* -----------------------------
-   Components: Colaboradores
------------------------------- */
-function viewColaboradores() {
-  return `
-    <div class="card">
-      <div class="sectionTitle">Colaboradores</div>
-      <div class="muted2">Listado desde la hoja Colaboradores (via backend).</div>
-
-      <div class="sep"></div>
-
-      <div class="toolbar">
-        <div class="pillMini">Total: <strong>${STATE.colaboradores.length}</strong></div>
-        <input id="colabSearch" placeholder="Buscar por nombre / ID / equipo / rol…" style="max-width: 420px;" />
-      </div>
-
-      <div class="sep"></div>
-
-      <div id="colabTable"></div>
-    </div>
-  `;
-}
-
-function wireColaboradores() {
-  const input = $("#colabSearch");
-  const renderTable = () => {
-    const q = norm(input?.value || "");
-    const rows = (STATE.colaboradores || []).filter(c => {
-      if (!q) return true;
-      const blob = [
-        c.id_meli, c.nombre, c.equipo, c.rol, c.ubicacion, c.slack_id
-      ].map(x => norm(x)).join(" ");
-      return blob.includes(q);
-    });
-
-    $("#colabTable").innerHTML = `
-      <div class="tableWrap">
-        <table>
-          <thead>
-            <tr>
-              <th style="width:170px;">ID_MELI</th>
-              <th style="width:280px;">Nombre</th>
-              <th style="width:220px;">Equipo</th>
-              <th style="width:220px;">Rol</th>
-              <th style="width:180px;">Ubicación</th>
-              <th style="width:180px;">Slack_ID</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.map(c => `
-              <tr>
-                <td class="mono">${escapeHtml(c.id_meli || "")}</td>
-                <td>${escapeHtml(c.nombre || "")}</td>
-                <td>${escapeHtml(c.equipo || "")}</td>
-                <td>${escapeHtml(c.rol || "")}</td>
-                <td>${escapeHtml(c.ubicacion || "")}</td>
-                <td class="mono">${escapeHtml(c.slack_id || "")}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>
-      <div class="muted2" style="margin-top:10px;">Mostrando: ${rows.length}</div>
-    `;
+      toast("Error", e?.message || String(e));
+    } finally { setLoading(false); }
   };
 
-  if (input) input.oninput = debounce(renderTable, 120);
-  renderTable();
-}
+  $("#op_refresh_plan").onclick = loadPlanificacionOperativa;
 
-/* -----------------------------
-   Components: Habilitaciones
------------------------------- */
-function viewHabilitaciones() {
-  const hab = STATE.hab;
-  if (!hab || hab?._error) {
-    return `
-      <div class="card">
-        <div class="sectionTitle">Habilitaciones</div>
-        <div class="errorBox">No pude cargar habilitaciones. ${escapeHtml(hab?._error || "Verificá backend/hoja.")}</div>
+  $("#op_gen_outbox").onclick = async () => {
+    setLoading(true, "Generando outbox…");
+    try {
+      const r = await API.slackOutboxGenerar();
+      toast("Outbox generado", `Filas: ${r?.rows ?? "—"}`);
+      await loadOutboxOperativa();
+    } catch (e) {
+      toast("Error", e?.message || String(e));
+    } finally { setLoading(false); }
+  };
+
+  $("#op_send_all").onclick = async () => {
+    setLoading(true, "Enviando pendientes…");
+    try {
+      const r = await API.slackOutboxEnviar();
+      toast("Slack", `Enviados: ${r?.sent ?? "—"}`);
+      await loadOutboxOperativa();
+    } catch (e) {
+      toast("Error", e?.message || String(e));
+    } finally { setLoading(false); }
+  };
+
+  $("#op_refresh_outbox").onclick = loadOutboxOperativa;
+  $("#op_refresh_flujos").onclick = loadFlujosOperativa;
+
+  $("#op_add_flujo").onclick = () => {
+    openModal("Agregar flujo", `
+      <div class="grid" style="gap:10px">
+        <div class="field"><label>Flujo</label><input id="m_flujo" placeholder="Ej: Enhancement"></div>
+        <div class="field"><label>Perfiles requeridos</label><input id="m_cant" type="number" min="0" placeholder="Ej: 5"></div>
+        <div class="field"><label>Slack channel (ID o nombre)</label><input id="m_ch" placeholder="Ej: C07... o team-catalogo"></div>
+        <div class="field"><label>Notas default</label><input id="m_notas" placeholder="Opcional"></div>
+        <div class="row">
+          <button class="btn primary" id="m_save">Guardar</button>
+          <button class="btn" id="m_cancel">Cancelar</button>
+        </div>
       </div>
-    `;
-  }
-
-  return `
-    <div class="card">
-      <div class="sectionTitle">Habilitaciones</div>
-      <div class="muted2">Matriz por colaborador y flujo (H_ / F_ en la hoja Habilitaciones).</div>
-
-      <div class="sep"></div>
-
-      <div class="toolbar">
-        <div class="pillMini">Flujos: <strong>${hab.flujos.length}</strong></div>
-        <div class="pillMini">Colaboradores: <strong>${hab.rows.length}</strong></div>
-        <input id="habSearch" placeholder="Buscar por nombre / ID / equipo…" style="max-width: 420px;" />
-        <select id="habFlujoFilter" style="max-width: 320px;">
-          <option value="">Ver: todos los flujos</option>
-          ${hab.flujos.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("")}
-        </select>
-        <div class="right muted2" id="habStatus"></div>
-      </div>
-
-      <div class="sep"></div>
-
-      <div id="habTable"></div>
-    </div>
-  `;
-}
-
-function wireHabilitaciones() {
-  const hab = STATE.hab;
-  if (!hab || hab?._error) return;
-
-  const search = $("#habSearch");
-  const filtro = $("#habFlujoFilter");
-  const status = $("#habStatus");
-
-  const renderTable = () => {
-    const q = norm(search?.value || "");
-    const onlyFlujo = (filtro?.value || "").trim();
-
-    const rows = (hab.rows || []).filter(r => {
-      if (!q) return true;
-      const blob = [r.id_meli, r.nombre, r.equipo, r.rol, r.ubicacion].map(x => norm(x)).join(" ");
-      return blob.includes(q);
-    });
-
-    const flujos = onlyFlujo ? [onlyFlujo] : (hab.flujos || []);
-
-    const headCols = flujos.map(f => `
-      <th style="min-width: 220px;">${escapeHtml(f)}</th>
-    `).join("");
-
-    const body = rows.map(r => {
-      const cols = flujos.map(f => {
-        const cell = r.perFlujo?.[f] || { habilitado: false, fijo: false };
-        return `
-          <td>
-            <div class="row" style="gap:14px;">
-              <label class="switch">
-                <input type="checkbox" data-kind="habilitado" data-id="${escapeHtml(r.id_meli)}" data-flujo="${escapeHtml(f)}" ${cell.habilitado ? "checked" : ""} />
-                <span class="small">Habilitado</span>
-              </label>
-              <label class="switch">
-                <input type="checkbox" data-kind="fijo" data-id="${escapeHtml(r.id_meli)}" data-flujo="${escapeHtml(f)}" ${cell.fijo ? "checked" : ""} />
-                <span class="small">Fijo</span>
-              </label>
-            </div>
-          </td>
-        `;
-      }).join("");
-
-      return `
-        <tr>
-          <td class="mono">${escapeHtml(r.id_meli || "")}</td>
-          <td>${escapeHtml(r.nombre || "")}</td>
-          <td>${escapeHtml(r.equipo || "")}</td>
-          ${cols}
-        </tr>
-      `;
-    }).join("");
-
-    $("#habTable").innerHTML = `
-      <div class="tableWrap">
-        <table>
-          <thead>
-            <tr>
-              <th style="width:160px;">ID_MELI</th>
-              <th style="width:260px;">Nombre</th>
-              <th style="width:220px;">Equipo</th>
-              ${headCols}
-            </tr>
-          </thead>
-          <tbody>${body}</tbody>
-        </table>
-      </div>
-      <div class="muted2" style="margin-top:10px;">Mostrando: ${rows.length}</div>
-    `;
-
-    // wire toggles
-    $$('input[type="checkbox"][data-kind]', $("#habTable")).forEach(chk => {
-      chk.onchange = async (ev) => {
-        const idMeli = ev.target.dataset.id;
-        const flujo = ev.target.dataset.flujo;
-        const kind = ev.target.dataset.kind;
-        const value = ev.target.checked;
-
-        status.textContent = `Guardando ${idMeli} / ${flujo}…`;
-
+    `, (root) => {
+      $("#m_cancel", root).onclick = closeModal;
+      $("#m_save", root).onclick = async () => {
         try {
-          if (kind === "habilitado") {
-            await API.habilitacionesSet(idMeli, flujo, value, undefined);
-          } else {
-            await API.habilitacionesSet(idMeli, flujo, undefined, value);
-          }
-          toast("Guardado");
-          await refreshHabilitacionesOnly(); // refresca matriz (verdad fuente)
+          const flujo = $("#m_flujo", root).value.trim();
+          const cant = Number($("#m_cant", root).value || 0);
+          const ch = $("#m_ch", root).value.trim();
+          const notas = $("#m_notas", root).value.trim();
+          if (!flujo) throw new Error("Flujo requerido");
+          await API.flujosUpsert(flujo, cant, ch, notas);
+          toast("Flujo guardado");
+          closeModal();
+          await loadFlujosOperativa();
         } catch (e) {
-          toast(e.message, true);
-          // rollback visual
-          ev.target.checked = !value;
-        } finally {
-          status.textContent = "";
+          toast("Error", e?.message || String(e));
         }
       };
     });
   };
-
-  if (search) search.oninput = debounce(renderTable, 120);
-  if (filtro) filtro.onchange = renderTable;
-
-  renderTable();
 }
 
-/* -----------------------------
-   Components: Presentismo
------------------------------- */
-function viewPresentismo() {
-  const date = STATE.pres.date || fmtYMD(new Date());
-  const stats = STATE.pres.stats;
-  const week = STATE.pres.week;
+async function loadPlanificacionOperativa() {
+  try {
+    const rows = await API.planificacionList();
+    state.cache.planificacion = rows || [];
+    $("#op_plan_meta").textContent = `Filas: ${state.cache.planificacion.length}`;
+    const tb = $("#op_plan_rows");
+    tb.innerHTML = state.cache.planificacion.map(r => `
+      <tr>
+        <td>${escapeHtml(r.fecha || "")}</td>
+        <td><b>${escapeHtml(r.flujo || "")}</b></td>
+        <td>${escapeHtml(r.id_meli || "")}</td>
+        <td>${escapeHtml(r.nombre || "")}</td>
+        <td>${r.es_fijo ? "SI" : "NO"}</td>
+        <td>${escapeHtml(r.canal || r.slack_channel || "")}</td>
+      </tr>
+    `).join("") || `<tr><td colspan="6" class="muted">Sin datos</td></tr>`;
+  } catch (e) {
+    toast("Error planificacion.list", e?.message || String(e));
+  }
+}
 
-  const statsBox = (() => {
-    if (!stats || stats?._error) {
-      return `<div class="errorBox">No pude cargar stats. ${escapeHtml(stats?._error || "")}</div>`;
-    }
-    return `
-      <div class="kpi" style="margin-top:10px;">
-        <div class="k"><div class="muted2">Fecha</div><div class="v mono">${escapeHtml(stats.date || date)}</div></div>
-        <div class="k"><div class="muted2">Presentes (P)</div><div class="v">${safeInt(stats.presentes, 0)}</div></div>
-        <div class="k"><div class="muted2">Licencias</div><div class="v">${safeInt(stats.licencias, 0)}</div></div>
-        <div class="k"><div class="muted2">Sin marca</div><div class="v">${safeInt(stats.sin_marca, 0)}</div></div>
+async function loadOutboxOperativa() {
+  try {
+    const rows = await API.slackOutboxList();
+    state.cache.outbox = rows || [];
+    const pending = state.cache.outbox.filter(x => String(x.estado || "").startsWith("PENDIENTE")).length;
+    $("#op_outbox_meta").textContent = `Filas: ${state.cache.outbox.length} | Pendientes: ${pending}`;
+
+    const tb = $("#op_outbox_rows");
+    tb.innerHTML = state.cache.outbox.map(r => `
+      <tr>
+        <td>${escapeHtml(r.row)}</td>
+        <td>${escapeHtml(r.tipo || "")}</td>
+        <td>${escapeHtml(r.canal || "")}</td>
+        <td>${escapeHtml(r.slack_channel || "")}</td>
+        <td>${escapeHtml(r.estado || "")}</td>
+        <td class="row" style="gap:8px">
+          <button class="btn" data-act="edit" data-row="${escapeHtml(r.row)}">Editar</button>
+          <button class="btn primary" data-act="send" data-row="${escapeHtml(r.row)}">Enviar</button>
+        </td>
+      </tr>
+    `).join("") || `<tr><td colspan="6" class="muted">Sin datos</td></tr>`;
+
+    $$("#op_outbox_rows [data-act='edit']").forEach(btn => {
+      btn.onclick = () => openEditOutbox(Number(btn.dataset.row));
+    });
+    $$("#op_outbox_rows [data-act='send']").forEach(btn => {
+      btn.onclick = async () => {
+        setLoading(true, "Enviando…");
+        try {
+          await API.slackOutboxEnviar(Number(btn.dataset.row));
+          toast("Enviado", `Fila ${btn.dataset.row}`);
+          await loadOutboxOperativa();
+        } catch (e) {
+          toast("Error", e?.message || String(e));
+        } finally {
+          setLoading(false);
+        }
+      };
+    });
+
+  } catch (e) {
+    toast("Error slack.outbox.list", e?.message || String(e));
+  }
+}
+
+function openEditOutbox(rowNumber) {
+  const row = (state.cache.outbox || []).find(r => Number(r.row) === Number(rowNumber));
+  if (!row) return toast("No encontré la fila", String(rowNumber));
+
+  openModal(`Editar Outbox (#${rowNumber})`, `
+    <div class="grid" style="gap:10px">
+      <div class="field"><label>Tipo</label><input id="o_tipo" value="${escapeHtml(row.tipo || "")}" placeholder="GENERAL / POR_FLUJO"></div>
+      <div class="field"><label>Canal (nombre)</label><input id="o_canal" value="${escapeHtml(row.canal || "")}"></div>
+      <div class="field"><label>Slack channel (ID o nombre)</label><input id="o_ch" value="${escapeHtml(row.slack_channel || "")}"></div>
+      <div class="field"><label>Mensaje</label><textarea id="o_msg">${escapeHtml(row.mensaje || "")}</textarea></div>
+      <div class="row">
+        <button class="btn primary" id="o_save">Guardar</button>
+        <button class="btn" id="o_cancel">Cancelar</button>
       </div>
-    `;
-  })();
+      ${row.error ? `<div class="muted"><b>Error:</b> ${escapeHtml(row.error)}</div>` : ""}
+    </div>
+  `, (root) => {
+    $("#o_cancel", root).onclick = closeModal;
+    $("#o_save", root).onclick = async () => {
+      try {
+        const tipo = $("#o_tipo", root).value.trim();
+        const canal = $("#o_canal", root).value.trim();
+        const channel_id = $("#o_ch", root).value.trim();
+        const mensaje = $("#o_msg", root).value;
+        await API.slackOutboxUpdate(rowNumber, canal, channel_id, mensaje, tipo);
+        toast("Outbox actualizada", `Fila ${rowNumber}`);
+        closeModal();
+        await loadOutboxOperativa();
+      } catch (e) {
+        toast("Error", e?.message || String(e));
+      }
+    };
+  });
+}
 
-  const weekBox = (() => {
-    if (!week || week?._error) {
-      return `<div class="errorBox">No pude cargar semana. ${escapeHtml(week?._error || "")}</div>`;
-    }
-    const labels = week.labels || [];
-    const rows = week.rows || [];
-    return `
-      <div class="muted2" style="margin-top:10px;">
-        Semana: <span class="mono">${escapeHtml(week.from || "")}</span> → <span class="mono">${escapeHtml(week.to || "")}</span>
+async function loadFlujosOperativa() {
+  try {
+    const [flujos, canales] = await Promise.all([API.flujosList(), API.canalesList()]);
+    state.cache.flujos = flujos || [];
+    state.cache.canales = canales || [];
+
+    const tb = $("#op_flujos_rows");
+    tb.innerHTML = state.cache.flujos.map(f => `
+      <tr>
+        <td><b>${escapeHtml(f.flujo)}</b></td>
+        <td><input data-f="cant" data-flujo="${escapeHtml(f.flujo)}" type="number" min="0" value="${escapeHtml(f.perfiles_requeridos)}"></td>
+        <td><input data-f="ch" data-flujo="${escapeHtml(f.flujo)}" value="${escapeHtml(f.slack_channel || "")}" placeholder="C07... o nombre"></td>
+        <td><input data-f="notas" data-flujo="${escapeHtml(f.flujo)}" value="${escapeHtml(f.notas_default || "")}" placeholder="Opcional"></td>
+        <td class="row" style="gap:8px">
+          <button class="btn primary" data-act="save" data-flujo="${escapeHtml(f.flujo)}">Guardar</button>
+          <button class="btn danger" data-act="del" data-flujo="${escapeHtml(f.flujo)}">Eliminar</button>
+        </td>
+      </tr>
+    `).join("") || `<tr><td colspan="5" class="muted">No hay flujos</td></tr>`;
+
+    $$("#op_flujos_rows [data-act='save']").forEach(btn => {
+      btn.onclick = async () => {
+        const flujo = btn.dataset.flujo;
+        const cant = Number($(`#op_flujos_rows input[data-f="cant"][data-flujo="${CSS.escape(flujo)}"]`).value || 0);
+        const ch = $(`#op_flujos_rows input[data-f="ch"][data-flujo="${CSS.escape(flujo)}"]`).value.trim();
+        const notas = $(`#op_flujos_rows input[data-f="notas"][data-flujo="${CSS.escape(flujo)}"]`).value.trim();
+        try {
+          await API.flujosUpsert(flujo, cant, ch, notas);
+          toast("Flujo guardado", flujo);
+          await loadFlujosOperativa();
+        } catch (e) {
+          toast("Error", e?.message || String(e));
+        }
+      };
+    });
+
+    $$("#op_flujos_rows [data-act='del']").forEach(btn => {
+      btn.onclick = async () => {
+        const flujo = btn.dataset.flujo;
+        try {
+          await API.flujosDelete(flujo);
+          toast("Flujo eliminado", flujo);
+          await loadFlujosOperativa();
+        } catch (e) {
+          toast("Error", e?.message || String(e));
+        }
+      };
+    });
+
+  } catch (e) {
+    toast("Error flujos/canales", e?.message || String(e));
+  }
+}
+
+/* =========================
+   COLABORADORES
+========================= */
+
+function colaboradoresHtml() {
+  return `
+    <div class="panel">
+      <div class="h">
+        <h2>Colaboradores</h2>
+        <div class="row">
+          <input id="col_q" placeholder="Buscar por nombre / ID / equipo…" style="min-width:320px">
+          <button class="btn" id="col_refresh">Actualizar</button>
+        </div>
       </div>
 
-      <div class="tableWrap" style="margin-top:10px;">
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th style="width:200px;">Colaborador</th>
-              <th style="width:160px;">ID_MELI</th>
-              ${labels.map(l => `<th style="min-width: 140px;">${escapeHtml(l)}</th>`).join("")}
+              <th>ID</th><th>Nombre</th><th>Rol</th><th>Equipo</th><th>Slack</th><th>Ubicación</th>
             </tr>
           </thead>
-          <tbody>
-            ${rows.map(r => `
-              <tr>
-                <td>${escapeHtml(r.nombre || "")}</td>
-                <td class="mono">${escapeHtml(r.id_meli || "")}</td>
-                ${(r.dias || []).map(v => `<td class="mono">${escapeHtml(v || "")}</td>`).join("")}
-              </tr>
-            `).join("")}
-          </tbody>
+          <tbody id="col_rows"></tbody>
         </table>
       </div>
-    `;
-  })();
+    </div>
+  `;
+}
 
+async function bootColaboradores() {
+  setLoading(true, "Cargando colaboradores…");
+  await loadColaboradores();
+  $("#col_refresh").onclick = loadColaboradores;
+  $("#col_q").oninput = () => renderColaboradores();
+  setLoading(false);
+}
+
+async function loadColaboradores() {
+  try {
+    state.cache.colaboradores = await API.colaboradoresList();
+    renderColaboradores();
+    toast("Colaboradores", `Filas: ${state.cache.colaboradores.length}`);
+  } catch (e) {
+    toast("Error", e?.message || String(e));
+  }
+}
+
+function renderColaboradores() {
+  const q = ($("#col_q").value || "").trim().toLowerCase();
+  const rows = (state.cache.colaboradores || []).filter(r => {
+    if (!q) return true;
+    const hay = `${r.id_meli} ${r.nombre} ${r.rol} ${r.equipo} ${r.tag}`.toLowerCase();
+    return hay.includes(q);
+  });
+
+  $("#col_rows").innerHTML = rows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.id_meli)}</td>
+      <td><b>${escapeHtml(r.nombre)}</b></td>
+      <td>${escapeHtml(r.rol || "")}</td>
+      <td>${escapeHtml(r.equipo || "")}</td>
+      <td>${escapeHtml(r.slack_id || "")}</td>
+      <td>${escapeHtml(r.ubicacion || "")}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="6" class="muted">Sin resultados</td></tr>`;
+}
+
+/* =========================
+   HABILITACIONES
+========================= */
+
+function habilitacionesHtml() {
   return `
-    <div class="hubGrid2">
-      <div class="card">
-        <div class="sectionTitle">Presentismo</div>
-        <div class="muted2">Vista semanal + stats del día. También podés cargar licencias.</div>
+    <div class="panel">
+      <div class="h">
+        <h2>Habilitaciones</h2>
+        <div class="row">
+          <input id="hab_q" placeholder="Buscar colaborador…" style="min-width:320px">
+          <button class="btn" id="hab_refresh">Actualizar</button>
+        </div>
+      </div>
+      <div class="muted" id="hab_meta">—</div>
+      <div class="table-wrap" style="margin-top:10px">
+        <table>
+          <thead id="hab_head"></thead>
+          <tbody id="hab_body"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
 
-        <div class="sep"></div>
+async function bootHabilitaciones() {
+  setLoading(true, "Cargando habilitaciones…");
+  await loadHabilitaciones();
+  $("#hab_refresh").onclick = loadHabilitaciones;
+  $("#hab_q").oninput = renderHabilitaciones;
+  setLoading(false);
+}
 
-        <div class="toolbar">
-          <div class="pillMini">Fecha</div>
-          <input id="presDate" value="${escapeHtml(date)}" class="mono" style="max-width: 200px;" />
-          <button id="btnPresLoad" class="btn">Cargar</button>
-          <div class="right muted2" id="presStatus"></div>
+async function loadHabilitaciones() {
+  try {
+    const data = await API.habilitacionesList();
+    state.cache.habilitaciones = data;
+    renderHabilitaciones();
+  } catch (e) {
+    toast("Error", e?.message || String(e));
+  }
+}
+
+function renderHabilitaciones() {
+  const data = state.cache.habilitaciones;
+  if (!data) return;
+
+  const q = ($("#hab_q").value || "").trim().toLowerCase();
+  const flujos = data.flujos || [];
+  const rows = (data.rows || []).filter(r => {
+    if (!q) return true;
+    const hay = `${r.id_meli} ${r.nombre}`.toLowerCase();
+    return hay.includes(q);
+  });
+
+  $("#hab_meta").textContent = `Colaboradores: ${rows.length} | Flujos: ${flujos.length}`;
+
+  $("#hab_head").innerHTML = `
+    <tr>
+      <th>ID</th><th>Nombre</th>
+      ${flujos.map(f => `<th>${escapeHtml(f)}<div class="muted" style="font-weight:400">H / F</div></th>`).join("")}
+    </tr>
+  `;
+
+  $("#hab_body").innerHTML = rows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.id_meli)}</td>
+      <td><b>${escapeHtml(r.nombre || "")}</b></td>
+      ${flujos.map(f => {
+        const v = r.per_flows?.[f] || { habilitado:false, fijo:false };
+        const hid = `${r.id_meli}||${f}`;
+        return `
+          <td>
+            <div class="row" style="gap:10px;align-items:center">
+              <label class="pill" style="padding:6px 8px">
+                <input type="checkbox" data-id="${escapeHtml(r.id_meli)}" data-flujo="${escapeHtml(f)}" data-k="h" ${v.habilitado ? "checked" : ""}>
+                H
+              </label>
+              <label class="pill" style="padding:6px 8px">
+                <input type="checkbox" data-id="${escapeHtml(r.id_meli)}" data-flujo="${escapeHtml(f)}" data-k="f" ${v.fijo ? "checked" : ""}>
+                F
+              </label>
+            </div>
+          </td>
+        `;
+      }).join("")}
+    </tr>
+  `).join("") || `<tr><td colspan="${2 + flujos.length}" class="muted">Sin resultados</td></tr>`;
+
+  // Wire toggles
+  $$("#hab_body input[type='checkbox']").forEach(cb => {
+    cb.onchange = async () => {
+      const idMeli = cb.dataset.id;
+      const flujo = cb.dataset.flujo;
+      const kind = cb.dataset.k;
+
+      const cell = cb.closest("td");
+      const hCb = $("input[data-k='h']", cell);
+      const fCb = $("input[data-k='f']", cell);
+
+      // regla: si fijo=true => habilitado=true
+      if (kind === "f" && fCb.checked) hCb.checked = true;
+      // regla: si habilitado=false => fijo=false
+      if (kind === "h" && !hCb.checked) fCb.checked = false;
+
+      try {
+        await API.habilitacionesSet(idMeli, flujo, hCb.checked, fCb.checked);
+        toast("Guardado", `${idMeli} · ${flujo} (H:${hCb.checked ? "1" : "0"} F:${fCb.checked ? "1" : "0"})`);
+      } catch (e) {
+        toast("Error", e?.message || String(e));
+        // rollback visual (lo mínimo para no mentirte)
+        await loadHabilitaciones();
+      }
+    };
+  });
+}
+
+/* =========================
+   PRESENTISMO
+========================= */
+
+function presentismoHtml() {
+  const today = ymdLocal();
+  return `
+    <div class="grid grid-2">
+      <div class="panel">
+        <div class="h">
+          <h2>Semana</h2>
+          <div class="row">
+            <input id="pr_date" type="date" value="${escapeHtml(today)}">
+            <button class="btn" id="pr_load">Cargar</button>
+          </div>
         </div>
 
-        ${statsBox}
-
-        <div class="sep"></div>
-
-        <div class="sectionTitle">Semana</div>
-        ${weekBox}
+        <div class="muted" id="pr_meta">—</div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead id="pr_head"></thead>
+            <tbody id="pr_body"></tbody>
+          </table>
+        </div>
       </div>
 
-      <div class="card">
-        <div class="sectionTitle">Cargar licencia</div>
-        <div class="muted2">Esto llama <span class="mono">presentismo.licencias.set</span> (desde/hasta, tipo).</div>
+      <div class="panel">
+        <div class="h"><h2>Registrar licencia/ausencia</h2><span class="muted">impacta Presentismo</span></div>
 
-        <div class="sep"></div>
-
-        <div class="row" style="gap:10px;">
-          <div style="flex:1;">
-            <div class="small">Colaborador</div>
-            <select id="licId">
-              ${STATE.colaboradores.map(c => `
-                <option value="${escapeHtml(c.id_meli)}">${escapeHtml(`${c.nombre || c.id_meli} (${c.id_meli})`)}</option>
-              `).join("")}
+        <div class="grid" style="gap:10px">
+          <div class="field">
+            <label>Colaborador</label>
+            <select id="pr_user"></select>
+          </div>
+          <div class="row">
+            <div class="field"><label>Desde</label><input id="pr_from" type="date" value="${escapeHtml(today)}"></div>
+            <div class="field"><label>Hasta</label><input id="pr_to" type="date" value="${escapeHtml(today)}"></div>
+          </div>
+          <div class="field">
+            <label>Tipo</label>
+            <select id="pr_tipo">
+              <option value="V">V - Vacaciones</option>
+              <option value="E">E - Enfermedad</option>
+              <option value="M">M - Médico</option>
+              <option value="MM">MM - Mudanza</option>
+              <option value="AI">AI - Asuntos internos</option>
+              <option value="P">P - Presente</option>
             </select>
           </div>
-        </div>
-
-        <div class="row" style="gap:10px; margin-top:10px;">
-          <div style="flex:1;">
-            <div class="small">Desde (YYYY-MM-DD)</div>
-            <input id="licDesde" value="${escapeHtml(date)}" class="mono" />
+          <div class="row">
+            <button class="btn primary" id="pr_save">Guardar</button>
+            <button class="btn" id="pr_refresh_users">Actualizar lista</button>
           </div>
-          <div style="flex:1;">
-            <div class="small">Hasta (YYYY-MM-DD)</div>
-            <input id="licHasta" value="${escapeHtml(date)}" class="mono" />
+
+          <div class="muted">
+            Si “no aparecen presentes”, no es magia: revisá que <b>Presentismo</b> tenga columna <b>ID_MELI</b> y que los IDs coincidan con Habilitaciones.
           </div>
-        </div>
-
-        <div class="row" style="gap:10px; margin-top:10px;">
-          <div style="flex:1;">
-            <div class="small">Tipo</div>
-            <select id="licTipo">
-              <option value="E">E — Enfermedad</option>
-              <option value="M">M — Médico</option>
-              <option value="MM">MM — Med. / Extendido</option>
-              <option value="AI">AI — Ausencia Injustificada</option>
-              <option value="V">V — Vacaciones</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="sep"></div>
-
-        <div class="toolbar">
-          <button id="btnLicSave" class="btn primary">Guardar licencia</button>
-          <div class="muted2 right" id="licStatus"></div>
-        </div>
-
-        <div class="sep"></div>
-
-        <div class="muted2">
-          Si esto falla: tu backend exige que exista la hoja <span class="mono">Presentismo</span> y que los IDs coincidan.
-          Si te devuelve “Unauthorized”, tu Netlify env no está inyectando el token.
         </div>
       </div>
     </div>
   `;
+}
+
+async function bootPresentismo() {
+  setLoading(true, "Cargando presentismo…");
+  await Promise.all([loadPresentismoWeek(), loadPresentismoUsers()]);
+  wirePresentismo();
+  setLoading(false);
 }
 
 function wirePresentismo() {
-  const presDate = $("#presDate");
-  const presStatus = $("#presStatus");
+  $("#pr_load").onclick = loadPresentismoWeek;
+  $("#pr_refresh_users").onclick = loadPresentismoUsers;
 
-  $("#btnPresLoad").onclick = async () => {
-    const d = (presDate.value || "").trim();
-    presStatus.textContent = "Cargando…";
+  $("#pr_save").onclick = async () => {
+    setLoading(true, "Guardando…");
     try {
-      await loadPresentismo(d);
-      toast("Presentismo actualizado");
-      render();
+      const idMeli = $("#pr_user").value;
+      const desde = $("#pr_from").value;
+      const hasta = $("#pr_to").value;
+      const tipo = $("#pr_tipo").value;
+      if (!idMeli) throw new Error("Seleccioná un colaborador");
+      await API.presentismoLicenciasSet(idMeli, desde, hasta, tipo);
+      toast("Presentismo", "Registro guardado");
+      await loadPresentismoWeek();
     } catch (e) {
-      toast(e.message, true);
+      toast("Error", e?.message || String(e));
     } finally {
-      presStatus.textContent = "";
-    }
-  };
-
-  const licStatus = $("#licStatus");
-  $("#btnLicSave").onclick = async () => {
-    const idMeli = ($("#licId").value || "").trim();
-    const desde = ($("#licDesde").value || "").trim();
-    const hasta = ($("#licHasta").value || "").trim();
-    const tipo = ($("#licTipo").value || "").trim();
-
-    if (!idMeli) return toast("Elegí un colaborador", true);
-    if (!desde) return toast("Desde requerido", true);
-    if (!tipo) return toast("Tipo requerido", true);
-
-    licStatus.textContent = "Guardando…";
-    try {
-      await rawPost("presentismo.licencias.set", { idMeli, desde, hasta, tipo });
-      toast("Licencia guardada");
-      await loadPresentismo(STATE.pres.date);
-      render();
-    } catch (e) {
-      toast(e.message, true);
-    } finally {
-      licStatus.textContent = "";
+      setLoading(false);
     }
   };
 }
 
-/* -----------------------------
-   Components: Dashboard (placeholder realista)
------------------------------- */
-function viewDashboard() {
-  // No invento endpoints que no existen: dejo dashboard “básico” con lo que hoy ya tenés.
-  const pres = STATE.pres.stats && !STATE.pres.stats?._error ? STATE.pres.stats : null;
-  const planCount = (STATE.plan || []).filter(r => String(r.flujo || "").trim()).length;
-  const outPend = (STATE.outbox || []).filter(r => !String(r.estado || "").toUpperCase().startsWith("ENVIADO")).length;
+async function loadPresentismoUsers() {
+  try {
+    const colabs = await API.colaboradoresList();
+    state.cache.colaboradores = colabs;
 
+    const sel = $("#pr_user");
+    sel.innerHTML = colabs
+      .slice()
+      .sort((a,b) => String(a.nombre||"").localeCompare(String(b.nombre||"")))
+      .map(c => `<option value="${escapeHtml(c.id_meli)}">${escapeHtml(c.nombre)} (${escapeHtml(c.id_meli)})</option>`)
+      .join("");
+  } catch (e) {
+    toast("Error colaboradores", e?.message || String(e));
+  }
+}
+
+async function loadPresentismoWeek() {
+  try {
+    const date = $("#pr_date")?.value || ymdLocal();
+    const data = await API.presentismoWeek(date);
+    state.cache.presentismoWeek = data;
+
+    $("#pr_meta").textContent = `Semana: ${data.week_start} → ${data.week_end} | Colaboradores: ${data.rows.length}`;
+
+    $("#pr_head").innerHTML = `
+      <tr>
+        <th>ID</th><th>Nombre</th>
+        ${data.days.map(d => `<th>${escapeHtml(d.label)}<div class="muted" style="font-weight:400">${escapeHtml(d.key)}</div></th>`).join("")}
+      </tr>
+    `;
+
+    $("#pr_body").innerHTML = data.rows.map(r => `
+      <tr>
+        <td>${escapeHtml(r.id_meli)}</td>
+        <td><b>${escapeHtml(r.nombre || "")}</b></td>
+        ${data.days.map(d => {
+          const v = (r.values && r.values[d.key]) ? String(r.values[d.key]) : "";
+          const cls = v === "P" ? "ok" : (v ? "warn" : "muted");
+          return `<td class="${cls}">${escapeHtml(v || "")}</td>`;
+        }).join("")}
+      </tr>
+    `).join("") || `<tr><td colspan="${2 + data.days.length}" class="muted">Sin datos</td></tr>`;
+
+  } catch (e) {
+    toast("Error presentismo.week", e?.message || String(e));
+  }
+}
+
+/* =========================
+   PRODUCTIVIDAD / CALIDAD
+========================= */
+
+function productividadHtml() {
   return `
-    <div class="card">
-      <div class="sectionTitle">Dashboard</div>
-      <div class="muted2">Indicadores rápidos. (Productividad/Calidad: los sumamos cuando tengas endpoints o fuentes listas).</div>
-
-      <div class="sep"></div>
-
-      <div class="kpi">
-        <div class="k">
-          <div class="muted2">Planificación (rows)</div>
-          <div class="v">${planCount}</div>
-        </div>
-        <div class="k">
-          <div class="muted2">Slack pendientes</div>
-          <div class="v">${outPend}</div>
-        </div>
-        <div class="k">
-          <div class="muted2">Presentes (hoy)</div>
-          <div class="v">${pres ? safeInt(pres.presentes, 0) : "—"}</div>
-        </div>
-        <div class="k">
-          <div class="muted2">Licencias (hoy)</div>
-          <div class="v">${pres ? safeInt(pres.licencias, 0) : "—"}</div>
-        </div>
+    <div class="panel">
+      <div class="h">
+        <h2>Productividad</h2>
+        <button class="btn" id="pd_refresh">Actualizar</button>
       </div>
-
-      <div class="sep"></div>
-
-      <div class="sectionTitle">Siguientes pasos (sin humo)</div>
-      <div class="muted2">
-        <ul>
-          <li><span class="mono">productividad.summary</span> (GET): tasks, tareas/día, por flujo, por colaborador.</li>
-          <li><span class="mono">calidad.pm.summary</span> (GET): efectividad por semana y usuario (ya tenés recalcular en el script “inspiración”).</li>
-          <li>Cuando existan, los enchufamos acá con cards + tablas + filtros.</li>
-        </ul>
+      <div class="muted" id="pd_meta">—</div>
+      <div class="table-wrap" style="margin-top:10px">
+        <table>
+          <thead id="pd_head"></thead>
+          <tbody id="pd_body"></tbody>
+        </table>
       </div>
     </div>
   `;
 }
-function wireDashboard() {}
 
-/* -----------------------------
-   Refresh helpers
------------------------------- */
-async function refreshFlujosOnly() {
-  STATE.flujos = await API.flujosList();
-  renderFlujos();
+async function bootProductividad() {
+  setLoading(true, "Cargando productividad…");
+  await loadProductividad();
+  $("#pd_refresh").onclick = loadProductividad;
+  setLoading(false);
 }
-async function refreshOutboxOnly() {
-  STATE.outbox = await API.slackOutboxList();
-  renderOutbox();
-}
-async function refreshHabilitacionesOnly() {
+
+async function loadProductividad() {
   try {
-    STATE.hab = await API.habilitacionesList();
-    if (STATE.view === "habilitaciones") render();
+    const data = await API.productividadList();
+    state.cache.productividad = data;
+    renderGenericTable("pd", data);
   } catch (e) {
-    toast(e.message, true);
+    toast("Productividad", e?.message || String(e));
+    renderEmptyGeneric("pd", "No hay datos (o falta hoja Productividad)");
   }
 }
 
-/* -----------------------------
-   Init
------------------------------- */
-(async function init() {
-  try {
-    STATE.loading = true;
-    render();
+function calidadHtml() {
+  return `
+    <div class="panel">
+      <div class="h">
+        <h2>Calidad</h2>
+        <button class="btn" id="ql_refresh">Actualizar</button>
+      </div>
+      <div class="muted" id="ql_meta">—</div>
+      <div class="table-wrap" style="margin-top:10px">
+        <table>
+          <thead id="ql_head"></thead>
+          <tbody id="ql_body"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
 
-    await loadCommon();
-    await Promise.all([
-      loadOperativa(),
-      loadHabilitaciones().catch((e) => (STATE.hab = { _error: e.message })),
-      loadPresentismo(STATE.pres.date).catch((e) => {
-        STATE.pres.week = { _error: e.message };
-        STATE.pres.stats = { _error: e.message };
-      }),
-    ]);
+async function bootCalidad() {
+  setLoading(true, "Cargando calidad…");
+  await loadCalidad();
+  $("#ql_refresh").onclick = loadCalidad;
+  setLoading(false);
+}
+
+async function loadCalidad() {
+  try {
+    const data = await API.calidadPmList();
+    state.cache.calidad = data;
+    renderGenericTable("ql", data);
   } catch (e) {
-    $("#app").innerHTML = `<div class="errorBox">Error inicial: ${escapeHtml(e.message)}</div>`;
-    return;
-  } finally {
-    STATE.loading = false;
-    render();
+    toast("Calidad", e?.message || String(e));
+    renderEmptyGeneric("ql", "No hay datos (o falta hoja Calidad_PM)");
   }
-})();
+}
+
+function renderEmptyGeneric(prefix, msg) {
+  $(`#${prefix}_meta`).textContent = msg;
+  $(`#${prefix}_head`).innerHTML = `<tr><th>—</th></tr>`;
+  $(`#${prefix}_body`).innerHTML = `<tr><td class="muted">${escapeHtml(msg)}</td></tr>`;
+}
+
+function renderGenericTable(prefix, data) {
+  const rows = (data && data.rows) ? data.rows : [];
+  const headers = (data && data.headers) ? data.headers : [];
+
+  $(`#${prefix}_meta`).textContent = `Filas: ${rows.length}`;
+
+  $(`#${prefix}_head`).innerHTML = `<tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr>`;
+  $(`#${prefix}_body`).innerHTML = rows.map(r => `
+    <tr>${headers.map(h => `<td>${escapeHtml(r[h] ?? "")}</td>`).join("")}</tr>
+  `).join("") || `<tr><td colspan="${Math.max(1, headers.length)}" class="muted">Sin datos</td></tr>`;
+}
