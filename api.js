@@ -3,19 +3,13 @@ const BASE = "/.netlify/functions/gas";
 
 async function safeJson(resp) {
   const text = await resp.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { ok: false, error: `Non-JSON response (${resp.status}): ${text.slice(0, 200)}` };
-  }
+  try { return JSON.parse(text); }
+  catch { return { ok: false, error: `Non-JSON response (${resp.status}): ${text.slice(0, 200)}` }; }
 }
 
 async function get(action, params = {}) {
   const qs = new URLSearchParams({ action, ...params });
-  const resp = await fetch(`${BASE}?${qs.toString()}`, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-  });
+  const resp = await fetch(`${BASE}?${qs.toString()}`, { method: "GET", headers: { Accept: "application/json" } });
   const data = await safeJson(resp);
   if (!resp.ok || data?.ok === false) throw new Error(data?.error || `GET ${action} failed (${resp.status})`);
   return data.data;
@@ -54,6 +48,8 @@ export const API = {
   slackOutboxList: () => get("slack.outbox.list"),
   slackOutboxUpdate: (row, canal, channel_id, mensaje) =>
     post("slack.outbox.update", { row, canal, channel_id, mensaje }),
+  slackOutboxAppend: (fechaISO, tipo, canal, channel_id, mensaje, estado) =>
+    post("slack.outbox.append", { fechaISO, tipo, canal, channel_id, mensaje, estado }),
   slackOutboxEnviar: (row) => post("slack.outbox.enviar", row ? { row } : {}),
 
   presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
