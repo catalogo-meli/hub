@@ -276,6 +276,22 @@
       text-align:right;
       padding-right:10px;
     }
+
+    .lic{
+      outline:2px solid rgba(239,68,68,.18);
+      background:rgba(239,68,68,.10) !important;
+      font-weight:700;
+    }
+    [data-theme="light"] .lic{
+      background:rgba(239,68,68,.08) !important;
+      color:#842029;
+    }
+
+    th.sortable{cursor:pointer; user-select:none}
+    th.sortable:hover{opacity:.9}
+    th.sortable .srt{margin-left:6px;opacity:.7;font-size:12px}
+    .selbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .selbar .btn{padding:9px 12px}
   </style>
 </head>
 
@@ -288,7 +304,6 @@
       </div>
       <div class="top-actions">
         <button class="btn ghost icon-btn" id="btnTheme" title="Cambiar tema">☾</button>
-        <button class="btn" id="btnHealth">Health</button>
       </div>
     </header>
 
@@ -360,13 +375,20 @@
               </tr>
             </thead>
             <tbody></tbody>
+            <tfoot>
+              <tr>
+                <td style="min-width:240px">
+                  <input class="input" id="newFlujoName" placeholder="+ Nuevo flujo..." />
+                </td>
+                <td class="right nowrap" style="min-width:140px">
+                  <input class="input smallnum" id="newFlujoReq" type="number" min="0" step="1" placeholder="Req." />
+                </td>
+                <td class="right nowrap" style="min-width:140px">
+                  <button class="btn primary" id="btnAddFlujo">Agregar</button>
+                </td>
+              </tr>
+            </tfoot>
           </table>
-        </div>
-
-        <div class="row" style="margin-top:12px">
-          <input class="input" id="newFlujoName" placeholder="+ Nuevo flujo..." />
-          <input class="input smallnum" id="newFlujoReq" type="number" min="0" step="1" placeholder="Req." />
-          <button class="btn primary" id="btnAddFlujo">Agregar</button>
         </div>
 
         <div class="hr"></div>
@@ -418,24 +440,36 @@
           <button class="btn ghost" id="btnClearColabs">Limpiar</button>
         </div>
 
+        <div class="row" style="margin-top:10px">
+          <div class="pill" id="colabsSelPill"><b>Seleccionados</b> 0</div>
+          <div class="spacer"></div>
+          <div class="selbar">
+            <button class="btn" id="btnCopySelIds">Copiar IDs</button>
+            <button class="btn" id="btnCopySelMailProd">Copiar Mail Productora</button>
+            <button class="btn" id="btnCopySelMailExt">Copiar Mail Externo</button>
+            <button class="btn ghost" id="btnClearSelColabs">Limpiar selección</button>
+          </div>
+        </div>
+
         <div style="margin-top:12px;overflow:auto">
           <table class="table" id="tblColabs">
             <thead>
               <tr>
-                <th>ID_MELI</th>
-                <th>Nombre</th>
-                <th>Rol</th>
-                <th>Equipo</th>
-                <th>Ubicación</th>
-                <th>Mail Productora</th>
-                <th>Mail Externo</th>
-                <th class="nowrap">Fecha Ingreso</th>
+                <th class="nowrap"><input type="checkbox" id="colabsSelectAll" /></th>
+                <th class="sortable" data-sort="id">ID_MELI<span class="srt" data-srt="id"></span></th>
+                <th class="sortable" data-sort="nombre">Nombre<span class="srt" data-srt="nombre"></span></th>
+                <th class="sortable" data-sort="rol">Rol<span class="srt" data-srt="rol"></span></th>
+                <th class="sortable" data-sort="equipo">Equipo<span class="srt" data-srt="equipo"></span></th>
+                <th class="sortable" data-sort="ubic">Ubicación<span class="srt" data-srt="ubic"></span></th>
+                <th class="sortable" data-sort="mailProd">Mail Productora<span class="srt" data-srt="mailProd"></span></th>
+                <th class="sortable" data-sort="mailExt">Mail Externo<span class="srt" data-srt="mailExt"></span></th>
+                <th class="sortable nowrap" data-sort="ingreso">Fecha Ingreso<span class="srt" data-srt="ingreso"></span></th>
               </tr>
             </thead>
             <tbody></tbody>
           </table>
         </div>
-        <div class="muted" style="margin-top:10px">Tip: hacé click en IDs y mails para copiarlos.</div>
+        <div class="muted" style="margin-top:10px">Tip: podés seleccionar varias filas y copiar IDs o mails en bloque. También podés clickear un ID/mail para copiarlo individualmente.</div>
       </section>
 
       <!-- Habilitaciones -->
@@ -459,6 +493,10 @@
             <div class="x" id="clearSearchHabil">×</div>
           </div>
           <button class="btn ghost" id="btnClearHabil">Limpiar</button>
+        </div>
+
+        <div class="row" style="margin-top:10px">
+          <div class="pill"><b>Referencia</b> H = Habilitado | F = Fijo</div>
         </div>
 
         <div style="margin-top:12px;overflow:auto">
@@ -503,11 +541,11 @@
           <div style="max-width:220px">
             <div class="muted" style="font-size:12px;margin-bottom:6px">Tipo</div>
             <select id="presTipo">
-              <option value="E">E (Enfermedad)</option>
-              <option value="M">M</option>
-              <option value="MM">MM</option>
-              <option value="AI">AI</option>
-              <option value="V">V (Vacaciones)</option>
+              <option value="AI">AI - Ausencia injustificada</option>
+              <option value="E">E - Día de estudio</option>
+              <option value="M">M - Licencia médica</option>
+              <option value="MM">MM - Menor a cargo</option>
+              <option value="V">V - Vacaciones</option>
             </select>
           </div>
 
