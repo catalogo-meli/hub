@@ -1,135 +1,528 @@
 <!doctype html>
 <html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Catálogo | HUB</title>
-    <style>
-      :root { color-scheme: dark; --bg:#07101f; --card:rgba(255,255,255,.04); --bd:rgba(255,255,255,.10); --muted:rgba(234,240,255,.72); }
-      *{ box-sizing:border-box; }
-      body{
-        margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-        background: radial-gradient(1200px 700px at 20% 10%, rgba(45,99,255,.18), transparent 60%),
-                    radial-gradient(900px 600px at 85% 15%, rgba(19,122,65,.16), transparent 55%),
-                    var(--bg);
-        color:#eaf0ff;
-      }
-      .wrap{ max-width:1320px; margin:18px auto; padding:0 14px; }
-      .top{
-        display:flex; align-items:flex-end; justify-content:space-between; gap:12px;
-        margin-bottom:12px;
-      }
-      .title h1{ margin:0; font-size:30px; letter-spacing:.2px; }
-      .title p{ margin:4px 0 0; opacity:.75; }
-      .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-      .btn{
-        border:1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
-        padding:10px 14px; border-radius:12px; cursor:pointer; color:#eaf0ff;
-      }
-      .btn:hover{ background: rgba(255,255,255,.09); }
-      .btn.primary{ background:#2d63ff; border-color:#2d63ff; }
-      .btn.success{ background:#137a41; border-color:#137a41; }
-      .btn.danger{ background: rgba(255,70,70,.10); border-color: rgba(255,70,70,.35); color:#ffd2d2; }
-      .btn.ghost{ background: transparent; }
-      .card{
-        border:1px solid var(--bd); background: var(--card);
-        border-radius:18px; padding:14px;
-        backdrop-filter: blur(10px);
-      }
-      .tabs{ display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 0; }
-      .tab{
-        padding:8px 12px; border-radius:999px;
-        border:1px solid rgba(255,255,255,.12);
-        background: rgba(255,255,255,.05);
-        cursor:pointer; font-size:13px; opacity:.9;
-      }
-      .tab.active{ background: rgba(45,99,255,.20); border-color: rgba(45,99,255,.55); }
-      .muted{ color: var(--muted); }
-      .sep{ height:1px; background: rgba(255,255,255,.10); margin:14px 0; }
-      .sectionTitle{ margin: 6px 0 8px; font-weight:800; font-size:18px; }
-      input, select, textarea{
-        width:100%; padding:10px 12px;
-        border-radius:14px; border:1px solid rgba(255,255,255,.14);
-        background: rgba(255,255,255,.05); color:#eaf0ff; outline:none;
-      }
-      textarea{ min-height:90px; resize:vertical; }
-      table{ width:100%; border-collapse:separate; border-spacing:0 10px; }
-      th{ text-align:left; font-size:12px; opacity:.75; font-weight:700; padding:0 10px; white-space:nowrap; }
-      td{ padding:10px; vertical-align:top; background: rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07); }
-      td:first-child{ border-radius:14px 0 0 14px; }
-      td:last-child{ border-radius:0 14px 14px 0; }
-      .grid{ display:grid; gap:10px; }
-      .grid.kpis{ grid-template-columns: repeat(4, minmax(0,1fr)); }
-      .kpi{ padding:12px; border-radius:16px; border:1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.04); }
-      .kpi .v{ font-size:22px; font-weight:900; margin-top:4px; }
-      .pill{ display:inline-flex; gap:8px; align-items:center; padding:8px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.04); font-size:12px; }
-      .errorBox{ border:1px solid rgba(255,70,70,.35); background: rgba(255,70,70,.10); color:#ffd2d2; padding:10px 12px; border-radius:12px; }
-      .toast{ position: fixed; left: 14px; right: 14px; bottom: 14px; margin:auto; max-width: 860px; display:none;
-              background: rgba(0,0,0,.75); border:1px solid rgba(255,255,255,.14); padding: 10px 12px; border-radius: 12px; }
-      .toast.show{ display:block; }
-      .filters{
-        display:grid; gap:10px;
-        grid-template-columns: 1.4fr 1fr 1fr auto;
-        align-items:end;
-      }
-      .hint{ font-size:12px; opacity:.7; margin-top:6px; }
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Catálogo | HUB</title>
+  <style>
+    :root{
+      --bg0:#070b16; --bg1:#0b1224; --card:#0f1933; --card2:#0c152c;
+      --txt:#e7ecff; --muted:#9fb0d0; --line:rgba(255,255,255,.08);
+      --pri:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+      --chip:#14234a;
+      --shadow: 0 12px 36px rgba(0,0,0,.35);
+      --radius:16px;
+      --input:#0b1430;
+    }
+    [data-theme="light"]{
+      --bg0:#f3f6ff; --bg1:#ffffff; --card:#ffffff; --card2:#f7f9ff;
+      --txt:#0b1224; --muted:#4b5b7a; --line:rgba(10,20,40,.12);
+      --chip:#eef3ff;
+      --input:#ffffff;
+      --shadow: 0 12px 36px rgba(15,23,42,.10);
+    }
 
-      @media (max-width: 980px){
-        .grid.kpis{ grid-template-columns: repeat(2, minmax(0,1fr)); }
-        .filters{ grid-template-columns: 1fr 1fr; }
-      }
-      @media (max-width: 520px){
-        .grid.kpis{ grid-template-columns: 1fr; }
-        .filters{ grid-template-columns: 1fr; }
-        .title h1{ font-size:26px; }
-      }
-    </style>
-  </head>
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background: radial-gradient(1200px 700px at 25% -10%, #182a5a 0%, transparent 60%),
+                  radial-gradient(900px 600px at 90% 0%, #2a1b5f 0%, transparent 50%),
+                  linear-gradient(180deg, var(--bg0), var(--bg1));
+      color:var(--txt);
+      min-height:100vh;
+    }
+    .wrap{max-width:1200px;margin:0 auto;padding:26px 18px 80px}
+    header{
+      display:flex;align-items:center;justify-content:space-between;gap:12px;
+      padding:10px 6px 18px;
+    }
+    .brand h1{margin:0;font-size:44px;letter-spacing:-.6px}
+    .brand p{margin:4px 0 0;color:var(--muted)}
+    .top-actions{display:flex;gap:10px;align-items:center}
+    .btn{
+      border:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+      color:var(--txt);
+      padding:10px 14px;border-radius:12px;
+      cursor:pointer;
+    }
+    .btn.primary{background:linear-gradient(180deg, rgba(59,130,246,.9), rgba(59,130,246,.6));border-color:rgba(59,130,246,.35)}
+    .btn.ok{background:linear-gradient(180deg, rgba(34,197,94,.85), rgba(34,197,94,.55));border-color:rgba(34,197,94,.35)}
+    .btn.ghost{background:transparent}
+    .btn:disabled{opacity:.55;cursor:not-allowed}
 
-  <body>
-    <div class="wrap">
-      <div class="top">
-        <div class="title">
-          <h1>Catálogo</h1>
-          <p class="muted">HUB Equipo & Planificación</p>
-          <div id="tabs" class="tabs"></div>
-        </div>
+    .tabs{
+      display:flex;gap:8px;flex-wrap:wrap;
+      padding:8px;
+      background:rgba(255,255,255,.03);
+      border:1px solid var(--line);
+      border-radius:18px;
+      box-shadow:var(--shadow);
+    }
+    .tab{
+      padding:10px 12px;border-radius:14px;
+      border:1px solid transparent;
+      color:var(--muted);
+      cursor:pointer;
+      user-select:none;
+    }
+    .tab.active{
+      background:rgba(59,130,246,.16);
+      border-color:rgba(59,130,246,.22);
+      color:var(--txt);
+    }
+
+    .grid{display:grid;gap:14px;margin-top:16px}
+    .card{
+      background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      padding:16px;
+    }
+    .card h2{margin:0 0 8px;font-size:18px}
+    .muted{color:var(--muted)}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .spacer{flex:1}
+    .hr{height:1px;background:var(--line);margin:14px 0}
+    .pill{
+      display:inline-flex;gap:8px;align-items:center;
+      padding:7px 10px;border-radius:999px;
+      background:rgba(255,255,255,.05);
+      border:1px solid var(--line);
+      color:var(--muted);
+      font-size:12px;
+    }
+    .pill b{color:var(--txt);font-weight:600}
+
+    .input, select, textarea{
+      width:100%;
+      background:var(--input);
+      color:var(--txt);
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:10px 12px;
+      outline:none;
+    }
+    textarea{min-height:86px;resize:vertical}
+    /* Contraste options en dark mode */
+    select option{
+      background: var(--bg1);
+      color: var(--txt);
+    }
+
+    .table{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      overflow:hidden;
+      border:1px solid var(--line);
+      border-radius:14px;
+    }
+    .table th,.table td{
+      text-align:left;
+      padding:10px 10px;
+      border-bottom:1px solid var(--line);
+      vertical-align:top;
+      font-size:13px;
+    }
+    .table th{color:var(--muted);font-weight:600;background:rgba(255,255,255,.03)}
+    .table tr:last-child td{border-bottom:none}
+    .right{text-align:right}
+    .nowrap{white-space:nowrap}
+
+    .toast{
+      position:fixed;right:18px;bottom:18px;
+      background:rgba(15,23,42,.92);
+      border:1px solid rgba(255,255,255,.10);
+      color:#fff;
+      padding:10px 12px;
+      border-radius:14px;
+      box-shadow:var(--shadow);
+      display:none;
+      max-width:min(520px, calc(100vw - 36px));
+      z-index:50;
+    }
+    [data-theme="light"] .toast{background:rgba(10,20,40,.92)}
+    .toast.show{display:block}
+    .toast .t1{font-weight:700}
+    .toast .t2{margin-top:2px;opacity:.9;font-size:13px}
+
+    .errbar{
+      display:none;
+      margin-top:14px;
+      padding:12px 14px;
+      border-radius:14px;
+      border:1px solid rgba(239,68,68,.25);
+      background:rgba(239,68,68,.10);
+      color:#ffd4d4;
+    }
+    .errbar.show{display:block}
+
+    .kpis{display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:12px}
+    @media (max-width:900px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media (max-width:520px){.kpis{grid-template-columns:1fr}}
+    .kpi{
+      padding:14px;border-radius:14px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.03);
+    }
+    .kpi .v{font-size:26px;font-weight:800;letter-spacing:-.5px}
+    .kpi .l{color:var(--muted);font-size:12px;margin-top:2px}
+
+    /* MultiSelect */
+    .ms{
+      position:relative;
+      min-width:260px;
+    }
+    .ms-btn{
+      display:flex;gap:10px;align-items:center;justify-content:space-between;
+      padding:10px 12px;border-radius:12px;
+      border:1px solid var(--line);
+      background:var(--input);
+      cursor:pointer;
+      user-select:none;
+    }
+    .ms-btn .label{color:var(--muted);font-size:12px}
+    .ms-btn .value{font-weight:600}
+    .ms-panel{
+      position:absolute;left:0;right:0;top:calc(100% + 8px);
+      background:var(--bg1);
+      border:1px solid var(--line);
+      border-radius:14px;
+      box-shadow:var(--shadow);
+      padding:10px;
+      display:none;
+      z-index:10;
+      max-height:280px;
+      overflow:auto;
+    }
+    .ms.open .ms-panel{display:block}
+    .ms-item{display:flex;gap:10px;align-items:center;padding:8px 6px;border-radius:10px}
+    .ms-item:hover{background:rgba(255,255,255,.04)}
+    .ms-item input{width:auto}
+    .ms-actions{display:flex;gap:8px;padding:8px 6px;border-top:1px solid var(--line);margin-top:8px}
+    .ms-actions button{flex:1}
+
+    /* Search with clear */
+    .search{
+      position:relative;
+      min-width:260px;
+      flex:1;
+    }
+    .search input{padding-right:40px}
+    .search .x{
+      position:absolute;right:10px;top:50%;transform:translateY(-50%);
+      width:26px;height:26px;border-radius:10px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.04);
+      color:var(--muted);
+      cursor:pointer;
+      display:none;
+      align-items:center;justify-content:center;
+      user-select:none;
+    }
+    .search.has .x{display:flex}
+
+    .copyable{cursor:pointer}
+    .copyable:hover{opacity:.85;text-decoration:underline}
+    .badge{
+      display:inline-flex;align-items:center;gap:6px;
+      padding:4px 8px;border-radius:999px;
+      font-size:12px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--muted);
+    }
+    .badge.ok{border-color:rgba(34,197,94,.25);background:rgba(34,197,94,.10);color:#c8ffe0}
+    .badge.bad{border-color:rgba(239,68,68,.25);background:rgba(239,68,68,.10);color:#ffd4d4}
+    [data-theme="light"] .badge.ok{color:#0f5132}
+    [data-theme="light"] .badge.bad{color:#842029}
+
+    .flow-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
+      gap:12px;
+    }
+    .flow-col{
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:rgba(255,255,255,.03);
+      padding:12px;
+    }
+    .flow-col h3{margin:0 0 10px;font-size:14px}
+    .flow-col ul{margin:0;padding-left:16px;color:var(--muted)}
+    .flow-col li{margin:6px 0}
+    .feriado{
+      outline:2px solid rgba(245,158,11,.25);
+      background:rgba(245,158,11,.08) !important;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap" id="appRoot">
+    <header>
+      <div class="brand">
+        <h1>Catálogo</h1>
+        <p>HUB Equipo &amp; Planificación</p>
+      </div>
+      <div class="top-actions">
+        <button class="btn ghost" id="btnTheme">Modo</button>
+        <button class="btn" id="btnHealth">Health</button>
+      </div>
+    </header>
+
+    <div id="errBar" class="errbar"></div>
+
+    <nav class="tabs" id="tabs">
+      <div class="tab active" data-tab="daily">Operativa diaria</div>
+      <div class="tab" data-tab="dashboard">Dashboard</div>
+      <div class="tab" data-tab="colabs">Colaboradores</div>
+      <div class="tab" data-tab="habil">Habilitaciones</div>
+      <div class="tab" data-tab="pres">Presentismo</div>
+    </nav>
+
+    <main class="grid" style="margin-top:16px">
+      <!-- Operativa diaria -->
+      <section class="card" id="tab_daily">
         <div class="row">
-          <button id="btnHealth" class="btn">Health</button>
+          <div>
+            <h2>Operativa diaria</h2>
+            <div class="muted">Configuración de flujos + ejecución (planificación y Slack).</div>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn primary" id="btnGenerarPlan">Generar planificación</button>
+          <button class="btn" id="btnGenerarOutbox">Generar Outbox</button>
+          <button class="btn ok" id="btnEnviarTodos">Enviar todos</button>
         </div>
-      </div>
 
-      <div class="card" style="margin-bottom:12px;">
-        <div class="sectionTitle" style="font-size:16px;">Filtros globales</div>
-        <div class="filters">
-          <div>
-            <label class="muted">Búsqueda</label>
-            <input id="fSearch" placeholder="Buscar por nombre, ID_MELI, Slack_ID…" />
-            <div class="hint muted">Aplica a todas las secciones.</div>
-          </div>
-          <div>
-            <label class="muted">Roles (multi)</label>
-            <select id="fRoles" multiple size="4"></select>
-          </div>
-          <div>
-            <label class="muted">Equipos (multi)</label>
-            <select id="fEquipos" multiple size="4"></select>
-          </div>
-          <div class="row" style="justify-content:flex-end;">
-            <label class="pill"><input id="fSoloSlack" type="checkbox" /> solo con Slack_ID</label>
-            <button id="btnClearFilters" class="btn ghost">Limpiar</button>
-          </div>
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="pill"><b>Flujos</b> (perfiles requeridos)</div>
+          <div class="spacer"></div>
+          <div class="pill" id="dailyStatus">Listo</div>
         </div>
-      </div>
 
-      <div id="app" class="card">
-        <div class="muted">Cargando…</div>
-      </div>
+        <div style="margin-top:10px;overflow:auto">
+          <table class="table" id="tblFlujos">
+            <thead>
+              <tr>
+                <th>Flujo</th>
+                <th class="right nowrap">Perfiles requeridos</th>
+                <th class="right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
 
-      <div id="toast" class="toast"></div>
+        <div class="row" style="margin-top:12px">
+          <input class="input" id="newFlujoName" placeholder="+ Nuevo flujo..." />
+          <input class="input" id="newFlujoReq" type="number" min="0" step="1" placeholder="Perfiles requeridos" style="max-width:220px" />
+          <button class="btn primary" id="btnAddFlujo">Agregar</button>
+        </div>
+
+        <div class="hr"></div>
+
+        <h2 style="margin-top:0">Planificación (resultado)</h2>
+        <div class="muted">Visualización por flujo (columnas).</div>
+        <div style="margin-top:12px" id="planGrid" class="flow-grid"></div>
+
+        <div class="hr"></div>
+
+        <h2 style="margin-top:0">Slack Outbox (pendientes)</h2>
+        <div class="muted">Editá canal/mensaje y enviá por fila o “Enviar todos”.</div>
+        <div style="margin-top:12px;overflow:auto">
+          <table class="table" id="tblOutbox">
+            <thead>
+              <tr>
+                <th class="nowrap">Fecha</th>
+                <th style="min-width:220px">Canal</th>
+                <th>Mensaje</th>
+                <th class="nowrap">Estado</th>
+                <th class="right nowrap">Acción</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Dashboard -->
+      <section class="card" id="tab_dashboard" style="display:none">
+        <div class="row">
+          <div>
+            <h2>Dashboard</h2>
+            <div class="muted">Indicadores rápidos. (Esto no reemplaza Looker: lo complementa.)</div>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn" id="btnReloadDash">Actualizar</button>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="kpis" id="dashKpis"></div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="pill"><b>Distribución</b> por rol</div>
+        </div>
+        <div style="margin-top:12px;overflow:auto">
+          <table class="table" id="tblDashRoles">
+            <thead><tr><th>Rol</th><th class="right">Cantidad</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Colaboradores -->
+      <section class="card" id="tab_colabs" style="display:none">
+        <div class="row">
+          <div>
+            <h2>Colaboradores</h2>
+            <div class="muted">Filtrá por rol/equipo y buscá por nombre, ID o mail.</div>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn" id="btnReloadColabs">Actualizar</button>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="ms" id="msRolesColabs"></div>
+          <div class="ms" id="msEquiposColabs"></div>
+          <div class="search" id="searchColabsWrap">
+            <input class="input" id="searchColabs" placeholder="Buscar..." />
+            <div class="x" id="clearSearchColabs">×</div>
+          </div>
+          <button class="btn ghost" id="btnClearColabs">Limpiar</button>
+        </div>
+
+        <div style="margin-top:12px;overflow:auto">
+          <table class="table" id="tblColabs">
+            <thead>
+              <tr>
+                <th>ID_MELI</th>
+                <th>Nombre</th>
+                <th>Rol</th>
+                <th>Equipo</th>
+                <th>Ubicación</th>
+                <th>Mail productora</th>
+                <th>Mail externo</th>
+                <th class="nowrap">Fecha ingreso</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="muted" style="margin-top:10px">Tip: hacé click en IDs y mails para copiarlos.</div>
+      </section>
+
+      <!-- Habilitaciones -->
+      <section class="card" id="tab_habil" style="display:none">
+        <div class="row">
+          <div>
+            <h2>Habilitaciones</h2>
+            <div class="muted">Habilitar / Fijo por usuario y flujo.</div>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn" id="btnReloadHabil">Actualizar</button>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="ms" id="msRolesHabil"></div>
+          <div class="ms" id="msEquiposHabil"></div>
+          <div class="search" id="searchHabilWrap">
+            <input class="input" id="searchHabil" placeholder="Buscar..." />
+            <div class="x" id="clearSearchHabil">×</div>
+          </div>
+          <button class="btn ghost" id="btnClearHabil">Limpiar</button>
+        </div>
+
+        <div style="margin-top:12px;overflow:auto">
+          <table class="table" id="tblHabil">
+            <thead id="tblHabilHead"></thead>
+            <tbody id="tblHabilBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Presentismo -->
+      <section class="card" id="tab_pres" style="display:none">
+        <div class="row">
+          <div>
+            <h2>Presentismo</h2>
+            <div class="muted">Semana (Lun–Vie). Feriados destacados. Licencias con rango.</div>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn" id="btnReloadPres">Actualizar</button>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="ms" id="msRolesPres"></div>
+          <div class="ms" id="msEquiposPres"></div>
+          <div class="search" id="searchPresWrap">
+            <input class="input" id="searchPres" placeholder="Buscar..." />
+            <div class="x" id="clearSearchPres">×</div>
+          </div>
+          <button class="btn ghost" id="btnClearPres">Limpiar</button>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row" style="align-items:flex-end">
+          <div style="min-width:260px">
+            <div class="muted" style="font-size:12px;margin-bottom:6px">Colaborador</div>
+            <select id="presSelectColab"></select>
+          </div>
+
+          <div style="max-width:220px">
+            <div class="muted" style="font-size:12px;margin-bottom:6px">Tipo</div>
+            <select id="presTipo">
+              <option value="E">E (Enfermedad)</option>
+              <option value="M">M</option>
+              <option value="MM">MM</option>
+              <option value="AI">AI</option>
+              <option value="V">V (Vacaciones)</option>
+            </select>
+          </div>
+
+          <div style="max-width:220px">
+            <div class="muted" style="font-size:12px;margin-bottom:6px">Desde</div>
+            <input class="input" id="presDesde" type="date" />
+          </div>
+
+          <div style="max-width:220px">
+            <div class="muted" style="font-size:12px;margin-bottom:6px">Hasta</div>
+            <input class="input" id="presHasta" type="date" />
+          </div>
+
+          <button class="btn primary" id="btnSetLicencia">Guardar</button>
+        </div>
+
+        <div class="hr"></div>
+
+        <div style="overflow:auto">
+          <table class="table" id="tblPresWeek">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast">
+      <div class="t1" id="toastT1"></div>
+      <div class="t2" id="toastT2"></div>
     </div>
+  </div>
 
-    <script type="module" src="./app.js"></script>
-  </body>
+  <script type="module" src="/api.js"></script>
+  <script type="module" src="/app.js"></script>
+</body>
 </html>
-
