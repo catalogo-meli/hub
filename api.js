@@ -34,9 +34,11 @@ async function post(action, payload = {}) {
 
 export const API = {
   health: () => get("health"),
+  dashboard: () => get("dashboard.get"),
 
   colaboradoresList: () => get("colaboradores.list"),
   canalesList: () => get("canales.list"),
+
   flujosList: () => get("flujos.list"),
   flujosUpsert: (flujo, perfiles_requeridos, channel_id) =>
     post("flujos.upsert", { flujo, perfiles_requeridos, channel_id }),
@@ -46,10 +48,9 @@ export const API = {
   habilitacionesSet: (idMeli, flujo, habilitado, fijo) =>
     post("habilitaciones.set", { idMeli, flujo, habilitado, fijo }),
 
-  presentismoWeek: (date) => get("presentismo.week", date ? { date } : {}),
-  presentismoStats: (date) => get("presentismo.stats", date ? { date } : {}),
-  presentismoLicenciasSet: (idMeli, desde, hasta, tipo) =>
-    post("presentismo.licencias.set", { idMeli, desde, hasta, tipo }),
+  presentismoHoy: () => get("presentismo.hoy"),
+  presentismoSetRango: (idMeli, desde, hasta, tipo) =>
+    post("presentismo.setRango", { idMeli, desde, hasta, tipo }),
 
   planificacionGenerar: () => post("planificacion.generar", {}),
   planificacionList: () => get("planificacion.list"),
@@ -58,5 +59,8 @@ export const API = {
   slackOutboxList: () => get("slack.outbox.list"),
   slackOutboxUpdate: (row, canal, channel_id, mensaje) =>
     post("slack.outbox.update", { row, canal, channel_id, mensaje }),
-  slackOutboxEnviar: (row) => post("slack.outbox.enviar", row ? { row } : {}),
+  slackOutboxEnviar: (row) =>
+    post("slack.outbox.enviar", row ? { row } : {}),
+
+  calidadPmList: () => get("calidad.pm.list"),
 };
