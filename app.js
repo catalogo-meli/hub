@@ -1,460 +1,723 @@
 // app.js (ESM)
 import { API } from "./api.js";
 
-/* -----------------------
-   Helpers DOM
------------------------- */
 const $ = (sel) => document.querySelector(sel);
-const el = (tag, attrs = {}, children = []) => {
-  const n = document.createElement(tag);
-  Object.entries(attrs).forEach(([k, v]) => {
-    if (k === "class") n.className = v;
-    else if (k === "html") n.innerHTML = v;
-    else if (k.startsWith("on") && typeof v === "function") n.addEventListener(k.slice(2), v);
-    else n.setAttribute(k, v);
-  });
-  (Array.isArray(children) ? children : [children]).forEach((c) => {
-    if (c == null) return;
-    if (typeof c === "string") n.appendChild(document.createTextNode(c));
-    else n.appendChild(c);
-  });
-  return n;
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+function safeEl(sel) {
+  const el = $(sel);
+  return el || null;
+}
+
+function toast(msg, isError = false) {
+  const el = safeEl("#toast");
+  if (!el) return; // NO CRASHEA
+  el.textContent = msg;
+  el.style.borderColor = isError ? "rgba(255,70,70,.40)" : "rgba(255,255,255,.14)";
+  el.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove("show"), isError ? 5200 : 2600);
+}
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+  }[m]));
+}
+
+function fmtDate(d) {
+  if (!d) return "";
+  const dd = new Date(d);
+  if (Number.isNaN(dd.getTime())) return String(d);
+  const day = String(dd.getDate()).padStart(2, "0");
+  const mon = String(dd.getMonth() + 1).padStart(2, "0");
+  const yr = dd.getFullYear();
+  return `${day}/${mon}/${yr}`;
+}
+
+function groupBy(arr, keyFn) {
+  const m = new Map();
+  for (const x of arr) {
+    const k = keyFn(x);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(x);
+  }
+  return m;
+}
+
+const ROUTES = [
+  { id: "dashboard", label: "Dashboard" },
+  { id: "operativa", label: "Operativa diaria" },
+  { id: "colaboradores", label: "Colaboradores" },
+  { id: "habilitaciones", label: "Habilitaciones" },
+  { id: "presentismo", label: "Presentismo" },
+  { id: "calidad", label: "Calidad" },
+  { id: "productividad", label: "Productividad" },
+];
+
+let STATE = {
+  dashboard: null,
+  canales: [],
+  colaboradores: [],
+  flujos: [],
+  habilitaciones: [], // [{idMeli, flujo, habilitado, fijo}]
+  plan: [],
+  outbox: [],
+  presentismo: [],
+  calidad: [],
 };
 
-function toast(msg, type = "info") {
-  const t = $("#toast");
-  t.textContent = msg;
-  t.dataset.type = type;
-  t.classList.add("show");
-  clearTimeout(window.__toastTimer);
-  window.__toastTimer = setTimeout(() => t.classList.remove("show"), type === "error" ? 5200 : 2600);
+function currentRoute() {
+  const h = (location.hash || "#dashboard").replace("#", "");
+  return ROUTES.some(r => r.id === h) ? h : "dashboard";
 }
 
-function fmt(v) {
-  if (v == null) return "";
-  if (v instanceof Date) return v.toLocaleDateString("es-AR");
-  return String(v);
+function setRoute(r) {
+  location.hash = `#${r}`;
 }
 
-function tableFromMatrix(matrix) {
-  if (!matrix || !matrix.length) return el("div", { class: "muted" }, "Sin datos");
-  const [headers, ...rows] = matrix;
-
-  const thead = el("thead", {}, el("tr", {}, headers.map(h => el("th", {}, fmt(h)))));
-  const tbody = el("tbody", {}, rows.map(r => el("tr", {}, headers.map((_, i) => el("td", {}, fmt(r[i]))))));
-  return el("table", { class: "tbl" }, [thead, tbody]);
-}
-
-function tableFromObjectTable(headers, rows) {
-  const thead = el("thead", {}, el("tr", {}, headers.map(h => el("th", {}, fmt(h)))));
-  const tbody = el("tbody", {}, rows.map(r => el("tr", {}, headers.map((_, i) => el("td", {}, fmt(r[i]))))));
-  return el("table", { class: "tbl" }, [thead, tbody]);
-}
-
-/* -----------------------
-   State
------------------------- */
-const state = {
-  tab: "operativa",
-  data: {
-    colaboradores: [],
-    canales: [],
-    flujos: [],
-    habil: null, // {headers, rows}
-    plan: [],
-    outbox: [],
-    presWeek: null,
-    presStats: null,
-  },
-};
-
-function setTab(tab) {
-  state.tab = tab;
-  render();
+function renderTabs() {
+  const tabs = safeEl("#tabs");
+  if (!tabs) return;
+  const r = currentRoute();
+  tabs.innerHTML = ROUTES.map(x =>
+    `<button class="tab ${x.id === r ? "active" : ""}" data-route="${x.id}">${esc(x.label)}</button>`
+  ).join("");
+  tabs.onclick = (e) => {
+    const b = e.target.closest("[data-route]");
+    if (!b) return;
+    setRoute(b.dataset.route);
+  };
 }
 
 async function loadAll() {
-  $("#content").innerHTML = `<div class="card"><div class="muted">Cargando datos…</div></div>`;
-  try {
-    const [colaboradores, canales, flujos, habil, plan, outbox] = await Promise.all([
-      API.colaboradoresList(),
-      API.canalesList(),
-      API.flujosList(),
-      API.habilitacionesList(),
-      API.planificacionList(),
-      API.slackOutboxList(),
-    ]);
-    state.data.colaboradores = colaboradores || [];
-    state.data.canales = canales || [];
-    state.data.flujos = flujos || [];
-    state.data.habil = habil || { headers: [], rows: [] };
-    state.data.plan = plan || [];
-    state.data.outbox = outbox || [];
-    toast("Datos actualizados");
-    render();
-  } catch (e) {
-    toast(e.message || String(e), "error");
-    $("#content").innerHTML = `<div class="card"><pre class="pre">${e.message || String(e)}</pre></div>`;
-  }
+  const [dash, canales, colabs, flujos, habs, plan, outbox, pres, calidad] = await Promise.all([
+    API.dashboard().catch(() => null),
+    API.canalesList().catch(() => []),
+    API.colaboradoresList().catch(() => []),
+    API.flujosList().catch(() => []),
+    API.habilitacionesList().catch(() => []),
+    API.planificacionList().catch(() => []),
+    API.slackOutboxList().catch(() => []),
+    API.presentismoHoy().catch(() => []),
+    API.calidadPmList().catch(() => []),
+  ]);
+
+  STATE.dashboard = dash;
+  STATE.canales = canales || [];
+  STATE.colaboradores = colabs || [];
+  STATE.flujos = flujos || [];
+  STATE.habilitaciones = habs || [];
+  STATE.plan = plan || [];
+  STATE.outbox = outbox || [];
+  STATE.presentismo = pres || [];
+  STATE.calidad = calidad || [];
 }
 
-/* -----------------------
-   Views
------------------------- */
-function viewOperativa() {
-  const wrap = el("div", { class: "grid2" }, []);
-
-  const cardA = el("div", { class: "card" }, [
-    el("div", { class: "cardTitle" }, "Operativa diaria"),
-    el("div", { class: "row" }, [
-      el("button", {
-        class: "btn primary",
-        onclick: async () => {
-          try {
-            toast("Generando planificación…");
-            await API.planificacionGenerar();
-            toast("Planificación generada");
-            state.data.plan = await API.planificacionList();
-            render();
-          } catch (e) { toast(e.message, "error"); }
-        }
-      }, "Generar planificación"),
-      el("button", {
-        class: "btn",
-        onclick: async () => {
-          try {
-            toast("Generando Slack Outbox…");
-            await API.slackOutboxGenerar();
-            toast("Outbox generado");
-            state.data.outbox = await API.slackOutboxList();
-            render();
-          } catch (e) { toast(e.message, "error"); }
-        }
-      }, "Generar Outbox"),
-      el("button", {
-        class: "btn success",
-        onclick: async () => {
-          try {
-            toast("Enviando pendientes…");
-            await API.slackOutboxEnviar();
-            toast("Outbox procesado");
-            state.data.outbox = await API.slackOutboxList();
-            render();
-          } catch (e) { toast(e.message, "error"); }
-        }
-      }, "Enviar pendientes"),
-      el("button", {
-        class: "btn",
-        onclick: async () => {
-          try {
-            const h = await API.health();
-            toast(`OK · ${h.tz}`);
-          } catch (e) { toast(e.message, "error"); }
-        }
-      }, "Health"),
-    ]),
-    el("div", { class: "hint" }, "Tip: el orden recomendado es Planificación → Outbox → Envío."),
-  ]);
-
-  const cardB = el("div", { class: "card" }, [
-    el("div", { class: "cardTitle" }, "Resumen rápido"),
-    el("div", { class: "kpis" }, [
-      kpi("Colaboradores", state.data.colaboradores.length),
-      kpi("Flujos", state.data.flujos.length),
-      kpi("Planificación (filas)", Math.max(0, (state.data.plan?.length || 0) - 1)),
-      kpi("Outbox (filas)", Math.max(0, (state.data.outbox?.length || 0) - 1)),
-    ]),
-  ]);
-
-  wrap.appendChild(cardA);
-  wrap.appendChild(cardB);
-
-  // Planificación table
-  const planCard = el("div", { class: "card" }, [
-    el("div", { class: "cardTitle" }, "Planificación diaria"),
-    tableFromMatrix(state.data.plan),
-  ]);
-
-  // Outbox table
-  const outCard = el("div", { class: "card" }, [
-    el("div", { class: "cardTitle" }, "Slack Outbox"),
-    el("div", { class: "hint" }, "Columnas: Fecha, Tipo, Canal, Slack_Channel_ID, Mensaje, Estado"),
-    tableFromMatrix(state.data.outbox),
-  ]);
-
-  return el("div", { class: "stack" }, [wrap, planCard, outCard]);
-}
-
-function kpi(label, value) {
-  return el("div", { class: "kpi" }, [
-    el("div", { class: "kpiLabel" }, label),
-    el("div", { class: "kpiValue" }, String(value)),
-  ]);
-}
-
-function viewColaboradores() {
-  const list = state.data.colaboradores || [];
-  const card = el("div", { class: "card" }, [
-    el("div", { class: "cardTitle" }, "Colaboradores"),
-    el("div", { class: "hint" }, "Fuente: hoja Colaboradores (ID_MELI, Slack_ID, Nombre)"),
-    el("table", { class: "tbl" }, [
-      el("thead", {}, el("tr", {}, ["ID_MELI", "Nombre", "Slack_ID"].map(h => el("th", {}, h)))),
-      el("tbody", {}, list.map(c => el("tr", {}, [
-        el("td", {}, fmt(c.ID_MELI)),
-        el("td", {}, fmt(c.Nombre)),
-        el("td", {}, fmt(c.Slack_ID)),
-      ])))
-    ]),
-  ]);
-  return el("div", { class: "stack" }, [card]);
-}
-
-function viewFlujos() {
-  const flujos = state.data.flujos || [];
-
-  const form = el("div", { class: "row wrap" }, [
-    el("input", { class: "inp", id: "newFlujo", placeholder: "Flujo (ej: Enhancement)" }),
-    el("input", { class: "inp", id: "newPerfiles", placeholder: "Perfiles requeridos (número)", type: "number", min: "0" }),
-    el("input", { class: "inp", id: "newChannel", placeholder: "Slack Channel (nombre exacto de la hoja Config_Flujos)" }),
-    el("button", {
-      class: "btn primary",
-      onclick: async () => {
-        try {
-          const flujo = $("#newFlujo").value.trim();
-          const perfiles = Number($("#newPerfiles").value || 0);
-          const channel = $("#newChannel").value.trim();
-
-          if (!flujo) return toast("Falta Flujo", "error");
-          await API.flujosUpsert(flujo, perfiles, channel);
-          toast("Flujo guardado");
-          state.data.flujos = await API.flujosList();
-          render();
-        } catch (e) { toast(e.message, "error"); }
-      }
-    }, "Guardar"),
-  ]);
-
-  const tbl = el("table", { class: "tbl" }, [
-    el("thead", {}, el("tr", {}, ["Flujo", "Perfiles_requeridos", "Slack_Channel", "Acciones"].map(h => el("th", {}, h)))),
-    el("tbody", {}, flujos.map(f => el("tr", {}, [
-      el("td", {}, fmt(f.Flujo)),
-      el("td", {}, fmt(f.Perfiles_requeridos)),
-      el("td", {}, fmt(f.Slack_Channel)),
-      el("td", {}, el("button", {
-        class: "btn danger sm",
-        onclick: async () => {
-          try {
-            const name = String(f.Flujo || "").trim();
-            if (!name) return;
-            if (!confirm(`Eliminar flujo "${name}"?`)) return;
-            await API.flujosDelete(name);
-            toast("Flujo eliminado");
-            state.data.flujos = await API.flujosList();
-            render();
-          } catch (e) { toast(e.message, "error"); }
-        }
-      }, "Eliminar")),
-    ]))),
-  ]);
-
-  return el("div", { class: "stack" }, [
-    el("div", { class: "card" }, [
-      el("div", { class: "cardTitle" }, "Configurar flujos"),
-      el("div", { class: "hint" }, "Esto impacta directamente en Planificación + Outbox."),
-      form,
-    ]),
-    el("div", { class: "card" }, [el("div", { class: "cardTitle" }, "Listado de flujos"), tbl]),
-  ]);
-}
-
-function viewHabilitaciones() {
-  const hab = state.data.habil || { headers: [], rows: [] };
-  const headers = hab.headers || [];
-  const rows = hab.rows || [];
-
-  if (!headers.length) {
-    return el("div", { class: "card" }, [
-      el("div", { class: "cardTitle" }, "Habilitaciones"),
-      el("div", { class: "muted" }, "No hay datos o la hoja está vacía."),
-    ]);
-  }
-
-  // UI: selector de ID y flujo para set rápido (evita editar matriz gigante)
-  const idOptions = rows.map(r => String(r[headers.indexOf("ID_MELI")] || "")).filter(Boolean);
-
-  const flujoOptions = (state.data.flujos || []).map(f => String(f.Flujo || "").trim()).filter(Boolean);
-
-  const quick = el("div", { class: "row wrap" }, [
-    el("select", { class: "inp", id: "habId" }, [
-      el("option", { value: "" }, "ID_MELI…"),
-      ...idOptions.map(id => el("option", { value: id }, id)),
-    ]),
-    el("select", { class: "inp", id: "habFlujo" }, [
-      el("option", { value: "" }, "Flujo…"),
-      ...flujoOptions.map(fl => el("option", { value: fl }, fl)),
-    ]),
-    el("label", { class: "chk" }, [
-      el("input", { type: "checkbox", id: "habEn" }),
-      el("span", {}, "Habilitado"),
-    ]),
-    el("label", { class: "chk" }, [
-      el("input", { type: "checkbox", id: "habFijo" }),
-      el("span", {}, "Fijo"),
-    ]),
-    el("button", {
-      class: "btn primary",
-      onclick: async () => {
-        try {
-          const id = $("#habId").value.trim();
-          const flujo = $("#habFlujo").value.trim();
-          const habilitado = $("#habEn").checked;
-          const fijo = $("#habFijo").checked;
-          if (!id || !flujo) return toast("Falta ID o Flujo", "error");
-
-          await API.habilitacionesSet(id, flujo, habilitado, fijo);
-          toast("Habilitación actualizada");
-          state.data.habil = await API.habilitacionesList();
-          render();
-        } catch (e) { toast(e.message, "error"); }
-      }
-    }, "Aplicar"),
-  ]);
-
-  const card = el("div", { class: "card" }, [
-    el("div", { class: "cardTitle" }, "Habilitaciones"),
-    el("div", { class: "hint" }, "UI rápida para setear sin editar la matriz completa. La tabla abajo es referencia."),
-    quick,
-  ]);
-
-  const tableCard = el("div", { class: "card" }, [
-    el("div", { class: "cardTitle" }, "Vista tabla (referencia)"),
-    el("div", { class: "hint" }, "Si esto te queda enorme: normal. Por eso existe el set rápido arriba."),
-    tableFromObjectTable(headers, rows),
-  ]);
-
-  return el("div", { class: "stack" }, [card, tableCard]);
-}
-
-function viewPresentismo() {
-  const cardTop = el("div", { class: "card" }, [
-    el("div", { class: "cardTitle" }, "Presentismo"),
-    el("div", { class: "row wrap" }, [
-      el("input", { class: "inp", id: "presDate", placeholder: "Fecha (YYYY-MM-DD o DD/MM/YYYY)" }),
-      el("button", {
-        class: "btn",
-        onclick: async () => {
-          try {
-            const d = $("#presDate").value.trim();
-            state.data.presStats = await API.presentismoStats(d || undefined);
-            state.data.presWeek = await API.presentismoWeek(d || undefined);
-            toast("Presentismo actualizado");
-            render();
-          } catch (e) { toast(e.message, "error"); }
-        }
-      }, "Actualizar"),
-    ]),
-    el("div", { class: "divider" }),
-    el("div", { class: "cardTitle small" }, "Registrar licencia/ausencia"),
-    el("div", { class: "row wrap" }, [
-      el("input", { class: "inp", id: "licId", placeholder: "ID_MELI" }),
-      el("input", { class: "inp", id: "licDesde", placeholder: "Desde (YYYY-MM-DD o DD/MM/YYYY)" }),
-      el("input", { class: "inp", id: "licHasta", placeholder: "Hasta (opcional)" }),
-      el("select", { class: "inp", id: "licTipo" }, [
-        el("option", { value: "V" }, "V (Vacaciones)"),
-        el("option", { value: "E" }, "E"),
-        el("option", { value: "M" }, "M"),
-        el("option", { value: "MM" }, "MM"),
-        el("option", { value: "AI" }, "AI"),
-        el("option", { value: "P" }, "P (Presente)"),
-      ]),
-      el("button", {
-        class: "btn primary",
-        onclick: async () => {
-          try {
-            const idMeli = $("#licId").value.trim();
-            const desde = $("#licDesde").value.trim();
-            const hasta = $("#licHasta").value.trim();
-            const tipo = $("#licTipo").value.trim();
-            if (!idMeli || !desde) return toast("Falta ID o Desde", "error");
-
-            await API.presentismoLicenciasSet(idMeli, desde, hasta || "", tipo);
-            toast("Registro guardado");
-          } catch (e) { toast(e.message, "error"); }
-        }
-      }, "Guardar"),
-    ]),
-  ]);
-
-  const stats = state.data.presStats;
-  const statsCard = el("div", { class: "card" }, [
-    el("div", { class: "cardTitle" }, "Stats día"),
-    stats
-      ? el("div", { class: "kpis" }, [
-          kpi("Fecha", stats.fecha || "-"),
-          kpi("Total", stats.total ?? 0),
-          kpi("Presentes", stats.presentes ?? 0),
-          kpi("Ausentes", stats.ausentes ?? 0),
-        ])
-      : el("div", { class: "muted" }, "Sin stats todavía. Tocá Actualizar."),
-  ]);
-
-  const week = state.data.presWeek;
-  const weekCard = el("div", { class: "card" }, [
-    el("div", { class: "cardTitle" }, "Semana (últimas 7 columnas fecha)"),
-    week ? tableFromObjectTable(week.headers, week.rows) : el("div", { class: "muted" }, "Sin datos todavía."),
-  ]);
-
-  return el("div", { class: "stack" }, [cardTop, statsCard, weekCard]);
-}
-
-function viewDashboards() {
-  // placeholders para que no te autoengañes: esto no se “inventa”, se conecta a datos reales.
-  return el("div", { class: "stack" }, [
-    el("div", { class: "card" }, [
-      el("div", { class: "cardTitle" }, "Dashboard (Productividad / Calidad)"),
-      el("div", { class: "hint" }, "Esto es el siguiente paso: conectarlo a tus fuentes reales (auditorías, volumen, efectividad, etc.)."),
-      el("ul", { class: "ul" }, [
-        el("li", {}, "Productividad: tareas/día por flujo, por colaborador, tendencia semanal."),
-        el("li", {}, "Calidad: efectividad global, % graves, top motivos, top perfiles en riesgo."),
-        el("li", {}, "Alertas: baja cobertura, flujos sin perfiles, outbox con errores."),
-      ]),
-      el("div", { class: "muted" }, "Cuando me pases la estructura de tus hojas de productividad/calidad, lo cierro en serio."),
-    ]),
-  ]);
-}
-
-/* -----------------------
-   Render root
------------------------- */
 function render() {
-  const content = $("#content");
-  content.innerHTML = "";
-  const view =
-    state.tab === "operativa" ? viewOperativa()
-    : state.tab === "colaboradores" ? viewColaboradores()
-    : state.tab === "flujos" ? viewFlujos()
-    : state.tab === "habilitaciones" ? viewHabilitaciones()
-    : state.tab === "presentismo" ? viewPresentismo()
-    : viewDashboards();
+  renderTabs();
 
-  content.appendChild(view);
+  const app = safeEl("#app");
+  if (!app) return;
 
-  // nav active
-  document.querySelectorAll("[data-tab]").forEach(b => {
-    b.classList.toggle("active", b.dataset.tab === state.tab);
+  const r = currentRoute();
+  if (r === "dashboard") return renderDashboard(app);
+  if (r === "operativa") return renderOperativa(app);
+  if (r === "colaboradores") return renderColaboradores(app);
+  if (r === "habilitaciones") return renderHabilitaciones(app);
+  if (r === "presentismo") return renderPresentismo(app);
+  if (r === "calidad") return renderCalidad(app);
+  if (r === "productividad") return renderProductividad(app);
+}
+
+function renderDashboard(app) {
+  const d = STATE.dashboard || {};
+  app.innerHTML = `
+    <div class="sectionTitle">Dashboard</div>
+    <div class="muted">Estado general del HUB.</div>
+    <div class="sep"></div>
+
+    <div class="grid kpis">
+      <div class="kpi">
+        <div class="muted">Colaboradores</div>
+        <div class="v">${esc(d.colaboradores_total ?? STATE.colaboradores.length)}</div>
+      </div>
+      <div class="kpi">
+        <div class="muted">Presentes hoy</div>
+        <div class="v">${esc(d.presentes_hoy ?? STATE.presentismo.filter(x => x.estado === "P").length)}</div>
+      </div>
+      <div class="kpi">
+        <div class="muted">Flujos activos</div>
+        <div class="v">${esc(d.flujos_total ?? STATE.flujos.length)}</div>
+      </div>
+      <div class="kpi">
+        <div class="muted">Outbox pendientes</div>
+        <div class="v">${esc(d.outbox_pendientes ?? STATE.outbox.filter(x => String(x.estado||"").startsWith("PENDIENTE")).length)}</div>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+    <div class="row">
+      <span class="pill">Planificación: ${STATE.plan.length ? "cargada" : "vacía"}</span>
+      <span class="pill">Outbox: ${STATE.outbox.length ? "cargada" : "vacía"}</span>
+      <span class="pill">Canales: ${STATE.canales.length}</span>
+    </div>
+  `;
+}
+
+function renderOperativa(app) {
+  app.innerHTML = `
+    <div class="sectionTitle">Operativa diaria</div>
+    <div class="muted">Config de flujos + generación de planificación + Slack outbox.</div>
+
+    <div class="sep"></div>
+
+    <div class="sectionTitle" style="font-size:16px;">Flujos</div>
+    <div class="muted">Se guarda automáticamente al editar.</div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:30%;">Flujo</th>
+          <th style="width:35%;">Slack channel</th>
+          <th style="width:20%;">Perfiles</th>
+          <th style="width:15%;">Acción</th>
+        </tr>
+      </thead>
+      <tbody id="tbFlujos"></tbody>
+    </table>
+
+    <div class="row">
+      <input id="newFlujo" placeholder="+ Nuevo flujo…" style="flex:2; min-width:180px;" />
+      <select id="newChannel" style="flex:2; min-width:180px;"></select>
+      <input id="newPerfiles" type="number" min="0" value="0" style="flex:1; min-width:120px;" />
+      <button id="btnAddFlujo" class="btn primary">Agregar</button>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="row">
+      <button id="btnPlan" class="btn primary">Generar planificación</button>
+      <button id="btnOutbox" class="btn">Generar Outbox</button>
+      <button id="btnSendAll" class="btn success">Enviar todos</button>
+      <span id="opStatus" class="muted"></span>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="sectionTitle" style="font-size:16px;">Planificación (resultado)</div>
+    <div id="planBox" class="muted">${STATE.plan.length ? "" : "Sin planificación cargada."}</div>
+
+    <div class="sep"></div>
+
+    <div class="sectionTitle" style="font-size:16px;">Slack Outbox (pendientes)</div>
+    <div class="muted">Editá canal/mensaje y enviá por fila o “Enviar todos”.</div>
+    <div id="outBox" style="margin-top:10px;"></div>
+  `;
+
+  // canales select
+  const sel = safeEl("#newChannel");
+  if (sel) {
+    sel.innerHTML = `<option value="">—</option>` + STATE.canales
+      .map(c => `<option value="${esc(c.channel_id)}">${esc(c.canal)} (${esc(c.channel_id)})</option>`)
+      .join("");
+  }
+
+  // tabla flujos
+  const tb = safeEl("#tbFlujos");
+  if (tb) {
+    tb.innerHTML = (STATE.flujos || []).map(f => {
+      return `
+        <tr data-flujo="${esc(f.flujo)}">
+          <td><strong>${esc(f.flujo)}</strong></td>
+          <td>
+            <select data-field="channel_id">
+              <option value="">—</option>
+              ${STATE.canales.map(c =>
+                `<option value="${esc(c.channel_id)}" ${String(c.channel_id)===String(f.channel_id) ? "selected":""}>
+                  ${esc(c.canal)} (${esc(c.channel_id)})
+                </option>`
+              ).join("")}
+            </select>
+          </td>
+          <td><input data-field="perfiles_requeridos" type="number" min="0" value="${esc(f.perfiles_requeridos ?? 0)}"/></td>
+          <td><button class="btn danger" data-del="1">Borrar</button></td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  // render plan
+  const planBox = safeEl("#planBox");
+  if (planBox && STATE.plan.length) {
+    const g = groupBy(STATE.plan, x => x.flujo);
+    planBox.classList.remove("muted");
+    planBox.innerHTML = Array.from(g.entries()).map(([flujo, rows]) => {
+      const ppl = rows
+        .filter(r => r.idMeli && r.idMeli !== "SIN PERFILES DISPONIBLES")
+        .map(r => r.nombre ? `${esc(r.nombre)} (${esc(r.idMeli)})` : esc(r.idMeli))
+        .join(" • ");
+      return `
+        <div style="margin:10px 0;">
+          <div class="pill"><strong>${esc(flujo)}</strong> <span class="muted">(${rows.length})</span></div>
+          <div style="margin-top:8px;">${ppl || `<span class="muted">Sin perfiles</span>`}</div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  // render outbox
+  renderOutbox();
+
+  // handlers
+  app.addEventListener("change", async (e) => {
+    const tr = e.target.closest("tr[data-flujo]");
+    if (!tr) return;
+
+    const flujo = tr.dataset.flujo;
+    const field = e.target.getAttribute("data-field");
+    if (!field) return;
+
+    const channel_id = tr.querySelector('select[data-field="channel_id"]')?.value || "";
+    const perfiles_requeridos = Number(tr.querySelector('input[data-field="perfiles_requeridos"]')?.value || 0);
+
+    try {
+      await API.flujosUpsert(flujo, perfiles_requeridos, channel_id);
+      toast("Flujo guardado");
+      await refreshOperativa();
+    } catch (err) {
+      toast(err.message || String(err), true);
+    }
+  }, { passive: true });
+
+  app.addEventListener("click", async (e) => {
+    const delBtn = e.target.closest("[data-del]");
+    if (delBtn) {
+      const tr = delBtn.closest("tr[data-flujo]");
+      const flujo = tr?.dataset?.flujo;
+      if (!flujo) return;
+      if (!confirm(`Borrar flujo "${flujo}"?`)) return;
+
+      try {
+        await API.flujosDelete(flujo);
+        toast("Flujo borrado");
+        await refreshOperativa();
+      } catch (err) {
+        toast(err.message || String(err), true);
+      }
+      return;
+    }
+
+    if (e.target.id === "btnAddFlujo") {
+      const nf = safeEl("#newFlujo")?.value?.trim();
+      const nc = safeEl("#newChannel")?.value?.trim() || "";
+      const np = Number(safeEl("#newPerfiles")?.value || 0);
+      if (!nf) return toast("Poné un nombre de flujo", true);
+
+      try {
+        await API.flujosUpsert(nf, np, nc);
+        toast("Flujo agregado");
+        await refreshOperativa();
+      } catch (err) {
+        toast(err.message || String(err), true);
+      }
+      return;
+    }
+
+    if (e.target.id === "btnPlan") {
+      await runOp("Generando planificación…", async () => {
+        await API.planificacionGenerar();
+        STATE.plan = await API.planificacionList().catch(() => []);
+      });
+      render();
+      return;
+    }
+
+    if (e.target.id === "btnOutbox") {
+      await runOp("Generando Outbox…", async () => {
+        await API.slackOutboxGenerar();
+        STATE.outbox = await API.slackOutboxList().catch(() => []);
+      });
+      render();
+      return;
+    }
+
+    if (e.target.id === "btnSendAll") {
+      await runOp("Enviando…", async () => {
+        await API.slackOutboxEnviar(); // envía todos pendientes
+        STATE.outbox = await API.slackOutboxList().catch(() => []);
+      });
+      render();
+      return;
+    }
+
+    // enviar fila
+    const sendRow = e.target.closest("[data-send-row]");
+    if (sendRow) {
+      const row = Number(sendRow.dataset.sendRow);
+      if (!row) return;
+      await runOp("Enviando fila…", async () => {
+        await API.slackOutboxEnviar(row);
+        STATE.outbox = await API.slackOutboxList().catch(() => []);
+      });
+      render();
+      return;
+    }
   });
 }
 
-/* -----------------------
-   Boot
------------------------- */
-function boot() {
-  // nav events
-  document.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
-
-  $("#btnRefresh").addEventListener("click", loadAll);
-
-  loadAll();
+async function runOp(msg, fn) {
+  const st = safeEl("#opStatus");
+  if (st) st.textContent = msg;
+  try {
+    await fn();
+    toast("OK");
+  } catch (err) {
+    toast(err.message || String(err), true);
+  } finally {
+    if (st) st.textContent = "";
+  }
 }
 
-boot();
+async function refreshOperativa() {
+  const [canales, flujos, plan, outbox] = await Promise.all([
+    API.canalesList().catch(() => []),
+    API.flujosList().catch(() => []),
+    API.planificacionList().catch(() => []),
+    API.slackOutboxList().catch(() => []),
+  ]);
+  STATE.canales = canales || [];
+  STATE.flujos = flujos || [];
+  STATE.plan = plan || [];
+  STATE.outbox = outbox || [];
+}
+
+function renderOutbox() {
+  const box = safeEl("#outBox");
+  if (!box) return;
+
+  const pendientes = (STATE.outbox || []).filter(x => String(x.estado || "").startsWith("PENDIENTE") || x.estado === "ERROR");
+  if (!pendientes.length) {
+    box.innerHTML = `<div class="muted">Sin pendientes.</div>`;
+    return;
+  }
+
+  box.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th style="width:110px;">Fecha</th>
+          <th style="width:260px;">Canal</th>
+          <th>Mensaje</th>
+          <th style="width:110px;">Estado</th>
+          <th style="width:120px;">Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${pendientes.map(r => {
+          return `
+            <tr>
+              <td>${esc(fmtDate(r.fecha))}</td>
+              <td>
+                <select data-outbox-row="${esc(r.row)}" data-outbox-field="channel_id">
+                  <option value="">—</option>
+                  ${STATE.canales.map(c =>
+                    `<option value="${esc(c.channel_id)}" ${String(c.channel_id)===String(r.channel_id) ? "selected":""}>
+                      ${esc(c.canal)} (${esc(c.channel_id)})
+                    </option>`
+                  ).join("")}
+                </select>
+                <div class="muted" style="font-size:12px; margin-top:6px;">${esc(r.canal || "")}</div>
+              </td>
+              <td>
+                <textarea data-outbox-row="${esc(r.row)}" data-outbox-field="mensaje">${esc(r.mensaje || "")}</textarea>
+                ${r.error ? `<div class="errorBox" style="margin-top:8px;">${esc(r.error)}</div>` : ``}
+              </td>
+              <td>${esc(r.estado || "")}</td>
+              <td>
+                <div class="row">
+                  <button class="btn" data-save-row="${esc(r.row)}">Guardar</button>
+                  <button class="btn primary" data-send-row="${esc(r.row)}">Enviar</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+
+  box.onclick = async (e) => {
+    const save = e.target.closest("[data-save-row]");
+    if (!save) return;
+    const row = Number(save.dataset.saveRow);
+    if (!row) return;
+
+    const channel_id = box.querySelector(`[data-outbox-row="${row}"][data-outbox-field="channel_id"]`)?.value || "";
+    const mensaje = box.querySelector(`[data-outbox-row="${row}"][data-outbox-field="mensaje"]`)?.value || "";
+    const canal = STATE.canales.find(c => String(c.channel_id) === String(channel_id))?.canal || "";
+
+    try {
+      await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
+      toast("Outbox guardada");
+      STATE.outbox = await API.slackOutboxList().catch(() => []);
+      render();
+    } catch (err) {
+      toast(err.message || String(err), true);
+    }
+  };
+}
+
+function renderColaboradores(app) {
+  app.innerHTML = `
+    <div class="sectionTitle">Colaboradores</div>
+    <div class="muted">Listado desde hoja “Colaboradores”.</div>
+    <div class="sep"></div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:180px;">ID_MELI</th>
+          <th>Nombre</th>
+          <th style="width:220px;">Slack_ID</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(STATE.colaboradores || []).map(c => `
+          <tr>
+            <td><strong>${esc(c.idMeli)}</strong></td>
+            <td>${esc(c.nombre || "")}</td>
+            <td>${esc(c.slackId || "")}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderHabilitaciones(app) {
+  const flujos = (STATE.flujos || []).map(f => f.flujo);
+  const habMap = new Map(); // key: id|flujo -> {habilitado,fijo}
+  for (const h of (STATE.habilitaciones || [])) {
+    habMap.set(`${h.idMeli}||${h.flujo}`, { habilitado: !!h.habilitado, fijo: !!h.fijo });
+  }
+
+  app.innerHTML = `
+    <div class="sectionTitle">Habilitaciones</div>
+    <div class="muted">Toggle por colaborador y flujo (habilitado + fijo).</div>
+    <div class="sep"></div>
+
+    <div class="muted" style="margin-bottom:10px;">
+      Consejo: si esto te parece largo, es porque lo es. Es una matriz.
+    </div>
+
+    <div style="overflow:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th style="min-width:180px;">Colaborador</th>
+            ${flujos.map(f => `<th style="min-width:180px;">${esc(f)}</th>`).join("")}
+          </tr>
+        </thead>
+        <tbody>
+          ${(STATE.colaboradores || []).map(c => {
+            return `
+              <tr>
+                <td><strong>${esc(c.nombre || c.idMeli)}</strong><div class="muted" style="font-size:12px;">${esc(c.idMeli)}</div></td>
+                ${flujos.map(f => {
+                  const st = habMap.get(`${c.idMeli}||${f}`) || { habilitado:false, fijo:false };
+                  return `
+                    <td>
+                      <div class="row">
+                        <label class="pill">
+                          <input type="checkbox" data-h-id="${esc(c.idMeli)}" data-h-flujo="${esc(f)}" data-h-field="habilitado" ${st.habilitado ? "checked":""}/>
+                          habilitado
+                        </label>
+                        <label class="pill">
+                          <input type="checkbox" data-h-id="${esc(c.idMeli)}" data-h-flujo="${esc(f)}" data-h-field="fijo" ${st.fijo ? "checked":""}/>
+                          fijo
+                        </label>
+                      </div>
+                    </td>
+                  `;
+                }).join("")}
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  app.onchange = async (e) => {
+    const el = e.target;
+    if (!el?.matches?.("input[data-h-id]")) return;
+
+    const idMeli = el.getAttribute("data-h-id");
+    const flujo = el.getAttribute("data-h-flujo");
+    const field = el.getAttribute("data-h-field");
+
+    // obtenemos ambos checks (habilitado/fijo) para guardar consistente
+    const hab = app.querySelector(`input[data-h-id="${CSS.escape(idMeli)}"][data-h-flujo="${CSS.escape(flujo)}"][data-h-field="habilitado"]`)?.checked || false;
+    const fijo = app.querySelector(`input[data-h-id="${CSS.escape(idMeli)}"][data-h-flujo="${CSS.escape(flujo)}"][data-h-field="fijo"]`)?.checked || false;
+
+    try {
+      await API.habilitacionesSet(idMeli, flujo, hab, fijo);
+      toast("Guardado");
+      STATE.habilitaciones = await API.habilitacionesList().catch(() => []);
+    } catch (err) {
+      toast(err.message || String(err), true);
+    }
+  };
+}
+
+function renderPresentismo(app) {
+  app.innerHTML = `
+    <div class="sectionTitle">Presentismo</div>
+    <div class="muted">Estado de hoy (TZ del spreadsheet). Registrar ausencia por rango.</div>
+    <div class="sep"></div>
+
+    <div class="row">
+      <select id="pColab" style="flex:2; min-width:220px;"></select>
+      <input id="pDesde" placeholder="Desde (yyyy-mm-dd o dd/mm/yyyy)" style="flex:1; min-width:180px;" />
+      <input id="pHasta" placeholder="Hasta (opcional)" style="flex:1; min-width:180px;" />
+      <select id="pTipo" style="flex:1; min-width:140px;">
+        <option value="V">Vacaciones (V)</option>
+        <option value="E">Enfermedad (E)</option>
+        <option value="M">Médico (M)</option>
+        <option value="MM">Mudanza (MM)</option>
+        <option value="AI">Ausencia injustificada (AI)</option>
+      </select>
+      <button id="pGuardar" class="btn primary">Guardar</button>
+    </div>
+
+    <div class="sep"></div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:180px;">ID_MELI</th>
+          <th>Nombre</th>
+          <th style="width:120px;">Estado</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(STATE.presentismo || []).map(r => `
+          <tr>
+            <td><strong>${esc(r.idMeli)}</strong></td>
+            <td>${esc(r.nombre || "")}</td>
+            <td>${esc(r.estado || "")}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+
+  const sel = safeEl("#pColab");
+  if (sel) {
+    sel.innerHTML = `<option value="">Elegí colaborador…</option>` + (STATE.colaboradores || [])
+      .map(c => `<option value="${esc(c.idMeli)}">${esc(c.nombre || c.idMeli)} (${esc(c.idMeli)})</option>`)
+      .join("");
+  }
+
+  app.onclick = async (e) => {
+    if (e.target.id !== "pGuardar") return;
+    const idMeli = safeEl("#pColab")?.value || "";
+    const desde = safeEl("#pDesde")?.value?.trim() || "";
+    const hasta = safeEl("#pHasta")?.value?.trim() || "";
+    const tipo = safeEl("#pTipo")?.value || "V";
+
+    if (!idMeli) return toast("Elegí colaborador", true);
+    if (!desde) return toast("Poné fecha desde", true);
+
+    try {
+      await API.presentismoSetRango(idMeli, desde, hasta, tipo);
+      toast("Ausencia registrada");
+      STATE.presentismo = await API.presentismoHoy().catch(() => []);
+      render();
+    } catch (err) {
+      toast(err.message || String(err), true);
+    }
+  };
+}
+
+function renderCalidad(app) {
+  if (!STATE.calidad?.length) {
+    app.innerHTML = `
+      <div class="sectionTitle">Calidad</div>
+      <div class="muted">No hay datos (o no existe la hoja Calidad_PM).</div>
+      <div class="sep"></div>
+      <div class="pill">Tip: si querés, conectamos esto a Looker / KPI real.</div>
+    `;
+    return;
+  }
+
+  app.innerHTML = `
+    <div class="sectionTitle">Calidad PM</div>
+    <div class="muted">Fuente: hoja “Calidad_PM”.</div>
+    <div class="sep"></div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Semana</th>
+          <th>Usuario</th>
+          <th>Total</th>
+          <th>Errores</th>
+          <th>Correctas</th>
+          <th>Efectividad</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(STATE.calidad || []).map(r => `
+          <tr>
+            <td>${esc(r.semana)}</td>
+            <td><strong>${esc(r.usuario)}</strong></td>
+            <td>${esc(r.total_sugerencias)}</td>
+            <td>${esc(r.sugerencias_con_error)}</td>
+            <td>${esc(r.sugerencias_correctas)}</td>
+            <td>${r.efectividad != null ? esc((Number(r.efectividad) * 100).toFixed(2) + "%") : ""}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderProductividad(app) {
+  app.innerHTML = `
+    <div class="sectionTitle">Productividad</div>
+    <div class="muted">Placeholder: esta sección depende de tu fuente (Looker / Sheets / API MELI).</div>
+    <div class="sep"></div>
+    <div class="pill">Si querés “KPI real”, definí: fuente, granularidad y métricas.</div>
+  `;
+}
+
+async function init() {
+  // errores globales => toast en vez de “pantalla en blanco”
+  window.addEventListener("error", (e) => toast(e?.message || "Error", true));
+  window.addEventListener("unhandledrejection", (e) => toast(e?.reason?.message || String(e.reason || "Promise error"), true));
+
+  const btnHealth = safeEl("#btnHealth");
+  if (btnHealth) {
+    btnHealth.onclick = async () => {
+      try {
+        const x = await API.health();
+        toast(`OK: ${x?.spreadsheetId || "health"}`);
+      } catch (err) {
+        toast(err.message || String(err), true);
+      }
+    };
+  }
+
+  await loadAll();
+  renderTabs();
+  render();
+
+  window.addEventListener("hashchange", () => {
+    renderTabs();
+    render();
+  });
+}
+
+init();
