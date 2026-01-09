@@ -14,7 +14,7 @@
                     var(--bg);
         color:#eaf0ff;
       }
-      .wrap{ max-width:1200px; margin:18px auto; padding:0 14px; }
+      .wrap{ max-width:1320px; margin:18px auto; padding:0 14px; }
       .top{
         display:flex; align-items:flex-end; justify-content:space-between; gap:12px;
         margin-bottom:12px;
@@ -30,6 +30,7 @@
       .btn.primary{ background:#2d63ff; border-color:#2d63ff; }
       .btn.success{ background:#137a41; border-color:#137a41; }
       .btn.danger{ background: rgba(255,70,70,.10); border-color: rgba(255,70,70,.35); color:#ffd2d2; }
+      .btn.ghost{ background: transparent; }
       .card{
         border:1px solid var(--bd); background: var(--card);
         border-radius:18px; padding:14px;
@@ -53,7 +54,7 @@
       }
       textarea{ min-height:90px; resize:vertical; }
       table{ width:100%; border-collapse:separate; border-spacing:0 10px; }
-      th{ text-align:left; font-size:12px; opacity:.75; font-weight:700; padding:0 10px; }
+      th{ text-align:left; font-size:12px; opacity:.75; font-weight:700; padding:0 10px; white-space:nowrap; }
       td{ padding:10px; vertical-align:top; background: rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07); }
       td:first-child{ border-radius:14px 0 0 14px; }
       td:last-child{ border-radius:0 14px 14px 0; }
@@ -63,15 +64,23 @@
       .kpi .v{ font-size:22px; font-weight:900; margin-top:4px; }
       .pill{ display:inline-flex; gap:8px; align-items:center; padding:8px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.04); font-size:12px; }
       .errorBox{ border:1px solid rgba(255,70,70,.35); background: rgba(255,70,70,.10); color:#ffd2d2; padding:10px 12px; border-radius:12px; }
-      .toast{ position: fixed; left: 14px; right: 14px; bottom: 14px; margin:auto; max-width: 760px; display:none;
+      .toast{ position: fixed; left: 14px; right: 14px; bottom: 14px; margin:auto; max-width: 860px; display:none;
               background: rgba(0,0,0,.75); border:1px solid rgba(255,255,255,.14); padding: 10px 12px; border-radius: 12px; }
       .toast.show{ display:block; }
+      .filters{
+        display:grid; gap:10px;
+        grid-template-columns: 1.4fr 1fr 1fr auto;
+        align-items:end;
+      }
+      .hint{ font-size:12px; opacity:.7; margin-top:6px; }
 
-      @media (max-width: 900px){
+      @media (max-width: 980px){
         .grid.kpis{ grid-template-columns: repeat(2, minmax(0,1fr)); }
+        .filters{ grid-template-columns: 1fr 1fr; }
       }
       @media (max-width: 520px){
         .grid.kpis{ grid-template-columns: 1fr; }
+        .filters{ grid-template-columns: 1fr; }
         .title h1{ font-size:26px; }
       }
     </style>
@@ -90,6 +99,29 @@
         </div>
       </div>
 
+      <div class="card" style="margin-bottom:12px;">
+        <div class="sectionTitle" style="font-size:16px;">Filtros globales</div>
+        <div class="filters">
+          <div>
+            <label class="muted">Búsqueda</label>
+            <input id="fSearch" placeholder="Buscar por nombre, ID_MELI, Slack_ID…" />
+            <div class="hint muted">Aplica a todas las secciones.</div>
+          </div>
+          <div>
+            <label class="muted">Roles (multi)</label>
+            <select id="fRoles" multiple size="4"></select>
+          </div>
+          <div>
+            <label class="muted">Equipos (multi)</label>
+            <select id="fEquipos" multiple size="4"></select>
+          </div>
+          <div class="row" style="justify-content:flex-end;">
+            <label class="pill"><input id="fSoloSlack" type="checkbox" /> solo con Slack_ID</label>
+            <button id="btnClearFilters" class="btn ghost">Limpiar</button>
+          </div>
+        </div>
+      </div>
+
       <div id="app" class="card">
         <div class="muted">Cargando…</div>
       </div>
@@ -100,3 +132,4 @@
     <script type="module" src="./app.js"></script>
   </body>
 </html>
+
