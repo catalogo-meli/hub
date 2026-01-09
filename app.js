@@ -41,6 +41,32 @@ function fmtDateDMY(isoYMD) {
   return `${String(d).padStart(2, "0")}-${String(m).padStart(2, "0")}-${y}`;
 }
 
+function fmtDateAny(val) {
+  if (!val) return "";
+  // Date instance
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, "0");
+    const d = String(val.getDate()).padStart(2, "0");
+    return `${d}-${m}-${y}`;
+  }
+
+  const s = String(val).trim();
+  if (!s) return "";
+
+  // ISO yyyy-mm-dd
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return fmtDateDMY(s);
+
+  // dd/mm/yyyy
+  const m1 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m1) return `${String(m1[1]).padStart(2,"0")}-${String(m1[2]).padStart(2,"0")}-${m1[3]}`;
+
+  // dd-mm-yyyy already
+  if (/^\d{2}-\d{2}-\d{4}$/.test(s)) return s;
+
+  return s;
+}
+
 function norm(s) {
   return String(s || "")
     .trim()
@@ -75,6 +101,29 @@ function debounce(fn, ms = 350) {
     clearTimeout(t);
     t = setTimeout(() => fn(...args), ms);
   };
+}
+
+function mountTableSort_(tableId, sortState, onChange) {
+  const tbl = $(tableId);
+  if (!tbl) return;
+
+  const key = sortState?.key || "";
+  const dir = sortState?.dir || 1;
+
+  // indicators
+  tbl.querySelectorAll("th.sortable").forEach((th) => {
+    const k = th.getAttribute("data-sort");
+    const srt = th.querySelector(".srt");
+    if (srt) {
+      if (k === key) srt.textContent = dir === 1 ? "▲" : "▼";
+      else srt.textContent = "";
+    }
+    th.onclick = () => {
+      const nextKey = k;
+      const nextDir = (nextKey === key) ? (dir * -1) : 1;
+      onChange?.({ key: nextKey, dir: nextDir });
+    };
+  });
 }
 
 /* ========= MultiSelect ========= */
@@ -198,6 +247,14 @@ const S = {
   fColabs: { roles: new Set(), equipos: new Set(), q: "" },
   fHabil: { roles: new Set(), equipos: new Set(), q: "" },
   fPres: { roles: new Set(), equipos: new Set(), q: "" },
+
+  // Selección + sorters
+  selColabs: new Set(),
+  sort: {
+    colabs: { key: "nombre", dir: 1 },
+    habil: { key: "", dir: 1 },
+    pres: { key: "nombre", dir: 1 },
+  },
 };
 
 /* ========= Theme ========= */
@@ -443,7 +500,7 @@ function renderPlan() {
       const items = by[f] || [];
       const lis = items
         .map((x) => {
-          const fijo = x.es_fijo === "SI" ? " ⭐" : "";
+          const fijo = x.es_fijo === "SI" ? " F" : "";
           const name = x.nombre || x.id_meli || "";
           return `<li>${escapeHtml(name)}${fijo}</li>`;
         })
@@ -601,18 +658,44 @@ function renderColabs() {
   const tb = $("tblColabs")?.querySelector("tbody");
   if (!tb) return;
 
-  const filtered = applySectionFilter(S.colabs || [], S.fColabs);
+  const filtered = applySectionFilter(S.colabs || [], S.fColabs).map(colabRowView);
 
-  if (!filtered.length) {
-    tb.innerHTML = `<tr><td colspan="8" class="muted">Sin resultados.</td></tr>`;
+  // sort
+  const { key, dir } = S.sort.colabs || { key: "", dir: 1 };
+  const sorted = filtered.slice().sort((a, b) => {
+    const av = a?.[key] ?? "";
+    const bv = b?.[key] ?? "";
+    // ingreso as date-friendly
+    if (key === "ingreso") {
+      return dir * fmtDateAny(av).localeCompare(fmtDateAny(bv));
+    }
+    return dir * String(av).localeCompare(String(bv));
+  });
+
+  // selection pill
+  const pill = $("colabsSelPill");
+  if (pill) pill.innerHTML = `<b>Seleccionados</b> ${S.selColabs.size}`;
+
+  // select-all checkbox reflects filtered selection state
+  const selAll = $("colabsSelectAll");
+  if (selAll) {
+    const allIds = sorted.map((x) => x.id).filter(Boolean);
+    const allSelected = allIds.length > 0 && allIds.every((id) => S.selColabs.has(id));
+    selAll.checked = allSelected;
+    selAll.indeterminate = !allSelected && allIds.some((id) => S.selColabs.has(id));
+  }
+
+  if (!sorted.length) {
+    tb.innerHTML = `<tr><td colspan="9" class="muted">Sin resultados.</td></tr>`;
     return;
   }
 
-  tb.innerHTML = filtered
-    .map((c) => {
-      const v = colabRowView(c);
+  tb.innerHTML = sorted
+    .map((v) => {
+      const checked = S.selColabs.has(v.id) ? "checked" : "";
       return `
-        <tr>
+        <tr data-id="${escapeAttr(v.id)}">
+          <td class="nowrap"><input type="checkbox" data-sel ${checked} /></td>
           <td class="copyable" data-copy="${escapeAttr(v.id)}">${escapeHtml(v.id)}</td>
           <td>${escapeHtml(v.nombre)}</td>
           <td>${escapeHtml(roleBucket(v.rol))}</td>
@@ -620,14 +703,32 @@ function renderColabs() {
           <td>${escapeHtml(v.ubic)}</td>
           <td class="copyable" data-copy="${escapeAttr(v.mailProd)}">${escapeHtml(v.mailProd)}</td>
           <td class="copyable" data-copy="${escapeAttr(v.mailExt)}">${escapeHtml(v.mailExt)}</td>
-          <td class="nowrap">${escapeHtml(String(v.ingreso || ""))}</td>
+          <td class="nowrap">${escapeHtml(fmtDateAny(v.ingreso))}</td>
         </tr>
       `;
     })
     .join("");
 
+  // single-cell copy
   tb.querySelectorAll("[data-copy]").forEach((el) => {
     el.addEventListener("click", () => copyToClipboard(el.getAttribute("data-copy")));
+  });
+
+  // row selection
+  tb.querySelectorAll("input[data-sel]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const id = cb.closest("tr")?.getAttribute("data-id");
+      if (!id) return;
+      if (cb.checked) S.selColabs.add(unescapeAttr(id));
+      else S.selColabs.delete(unescapeAttr(id));
+      renderColabs(); // refresh pill + indeterminate
+    });
+  });
+
+  // sortable headers + indicators
+  mountTableSort_("tblColabs", S.sort.colabs, (next) => {
+    S.sort.colabs = next;
+    renderColabs();
   });
 }
 
@@ -647,7 +748,7 @@ function renderHabil() {
   head.innerHTML = `
     <tr>
       <th style="min-width:220px">Colaborador</th>
-      ${flujos.map((f) => `<th class="nowrap">${escapeHtml(f)}<div class="muted" style="font-size:11px;margin-top:2px">H / ⭐</div></th>`).join("")}
+      ${flujos.map((f) => `<th class="nowrap">${escapeHtml(f)}<div class="muted" style="font-size:11px;margin-top:2px">H / F</div></th>`).join("")}
     </tr>
   `;
 
@@ -701,7 +802,7 @@ function renderHabil() {
                 <input type="checkbox" data-h="1" data-id="${escapeAttr(id)}" data-flujo="${escapeAttr(f)}" ${hab ? "checked" : ""} />
                 <span class="muted">H</span>
                 <input type="checkbox" data-f="1" data-id="${escapeAttr(id)}" data-flujo="${escapeAttr(f)}" ${fijo ? "checked" : ""} />
-                <span class="muted">⭐</span>
+                <span class="muted">F</span>
               </label>
             </td>
           `;
@@ -802,13 +903,23 @@ function renderPresentismo() {
     return true;
   });
 
+  // sort (solo por colaborador por ahora)
+  const sp = S.sort.pres || { key: "nombre", dir: 1 };
+  filtered.sort((a, b) => {
+    const am = colabsById.get(a.id_meli) || { nombre: a.nombre || a.id_meli };
+    const bm = colabsById.get(b.id_meli) || { nombre: b.nombre || b.id_meli };
+    return sp.dir * String(am.nombre || "").localeCompare(String(bm.nombre || ""));
+  });
+
   const thead = tbl.querySelector("thead");
   thead.innerHTML = `
     <tr>
-      <th style="min-width:240px">Colaborador</th>
+      <th class="sortable" data-sort="nombre" style="min-width:240px">Colaborador<span class="srt" data-srt="nombre"></span></th>
       ${days.map((d) => `<th class="nowrap ${d.isFeriado ? "feriado" : ""}">${fmtDateDMY(d.key)}</th>`).join("")}
     </tr>
   `;
+
+  mountTableSort_("tblPresWeek", S.sort.pres, (next) => { S.sort.pres = next; renderPresentismo(); });
 
   const tbody = tbl.querySelector("tbody");
   if (!filtered.length) {
@@ -824,7 +935,9 @@ function renderPresentismo() {
         .map((d) => {
           const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
           const cls = d.isFeriado ? "feriado" : "";
-          return `<td class="${cls}">${escapeHtml(v)}</td>`;
+          const isLic = v && String(v).trim() !== "P";
+          const c2 = [cls, isLic ? "lic" : ""].filter(Boolean).join(" ");
+          return `<td class="${c2}">${escapeHtml(v)}</td>`;
         })
         .join("");
       return `<tr><td>${escapeHtml(label)}</td>${tds}</tr>`;
@@ -896,13 +1009,13 @@ function renderDashboard() {
 
   const pres = S.presStats?.presentes ?? 0;
   const analistasHoy = countAnalistasDisponiblesHoy_();
-  const pend = (S.outbox || []).filter((x) => String(x.estado || "").toUpperCase().startsWith("PENDIENTE")).length;
+  const flujosActivos = (S.flujos || []).filter((f) => Number(f.perfiles_requeridos ?? f.cantidad ?? 0) >= 1).length;
 
   kpi.innerHTML = `
     <div class="kpi"><div class="v">${total}</div><div class="l">Colaboradores</div></div>
     <div class="kpi"><div class="v">${pres}</div><div class="l">Presentes hoy</div></div>
     <div class="kpi"><div class="v">${analistasHoy}</div><div class="l">Analistas disponibles hoy</div></div>
-    <div class="kpi"><div class="v">${pend}</div><div class="l">Slack pendientes</div></div>
+    <div class="kpi"><div class="v">${flujosActivos}</div><div class="l">Flujos activos hoy</div></div>
   `;
 
   tb.innerHTML = ordered.map(([rol, n]) => `<tr><td>${escapeHtml(rol)}</td><td class="right">${n}</td></tr>`).join("");
@@ -952,16 +1065,6 @@ async function main() {
   $("btnTheme")?.addEventListener("click", () => {
     S.theme = S.theme === "dark" ? "light" : "dark";
     applyTheme();
-  });
-
-  $("btnHealth")?.addEventListener("click", async () => {
-    setErr("");
-    try {
-      const h = await API.health();
-      toast("Health", JSON.stringify(h));
-    } catch (e) {
-      setErr(`Health: ${e.message || e}`);
-    }
   });
 
   // Operativa
@@ -1017,11 +1120,12 @@ async function main() {
 
   // Filters
   const rolesList = ["Analista KV", "Analista PM", "Analista QA", "Líderes"];
+  const rolesListHab = ["Analista KV", "Analista PM", "Analista QA"];
 
   const msRolesCol = mountMultiSelect("msRolesColabs", { title: "Roles", items: rolesList, onChange: (set) => { S.fColabs.roles = set; renderColabs(); }});
   const msEquipCol = mountMultiSelect("msEquiposColabs", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fColabs.equipos = set; renderColabs(); }});
 
-  const msRolesHab = mountMultiSelect("msRolesHabil", { title: "Roles", items: rolesList, onChange: (set) => { S.fHabil.roles = set; renderHabil(); }});
+  const msRolesHab = mountMultiSelect("msRolesHabil", { title: "Roles", items: rolesListHab, onChange: (set) => { S.fHabil.roles = set; renderHabil(); }});
   const msEquipHab = mountMultiSelect("msEquiposHabil", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fHabil.equipos = set; renderHabil(); }});
 
   const msRolesPres = mountMultiSelect("msRolesPres", { title: "Roles", items: rolesList, onChange: (set) => { S.fPres.roles = set; renderPresentismo(); }});
@@ -1037,6 +1141,46 @@ async function main() {
     $("searchColabs").value = ""; $("searchColabsWrap").classList.remove("has");
     renderColabs();
   });
+
+  // Selección masiva (Colaboradores)
+  const syncSelPill = () => { const pill = $("colabsSelPill"); if (pill) pill.innerHTML = `<b>Seleccionados</b> ${S.selColabs.size}`; };
+
+  $("colabsSelectAll")?.addEventListener("change", (e) => {
+    const checked = e.target.checked;
+    const ids = applySectionFilter(S.colabs || [], S.fColabs).map(colabRowView).map((x) => x.id).filter(Boolean);
+    if (checked) ids.forEach((id) => S.selColabs.add(id));
+    else ids.forEach((id) => S.selColabs.delete(id));
+    syncSelPill();
+    renderColabs();
+  });
+
+  $("btnClearSelColabs")?.addEventListener("click", () => {
+    S.selColabs.clear();
+    syncSelPill();
+    renderColabs();
+  });
+
+  function getSelectedColabs_() {
+    const all = (S.colabs || []).map(colabRowView);
+    return all.filter((x) => x.id && S.selColabs.has(x.id));
+  }
+
+  $("btnCopySelIds")?.addEventListener("click", () => {
+    const rows = getSelectedColabs_();
+    if (!rows.length) return toast("Copiar", "No hay seleccionados");
+    copyToClipboard(rows.map((r) => r.id).join("\n"));
+  });
+  $("btnCopySelMailProd")?.addEventListener("click", () => {
+    const rows = getSelectedColabs_().map((r) => r.mailProd).filter(Boolean);
+    if (!rows.length) return toast("Copiar", "No hay mails seleccionados");
+    copyToClipboard(rows.join("\n"));
+  });
+  $("btnCopySelMailExt")?.addEventListener("click", () => {
+    const rows = getSelectedColabs_().map((r) => r.mailExt).filter(Boolean);
+    if (!rows.length) return toast("Copiar", "No hay mails seleccionados");
+    copyToClipboard(rows.join("\n"));
+  });
+
   $("btnClearHabil")?.addEventListener("click", () => {
     S.fHabil = { roles: new Set(), equipos: new Set(), q: "" };
     msRolesHab?.clear(); msEquipHab?.clear();
