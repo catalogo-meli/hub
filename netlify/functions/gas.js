@@ -1,79 +1,51 @@
 // netlify/functions/gas.js
-
-export async function handler(event) {
+exports.handler = async (event) => {
   try {
     const GAS_URL = process.env.GAS_URL;
     const API_TOKEN = process.env.API_TOKEN;
 
-    if (!GAS_URL) return json(500, { ok: false, error: "Missing env GAS_URL" });
-    if (!API_TOKEN) return json(500, { ok: false, error: "Missing env API_TOKEN" });
+    if (!GAS_URL) return json(500, { ok: false, error: "Missing GAS_URL env var" });
+    if (!API_TOKEN) return json(500, { ok: false, error: "Missing API_TOKEN env var" });
 
-    if (event.httpMethod === "OPTIONS") {
-      return { statusCode: 204, headers: corsHeaders(), body: "" };
-    }
+    const method = event.httpMethod || "GET";
 
-    const url = new URL(GAS_URL);
+    if (method === "GET") {
+      const qs = event.queryStringParameters || {};
+      const url = new URL(GAS_URL);
+      Object.entries(qs).forEach(([k, v]) => url.searchParams.set(k, v));
+      url.searchParams.set("token", API_TOKEN);
 
-    if (event.httpMethod === "GET") {
-      const qs = new URLSearchParams(event.queryStringParameters || {});
-      qs.set("token", API_TOKEN);
-      for (const [k, v] of qs.entries()) url.searchParams.set(k, v);
-
-      const resp = await fetch(url.toString(), {
-        method: "GET",
-        headers: { Accept: "application/json" },
-      });
-
+      const resp = await fetch(url.toString(), { method: "GET" });
       const text = await resp.text();
-      return {
-        statusCode: resp.status,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
-        body: text,
-      };
+      return { statusCode: resp.status, headers: cors(), body: text };
     }
 
-    if (event.httpMethod === "POST") {
-      let body = {};
-      try {
-        body = event.body ? JSON.parse(event.body) : {};
-      } catch {
-        return json(400, { ok: false, error: "Invalid JSON body" });
-      }
-
+    if (method === "POST") {
+      const body = event.body ? JSON.parse(event.body) : {};
       body.token = API_TOKEN;
 
-      const resp = await fetch(url.toString(), {
+      const resp = await fetch(GAS_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(body),
       });
 
       const text = await resp.text();
-      return {
-        statusCode: resp.status,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
-        body: text,
-      };
+      return { statusCode: resp.status, headers: cors(), body: text };
     }
 
-    return json(405, { ok: false, error: `Method not allowed: ${event.httpMethod}` });
+    return json(405, { ok: false, error: "Method not allowed" });
   } catch (e) {
-    return json(500, { ok: false, error: e?.message || String(e) });
+    return json(500, { ok: false, error: e.message || String(e) });
   }
-}
+};
 
-function json(statusCode, obj) {
-  return {
-    statusCode,
-    headers: { ...corsHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify(obj),
-  };
-}
-
-function corsHeaders() {
+function cors() {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
   };
+}
+function json(statusCode, obj) {
+  return { statusCode, headers: { ...cors(), "Content-Type": "application/json" }, body: JSON.stringify(obj) };
 }
