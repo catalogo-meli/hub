@@ -1,22 +1,15 @@
 // api.js (ESM)
-
 const BASE = "/.netlify/functions/gas";
 
 async function safeJson(resp) {
   const text = await resp.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { ok: false, error: `Non-JSON response (${resp.status}): ${text.slice(0, 200)}` };
-  }
+  try { return JSON.parse(text); }
+  catch { return { ok: false, error: `Non-JSON response (${resp.status}): ${text.slice(0, 200)}` }; }
 }
 
 async function get(action, params = {}) {
   const qs = new URLSearchParams({ action, ...params });
-  const resp = await fetch(`${BASE}?${qs.toString()}`, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-  });
+  const resp = await fetch(`${BASE}?${qs.toString()}`, { method: "GET", headers: { Accept: "application/json" } });
   const data = await safeJson(resp);
   if (!resp.ok || data?.ok === false) throw new Error(data?.error || `GET ${action} failed (${resp.status})`);
   return data.data;
@@ -34,38 +27,33 @@ async function post(action, payload = {}) {
 }
 
 export const API = {
-  // Base
   health: () => get("health"),
 
-  // Data base
   colaboradoresList: () => get("colaboradores.list"),
   canalesList: () => get("canales.list"),
 
-  // Flujos
   flujosList: () => get("flujos.list"),
   flujosUpsert: (flujo, perfiles_requeridos, channel_id = "") =>
     post("flujos.upsert", { flujo, perfiles_requeridos, channel_id }),
   flujosDelete: (flujo) => post("flujos.delete", { flujo }),
 
-  // Habilitaciones
   habilitacionesList: () => get("habilitaciones.list"),
   habilitacionesSet: (idMeli, flujo, habilitado, fijo) =>
     post("habilitaciones.set", { idMeli, flujo, habilitado, fijo }),
 
-  // Planificación
   planificacionGenerar: () => post("planificacion.generar", {}),
   planificacionList: () => get("planificacion.list"),
 
-  // Slack Outbox
   slackOutboxGenerar: () => post("slack.outbox.generar", {}),
   slackOutboxList: () => get("slack.outbox.list"),
   slackOutboxUpdate: (row, canal, channel_id, mensaje) =>
     post("slack.outbox.update", { row, canal, channel_id, mensaje }),
+  slackOutboxAppend: (fechaISO, tipo, canal, channel_id, mensaje, estado) =>
+    post("slack.outbox.append", { fechaISO, tipo, canal, channel_id, mensaje, estado }),
   slackOutboxEnviar: (row) => post("slack.outbox.enviar", row ? { row } : {}),
 
-  // Presentismo
-  presentismoStats: () => get("presentismo.stats"),
-  presentismoWeek: (from_yyyy_mm_dd) => get("presentismo.week", { from: from_yyyy_mm_dd }),
-  licenciasSet: (idMeli, desde, hasta, tipo) =>
-    post("licencias.set", { idMeli, desde, hasta, tipo }),
+  presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
+  presentismoStats: (dateYMD) => get("presentismo.stats", { date: dateYMD }),
+  presentismoSetLicencia: (idMeli, desdeYMD, hastaYMD, tipo) =>
+    post("presentismo.licencias.set", { idMeli, desde: desdeYMD, hasta: hastaYMD, tipo }),
 };
