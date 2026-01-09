@@ -34,13 +34,12 @@ async function post(action, payload = {}) {
 
 export const API = {
   health: () => get("health"),
-  dashboard: () => get("dashboard.get"),
 
   colaboradoresList: () => get("colaboradores.list"),
   canalesList: () => get("canales.list"),
 
   flujosList: () => get("flujos.list"),
-  flujosUpsert: (flujo, perfiles_requeridos, channel_id) =>
+  flujosUpsert: (flujo, perfiles_requeridos, channel_id = "") =>
     post("flujos.upsert", { flujo, perfiles_requeridos, channel_id }),
   flujosDelete: (flujo) => post("flujos.delete", { flujo }),
 
@@ -57,13 +56,8 @@ export const API = {
     post("slack.outbox.update", { row, canal, channel_id, mensaje }),
   slackOutboxEnviar: (row) => post("slack.outbox.enviar", row ? { row } : {}),
 
-  presentismoWeek: () => get("presentismo.week"),
-
-  comunicacionesTemplatesList: () => get("comunicaciones.templates.list"),
-  comunicacionesTemplatesUpsert: (key, template) => post("comunicaciones.templates.upsert", { key, template }),
-  comunicacionesTemplatesDelete: (key) => post("comunicaciones.templates.delete", { key }),
-
-  slackSend: (channel_id, text) => post("slack.send", { channel_id, text }),
-
-  calidadPmList: () => get("calidad.pm.list"),
+  presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
+  presentismoStats: (dateYMD) => get("presentismo.stats", { date: dateYMD }),
+  presentismoSetLicencia: (idMeli, desdeYMD, hastaYMD, tipo) =>
+    post("presentismo.licencias.set", { idMeli, desde: desdeYMD, hasta: hastaYMD, tipo }),
 };
