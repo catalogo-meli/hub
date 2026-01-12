@@ -38,7 +38,7 @@ const API = (() => {
     const token = getToken();
     if (!token) {
       throw new Error(
-        "Falta token. Llamá API.setToken('TU_TOKEN') al iniciar, o guardalo en localStorage como 'hub_token'."
+        "Falta token. Llamá API.setToken("hub_2026_catálogo_9f3a7c1d8b2e4a6d") al iniciar, o guardalo en localStorage como 'hub_token'."
       );
     }
 
