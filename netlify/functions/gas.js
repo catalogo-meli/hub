@@ -1,5 +1,6 @@
 // netlify/functions/gas.js
 // Proxy a Google Apps Script + Slack sender (direct from Netlify)
+
 exports.handler = async (event) => {
   try {
     const GAS_URL = process.env.GAS_URL;
@@ -46,6 +47,8 @@ exports.handler = async (event) => {
           return parsed.data;
         };
 
+        const stamp = formatStampAR_(new Date()); // ✅ dd/MM/yyyy HH:mm (AR)
+
         if (action === "slack.sendRow") {
           const row = Number(body?.row);
           if (!row) return json(400, { ok: false, error: "row requerido" });
@@ -53,12 +56,11 @@ exports.handler = async (event) => {
           const item = await gasPost({ action: "slack.outbox.getRow", row });
           const { channel_id, mensaje } = item || {};
           if (!channel_id) {
-            await gasPost({ action: "slack.outbox.setStatus", row, estado: `ERROR ❌ - SIN CANAL` });
+            await gasPost({ action: "slack.outbox.setStatus", row, estado: `ERROR ❌ ${stamp} - SIN CANAL` });
             return json(200, { ok: true, data: { row, ok: false, error: "SIN CANAL" } });
           }
 
           const slackResp = await postToSlack(SLACK_BOT_TOKEN, channel_id, String(mensaje || ""));
-          const stamp = new Date().toISOString();
           if (slackResp.ok) {
             await gasPost({ action: "slack.outbox.setStatus", row, estado: `ENVIADO ✅ ${stamp}` });
             return json(200, { ok: true, data: { row, slack: slackResp } });
@@ -79,18 +81,18 @@ exports.handler = async (event) => {
           if (!row) continue;
 
           if (!channel_id) {
-            await gasPost({ action: "slack.outbox.setStatus", row, estado: `ERROR ❌ - SIN CANAL` });
+            await gasPost({ action: "slack.outbox.setStatus", row, estado: `ERROR ❌ ${stamp} - SIN CANAL` });
             failed++;
             continue;
           }
 
           const slackResp = await postToSlack(SLACK_BOT_TOKEN, channel_id, mensaje);
-          const stamp = new Date().toISOString();
+          const stamp2 = formatStampAR_(new Date());
           if (slackResp.ok) {
-            await gasPost({ action: "slack.outbox.setStatus", row, estado: `ENVIADO ✅ ${stamp}` });
+            await gasPost({ action: "slack.outbox.setStatus", row, estado: `ENVIADO ✅ ${stamp2}` });
             sent++;
           } else {
-            await gasPost({ action: "slack.outbox.setStatus", row, estado: `ERROR ❌ ${stamp} - ${slackResp.error || "desconocido"}` });
+            await gasPost({ action: "slack.outbox.setStatus", row, estado: `ERROR ❌ ${stamp2} - ${slackResp.error || "desconocido"}` });
             failed++;
           }
         }
@@ -116,6 +118,21 @@ exports.handler = async (event) => {
   }
 };
 
+function formatStampAR_(d) {
+  // dd/MM/yyyy HH:mm in America/Argentina/Buenos_Aires
+  const fmt = new Intl.DateTimeFormat("es-AR", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  // es-AR devuelve "dd/mm/aaaa HH:MM"
+  return fmt.format(d).replace(",", "");
+}
+
 function cors() {
   return {
     "Access-Control-Allow-Origin": "*",
@@ -139,4 +156,3 @@ async function postToSlack(token, channel, text) {
   if (!data) return { ok: false, error: "invalid_json" };
   return data;
 }
-
