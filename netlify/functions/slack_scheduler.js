@@ -16,6 +16,7 @@ exports.handler = async () => {
     // helper to call GAS
     const gasPost = async (payload) => {
       payload.token = API_TOKEN;
+
       const r = await fetch(GAS_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -24,9 +25,13 @@ exports.handler = async () => {
 
       const t = await r.text();
       let j;
-      try { j = JSON.parse(t); } catch { j = null; }
+      try {
+        j = JSON.parse(t);
+      } catch {
+        j = null;
+      }
 
-      if (!r.ok) throw new Error(`GAS error (${r.status})`);
+      if (!r.ok) throw new Error(`GAS error (${r.status}): ${t?.slice?.(0, 200) || ""}`);
       if (!j || j.ok === false) throw new Error(j?.error || "GAS error");
       return j.data;
     };
@@ -35,7 +40,12 @@ exports.handler = async () => {
     const due = await gasPost({ action: "slack.outbox.listDue" });
     const items = Array.isArray(due) ? due : (due?.items || []);
 
-    let sent = 0, failed = 0;
+    if (!items.length) {
+      return json(200, { ok: true, processed: 0, sent: 0, failed: 0 });
+    }
+
+    let sent = 0,
+      failed = 0;
 
     for (const it of items) {
       const row = Number(it?.row);
@@ -44,17 +54,33 @@ exports.handler = async () => {
 
       if (!row) continue;
 
+      const stamp = formatStampAR_(new Date());
+
+      // 2) Pre-lock: marcar ENVIANDO para evitar duplicados si se superpone el cron
+      await gasPost({
+        action: "slack.outbox.setStatus",
+        row,
+        estado: `ENVIANDO ⏳ ${stamp}`,
+      });
+
       if (!channel) {
-        await gasPost({ action: "slack.outbox.setStatus", row, estado: `ERROR ❌ ${formatStampAR_(new Date())} - SIN CANAL` });
+        await gasPost({
+          action: "slack.outbox.setStatus",
+          row,
+          estado: `ERROR ❌ ${stamp} - SIN CANAL`,
+        });
         failed++;
         continue;
       }
 
       const slack = await postToSlack_(SLACK_BOT_TOKEN, channel, text);
-      const stamp = formatStampAR_(new Date());
 
       if (slack && slack.ok) {
-        await gasPost({ action: "slack.outbox.setStatus", row, estado: `ENVIADO ✅ ${stamp}` });
+        await gasPost({
+          action: "slack.outbox.setStatus",
+          row,
+          estado: `ENVIADO ✅ ${stamp}`,
+        });
         sent++;
       } else {
         await gasPost({
@@ -72,12 +98,13 @@ exports.handler = async () => {
   }
 };
 
-// ✅ Netlify Scheduled Function config (cada 1 minuto)
+// ✅ Scheduled Function (cada 1 minuto)
 exports.config = {
   schedule: "*/1 * * * *",
 };
 
 function formatStampAR_(d) {
+  // dd/MM/yyyy HH:mm
   const fmt = new Intl.DateTimeFormat("es-AR", {
     timeZone: "America/Argentina/Buenos_Aires",
     year: "numeric",
