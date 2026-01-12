@@ -127,58 +127,156 @@ function mountTableSort_(tableId, sortState, onChange) {
 }
 
 /* ========= MultiSelect ========= */
-function mountMultiSelect(targetId, { title, items, onChange }) {
-  const host = $(targetId);
-  if (!host) return null;
+function mountMultiSelect(root, items, { labelAll = "Todos", labelNone = "Ninguno", onChange } = {}) {
+  // Estado interno
+  const state = {
+    selected: new Set(),  // cuando hay selección explícita
+    noneMode: false,      // true => filtrar ninguno (0 resultados)
+    open: false,
+  };
 
-  host.className = "ms";
-  host.innerHTML = `
-    <div class="ms-btn">
-      <div>
-        <div class="label">${title}</div>
-        <div class="value" data-ms-value>Todos</div>
-      </div>
-      <div class="muted">▾</div>
-    </div>
-    <div class="ms-panel">
-      <div data-ms-list></div>
+  const $btn = root.querySelector("[data-ms-btn]");
+  const $menu = root.querySelector("[data-ms-menu]");
+  const $label = root.querySelector("[data-ms-label]");
+
+  if (!$btn || !$menu || !$label) return;
+
+  const norm = (v) => String(v ?? "").trim();
+  const allItems = (items || []).map(norm).filter(Boolean);
+
+  const isAllMode = () => !state.noneMode && state.selected.size === 0; // sin filtro
+  const isNoneMode = () => state.noneMode === true; // filtrar 0
+
+  const setAllMode = () => {
+    state.noneMode = false;
+    state.selected.clear();
+    emit();
+  };
+
+  const setNoneMode = () => {
+    state.noneMode = true;
+    state.selected.clear();
+    emit();
+  };
+
+  const toggleItem = (val) => {
+    val = norm(val);
+    if (!val) return;
+
+    // al tocar un item, salís de noneMode
+    state.noneMode = false;
+
+    if (state.selected.has(val)) state.selected.delete(val);
+    else state.selected.add(val);
+
+    // Si terminás sin selección explícita, volvés a "Todos" (sin filtro)
+    emit();
+  };
+
+  const getFilter = () => {
+    if (isAllMode()) return { mode: "all", selected: [] };
+    if (isNoneMode()) return { mode: "none", selected: [] };
+    return { mode: "some", selected: Array.from(state.selected) };
+  };
+
+  const renderLabel = () => {
+    if (isAllMode()) return labelAll;
+    if (isNoneMode()) return labelNone;
+    return `${state.selected.size} seleccionados`;
+  };
+
+  const emit = () => {
+    $label.textContent = renderLabel();
+    onChange?.(getFilter());
+    renderChecks();
+  };
+
+  const renderChecks = () => {
+    // marca checks en el menú
+    $menu.querySelectorAll("[data-ms-item]").forEach((el) => {
+      const v = norm(el.getAttribute("data-ms-item"));
+      const checked = state.selected.has(v) && !state.noneMode;
+      el.setAttribute("aria-checked", checked ? "true" : "false");
+      el.classList.toggle("is-checked", checked);
+    });
+
+    // estados de botones "Todos/Ninguno"
+    const $all = $menu.querySelector("[data-ms-all]");
+    const $none = $menu.querySelector("[data-ms-none]");
+    if ($all) $all.classList.toggle("is-active", isAllMode());
+    if ($none) $none.classList.toggle("is-active", isNoneMode());
+  };
+
+  const buildMenu = () => {
+    $menu.innerHTML = `
       <div class="ms-actions">
-        <button class="btn ghost" type="button" data-ms-all>Todos</button>
-        <button class="btn ghost" type="button" data-ms-none>Ninguno</button>
+        <button type="button" class="ms-act" data-ms-all>${escapeHtml(labelAll)}</button>
+        <button type="button" class="ms-act" data-ms-none>${escapeHtml(labelNone)}</button>
       </div>
-    </div>
-  `;
+      <div class="ms-items">
+        ${allItems
+          .map(
+            (v) => `
+          <button type="button" class="ms-item" data-ms-item="${escapeAttr(v)}" role="menuitemcheckbox" aria-checked="false">
+            ${escapeHtml(v)}
+          </button>`
+          )
+          .join("")}
+      </div>
+    `;
 
-  const state = { selected: new Set() };
+    $menu.querySelector("[data-ms-all]")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      setAllMode();
+    });
 
-  const btn = host.querySelector(".ms-btn");
-  const panel = host.querySelector(".ms-panel");
-  const list = host.querySelector("[data-ms-list]");
-  const value = host.querySelector("[data-ms-value]");
-  const bAll = host.querySelector("[data-ms-all]");
-  const bNone = host.querySelector("[data-ms-none]");
+    $menu.querySelector("[data-ms-none]")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      setNoneMode();
+    });
 
-  function renderList() {
-    list.innerHTML = items
-      .map(
-        (it) => `
-      <label class="ms-item">
-        <input type="checkbox" value="${String(it).replace(/"/g, "&quot;")}" />
-        <div>${it}</div>
-      </label>`
-      )
-      .join("");
-
-    list.querySelectorAll("input[type=checkbox]").forEach((cb) => {
-      cb.checked = state.selected.has(cb.value);
-      cb.addEventListener("change", () => {
-        if (cb.checked) state.selected.add(cb.value);
-        else state.selected.delete(cb.value);
-        renderValue();
-        onChange?.(new Set(state.selected));
+    $menu.querySelectorAll("[data-ms-item]")?.forEach((el) => {
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        toggleItem(el.getAttribute("data-ms-item"));
       });
     });
-  }
+
+    emit();
+  };
+
+  const open = () => {
+    state.open = true;
+    root.classList.add("open");
+  };
+  const close = () => {
+    state.open = false;
+    root.classList.remove("open");
+  };
+
+  $btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    state.open ? close() : open();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!root.contains(e.target)) close();
+  });
+
+  // API mínima por si la usás desde afuera
+  root._ms = {
+    setAll: setAllMode,
+    setNone: setNoneMode,
+    setSelected: (arr) => {
+      state.noneMode = false;
+      state.selected = new Set((arr || []).map(norm).filter(Boolean));
+      emit();
+    },
+    getFilter,
+  };
+
+  buildMenu();
+}
 
   function renderValue() {
     if (state.selected.size === 0) value.textContent = "Todos";
