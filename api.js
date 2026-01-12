@@ -15,42 +15,38 @@ async function get(action, params = {}) {
   return data.data;
 }
 
-async function post(action, payload = {}) {
+async function post(action, body = {}) {
   const resp = await fetch(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ action, ...payload }),
+    body: JSON.stringify({ action, ...body }),
   });
   const data = await safeJson(resp);
   if (!resp.ok || data?.ok === false) throw new Error(data?.error || `POST ${action} failed (${resp.status})`);
   return data.data;
 }
 
-export const API = {
-  health: () => get("health"),
-
+const API = {
   colaboradoresList: () => get("colaboradores.list"),
   canalesList: () => get("canales.list"),
-
   flujosList: () => get("flujos.list"),
-  flujosUpsert: (flujo, perfiles_requeridos, channel_id = "") =>
-    post("flujos.upsert", { flujo, perfiles_requeridos, channel_id }),
+  flujosUpsert: (flujo, perfiles_requeridos, comentario) => post("flujos.upsert", { flujo, perfiles_requeridos, comentario }),
   flujosDelete: (flujo) => post("flujos.delete", { flujo }),
 
   habilitacionesList: () => get("habilitaciones.list"),
-  habilitacionesSet: (idMeli, flujo, habilitado, fijo) =>
-    post("habilitaciones.set", { idMeli, flujo, habilitado, fijo }),
+  habilitacionesSet: (idMeli, habilitado, fijo) => post("habilitaciones.set", { idMeli, habilitado, fijo }),
 
-  planificacionGenerar: () => post("planificacion.generar", {}),
   planificacionList: () => get("planificacion.list"),
+  planificacionGenerar: () => post("planificacion.generar", {}),
 
   slackOutboxGenerar: () => post("slack.outbox.generar", {}),
   slackOutboxList: () => get("slack.outbox.list"),
-  slackOutboxUpdate: (row, canal, channel_id, mensaje) =>
-    post("slack.outbox.update", { row, canal, channel_id, mensaje }),
-  slackOutboxAppend: (fechaISO, tipo, canal, channel_id, mensaje, estado) =>
-    post("slack.outbox.append", { fechaISO, tipo, canal, channel_id, mensaje, estado }),
-  slackOutboxEnviar: (row) => post("slack.outbox.enviar", row ? { row } : {}),
+  slackOutboxUpdate: (row, canal, channel_id, mensaje, programado_para = "") =>
+    post("slack.outbox.update", { row, canal, channel_id, mensaje, programado_para }),
+  slackOutboxAppend: (fechaISO, tipo, canal, channel_id, mensaje, estado, programado_para = "") =>
+    post("slack.outbox.append", { fechaISO, tipo, canal, channel_id, mensaje, estado, programado_para }),
+  slackOutboxEnviar: (row, force = false) => post("slack.outbox.enviar", row ? { row, force } : { force }),
+  slackOutboxEnviarProgramados: () => post("slack.outbox.enviarProgramados", {}),
 
   presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
   presentismoStats: (dateYMD) => get("presentismo.stats", { date: dateYMD }),
