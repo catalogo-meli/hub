@@ -1,145 +1,97 @@
 // netlify/functions/slack_scheduler.js
 // Netlify Scheduled Function: envía mensajes vencidos del Slack_Outbox.
 // Requiere env vars: GAS_URL, API_TOKEN, SLACK_BOT_TOKEN
-// Depende de que tu Code.gs implemente: slack.outbox.listDue y slack.outbox.setStatus
 
-exports.handler = async () => {
-  try {
-    const GAS_URL = process.env.GAS_URL;
-    const API_TOKEN = process.env.API_TOKEN;
-    const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
+exports.schedule = "*/1 * * * *"; // cada 1 minuto
 
-    if (!GAS_URL) return json(500, { ok: false, error: "Missing GAS_URL env var" });
-    if (!API_TOKEN) return json(500, { ok: false, error: "Missing API_TOKEN env var" });
-    if (!SLACK_BOT_TOKEN) return json(500, { ok: false, error: "Missing SLACK_BOT_TOKEN env var" });
+exports.handler = async (event, context) => {
+  const GAS_URL = process.env.GAS_URL;
+  const API_TOKEN = process.env.API_TOKEN;
+  const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 
-    // helper to call GAS
-    const gasPost = async (payload) => {
-      payload.token = API_TOKEN;
-
-      const r = await fetch(GAS_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(payload),
-      });
-
-      const t = await r.text();
-      let j;
-      try {
-        j = JSON.parse(t);
-      } catch {
-        j = null;
-      }
-
-      if (!r.ok) throw new Error(`GAS error (${r.status}): ${t?.slice?.(0, 200) || ""}`);
-      if (!j || j.ok === false) throw new Error(j?.error || "GAS error");
-      return j.data;
+  if (!GAS_URL || !API_TOKEN || !SLACK_BOT_TOKEN) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        ok: false,
+        error: "Missing env vars",
+        missing: {
+          GAS_URL: !GAS_URL,
+          API_TOKEN: !API_TOKEN,
+          SLACK_BOT_TOKEN: !SLACK_BOT_TOKEN,
+        },
+      }),
     };
+  }
 
-    // 1) pedir mensajes vencidos
-    const due = await gasPost({ action: "slack.outbox.listDue" });
-    const items = Array.isArray(due) ? due : (due?.items || []);
+  // POST helper a GAS (Apps Script WebApp)
+  const gasPost = async (payload) => {
+    const r = await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, token: API_TOKEN }),
+    });
 
-    if (!items.length) {
-      return json(200, { ok: true, processed: 0, sent: 0, failed: 0 });
+    const t = await r.text();
+    let j;
+    try {
+      j = JSON.parse(t);
+    } catch (e) {
+      throw new Error(`GAS invalid JSON. HTTP ${r.status}. Body: ${t?.slice(0, 400)}`);
     }
 
-    let sent = 0,
-      failed = 0;
+    if (!r.ok || j.ok === false) throw new Error(j.error || `GAS error HTTP ${r.status}`);
+    return j.data;
+  };
 
-    for (const it of items) {
-      const row = Number(it?.row);
-      const channel = String(it?.channel_id || "").trim();
-      const text = String(it?.mensaje || "");
+  // 1) Pide a GAS los mensajes vencidos
+  const due = await gasPost({ action: "slack.outbox.listDue" });
+  const items = Array.isArray(due) ? due : [];
 
-      if (!row) continue;
+  let sent = 0,
+    failed = 0;
 
-      const stamp = formatStampAR_(new Date());
+  for (const it of items) {
+    const row = Number(it?.row);
+    const channel = String(it?.channel_id || "").trim();
+    const text = String(it?.mensaje || "");
 
-      // 2) Pre-lock: marcar ENVIANDO para evitar duplicados si se superpone el cron
+    if (!row) continue;
+
+    if (!channel) {
+      await gasPost({ action: "slack.outbox.setStatus", row, estado: "ERROR ❌ - SIN CANAL" });
+      failed++;
+      continue;
+    }
+
+    const slackResp = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+      },
+      body: JSON.stringify({ channel, text }),
+    })
+      .then((r) => r.json())
+      .catch(() => null);
+
+    const stamp = new Date().toISOString();
+
+    if (slackResp && slackResp.ok) {
+      await gasPost({ action: "slack.outbox.setStatus", row, estado: `ENVIADO ✅ ${stamp}` });
+      sent++;
+    } else {
       await gasPost({
         action: "slack.outbox.setStatus",
         row,
-        estado: `ENVIANDO ⏳ ${stamp}`,
+        estado: `ERROR ❌ ${stamp} - ${slackResp?.error || "desconocido"}`,
       });
-
-      if (!channel) {
-        await gasPost({
-          action: "slack.outbox.setStatus",
-          row,
-          estado: `ERROR ❌ ${stamp} - SIN CANAL`,
-        });
-        failed++;
-        continue;
-      }
-
-      const slack = await postToSlack_(SLACK_BOT_TOKEN, channel, text);
-
-      if (slack && slack.ok) {
-        await gasPost({
-          action: "slack.outbox.setStatus",
-          row,
-          estado: `ENVIADO ✅ ${stamp}`,
-        });
-        sent++;
-      } else {
-        await gasPost({
-          action: "slack.outbox.setStatus",
-          row,
-          estado: `ERROR ❌ ${stamp} - ${slack?.error || "desconocido"}`,
-        });
-        failed++;
-      }
+      failed++;
     }
-
-    return json(200, { ok: true, processed: items.length, sent, failed });
-  } catch (e) {
-    return json(500, { ok: false, error: e?.message || String(e) });
   }
-};
 
-// ✅ Scheduled Function (cada 1 minuto)
-exports.config = {
-  schedule: "*/1 * * * *",
-};
-
-function formatStampAR_(d) {
-  // dd/MM/yyyy HH:mm
-  const fmt = new Intl.DateTimeFormat("es-AR", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return fmt.format(d).replace(",", "");
-}
-
-async function postToSlack_(token, channel, text) {
-  const resp = await fetch("https://slack.com/api/chat.postMessage", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ channel, text }),
-  });
-
-  const data = await resp.json().catch(() => null);
-  if (!data) return { ok: false, error: "invalid_json" };
-  return data;
-}
-
-function json(statusCode, obj) {
   return {
-    statusCode,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(obj),
+    statusCode: 200,
+    body: JSON.stringify({ ok: true, processed: items.length, sent, failed }),
   };
-}
+};
