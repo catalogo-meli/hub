@@ -591,27 +591,57 @@ function renderOutbox() {
     return;
   }
 
+  // Convierte ISO Z a dd/mm/yyyy HH:mm (hora local del navegador)
+  const formatEstado = (estado) => {
+    const s = String(estado || "");
+    const m = s.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/);
+    if (!m) return s;
+
+    const d = new Date(m[1]);
+    if (isNaN(d.getTime())) return s;
+
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const HH = String(d.getHours()).padStart(2, "0");
+    const MM = String(d.getMinutes()).padStart(2, "0");
+
+    return s.replace(m[1], `${dd}/${mm}/${yyyy} ${HH}:${MM}`);
+  };
+
   tb.innerHTML = out
     .map((r) => {
-      const estado = r.estado || "";
-      const isErr = estado.toUpperCase().includes("ERROR");
-      const badge = isErr ? "badge bad" : estado.toUpperCase().includes("ENVIADO") ? "badge ok" : "badge";
+      const rawEstado = r.estado || "";
+      const estado = formatEstado(rawEstado);
+
+      const estUp = String(rawEstado || "").toUpperCase();
+      const isErr = estUp.includes("ERROR");
+      const isSent = estUp.includes("ENVIADO");
+      const isProg = estUp.includes("PROGRAMADO");
+
+      const badge = isErr ? "badge bad" : isSent ? "badge ok" : "badge";
       const date = r.fecha || "";
       const chId = r.channel_id || "";
       const msg = r.mensaje || "";
       const row = r.row;
 
-      return `
-        <tr data-row="${row}">
-          <td class="nowrap">${escapeHtml(date)}</td>
-          <td>
-            <select data-ch>${channelOptionsHtml(chId)}</select>
-          </td>
-          <td>
-            <textarea data-msg>${escapeHtml(msg)}</textarea>
-          </td>
-          <td class="nowrap"><span class="${badge}">${escapeHtml(estado)}</span></td>
-          <td class="right nowrap">
+      // Acciones:
+      // - ENVIADO: no mostrar programar/enviar ni el datetime
+      // - PROGRAMADO: mostrar datetime solo lectura y sin botones
+      // - PENDIENTE/ERROR: mostrar todo
+      const accionesHtml = isSent
+        ? ""
+        : isProg
+          ? `
+            <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+              <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" disabled />
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button class="btn ghost" data-prog disabled title="Ya está programado">Programar</button>
+                <button class="btn primary" data-send disabled title="Ya está programado">Enviar</button>
+              </div>
+            </div>
+          `
+          : `
             <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
               <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" />
               <div style="display:flex;gap:8px;justify-content:flex-end">
@@ -619,7 +649,19 @@ function renderOutbox() {
                 <button class="btn primary" data-send>Enviar</button>
               </div>
             </div>
+          `;
+
+      return `
+        <tr data-row="${row}" data-sent="${isSent ? "1" : "0"}" data-prog="${isProg ? "1" : "0"}">
+          <td class="nowrap">${escapeHtml(date)}</td>
+          <td>
+            <select data-ch ${isSent ? "disabled" : ""}>${channelOptionsHtml(chId)}</select>
           </td>
+          <td>
+            <textarea data-msg ${isSent ? "disabled" : ""}>${escapeHtml(msg)}</textarea>
+          </td>
+          <td class="nowrap"><span class="${badge}">${escapeHtml(estado)}</span></td>
+          <td class="right nowrap">${accionesHtml}</td>
         </tr>
       `;
     })
@@ -627,24 +669,35 @@ function renderOutbox() {
 
   tb.querySelectorAll("tr").forEach((tr) => {
     const row = Number(tr.getAttribute("data-row"));
+    const isSent = tr.getAttribute("data-sent") === "1";
+    const isProg = tr.getAttribute("data-prog") === "1";
+
     const sel = tr.querySelector("[data-ch]");
     const txt = tr.querySelector("[data-msg]");
     const when = tr.querySelector("[data-when]");
 
+    // Si ya fue enviado, no hay listeners (evita autosave y acciones)
+    if (isSent) return;
+
     const triggerSave = () => outboxAutosave(row, sel.value, txt.value);
 
-    sel.addEventListener("change", triggerSave);
-    txt.addEventListener("input", triggerSave);
-    txt.addEventListener("blur", triggerSave);
+    sel?.addEventListener("change", triggerSave);
+    txt?.addEventListener("input", triggerSave);
+    txt?.addEventListener("blur", triggerSave);
 
     tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
       setErr("");
       try {
+        // Si ya está programado, no permitir reprogramar desde UI (evita duplicados)
+        if (isProg) return;
+
         const v = (when?.value || "").trim();
         if (!v) throw new Error("Elegí fecha y hora para programar.");
+
         // guardo antes de programar
         const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
         await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
+
         await API.slackOutboxProgramar(row, v);
         S.outbox = await API.slackOutboxList();
         renderOutbox();
@@ -655,11 +708,13 @@ function renderOutbox() {
     });
 
     tr.querySelector("[data-send]")?.addEventListener("click", async () => {
+      // Si ya está programado, no permitir enviar manual (evita duplicados)
+      if (isProg) return;
+
       // guardo antes de enviar
-      await (async () => {
-        const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
-        await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
-      })();
+      const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
+      await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
+
       await onOutboxSend(row);
     });
   });
