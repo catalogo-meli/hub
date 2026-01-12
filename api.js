@@ -50,11 +50,17 @@ export const API = {
     post("slack.outbox.update", { row, canal, channel_id, mensaje }),
   slackOutboxAppend: (fechaISO, tipo, canal, channel_id, mensaje, estado) =>
     post("slack.outbox.append", { fechaISO, tipo, canal, channel_id, mensaje, estado }),
+
+  // Legacy (Apps Script intentaba enviar con UrlFetch) — queda por compatibilidad, pero no se usa.
   slackOutboxEnviar: (row) => post("slack.outbox.enviar", row ? { row } : {}),
-  slackOutboxProgramar: (row, whenISO) => post("slack.outbox.programar", { row, whenISO }),
+
+  // ✅ Nuevo: Slack se envía directo desde Netlify (sin UrlFetch en Apps Script)
+  slackSendRow: (row) => post("slack.sendRow", { row }),
+  slackSendDue: () => post("slack.sendDue", {}),
 
   presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
   presentismoStats: (dateYMD) => get("presentismo.stats", { date: dateYMD }),
   presentismoSetLicencia: (idMeli, desdeYMD, hastaYMD, tipo) =>
     post("presentismo.licencias.set", { idMeli, desde: desdeYMD, hasta: hastaYMD, tipo }),
 };
+
