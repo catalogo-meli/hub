@@ -1,64 +1,93 @@
 // api.js
-const API = (() => {
-  const BASE = "/.netlify/functions/gas";
+// Wrapper de llamadas a Netlify Function (proxy a Apps Script)
 
-  async function request(path, { method = "GET", query, body } = {}) {
-    let url = BASE;
+const BASE = "/.netlify/functions/gas";
+
+async function request(path, { method = "GET", query, body } = {}) {
+  let url = BASE;
+
+  // GET: action por querystring
+  if (method === "GET") {
     const qs = new URLSearchParams();
-
-    if (method === "GET") {
-      if (path) qs.set("action", path);
-      if (query) Object.entries(query).forEach(([k, v]) => (v != null) && qs.set(k, String(v)));
-      const q = qs.toString();
-      if (q) url += `?${q}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (!data?.ok) throw new Error(data?.error || "Error");
-      return data.data;
-    }
-
-    // POST
-    const payload = { action: path, ...(body || {}) };
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!data?.ok) throw new Error(data?.error || "Error");
-    return data.data;
+    if (query) Object.entries(query).forEach(([k, v]) => v != null && qs.set(k, String(v)));
+    qs.set("action", path);
+    url = `${BASE}?${qs.toString()}`;
   }
 
-  return {
-    // GET
-    health: () => request("health"),
-    colaboradoresList: () => request("colaboradores.list"),
-    canalesList: () => request("canales.list"),
-    flujosList: () => request("flujos.list"),
-    habilitacionesList: () => request("habilitaciones.list"),
-    presentismoWeek: (date) => request("presentismo.week", { query: { date } }),
-    presentismoStats: (date) => request("presentismo.stats", { query: { date } }),
-    planificacionList: () => request("planificacion.list"),
-    slackOutboxList: () => request("slack.outbox.list"),
-
-    // POST
-    flujosUpsert: (payload) => request("flujos.upsert", { method: "POST", body: payload }),
-    flujosDelete: (payload) => request("flujos.delete", { method: "POST", body: payload }),
-    habilitacionesSet: (payload) => request("habilitaciones.set", { method: "POST", body: payload }),
-    planificacionGenerar: () => request("planificacion.generar", { method: "POST", body: {} }),
-
-    slackOutboxGenerar: () => request("slack.outbox.generar", { method: "POST", body: {} }),
-    slackOutboxUpdate: (payload) => request("slack.outbox.update", { method: "POST", body: payload }),
-    slackOutboxAppend: (payload) => request("slack.outbox.append", { method: "POST", body: payload }),
-
-    slackOutboxGetRow: (payload) => request("slack.outbox.getRow", { method: "POST", body: payload }),
-    slackOutboxSetStatus: (payload) => request("slack.outbox.setStatus", { method: "POST", body: payload }),
-
-    slackOutboxProgramar: (payload) => request("slack.outbox.programar", { method: "POST", body: payload }),
-    slackOutboxDesprogramar: (payload) => request("slack.outbox.desprogramar", { method: "POST", body: payload }),
-
-    slackOutboxListDue: () => request("slack.outbox.listDue", { method: "POST", body: {} }),
+  const opts = {
+    method,
+    headers: { "Content-Type": "application/json" },
   };
-})();
 
-export { API };
+  // POST: action + payload en body
+  if (method === "POST") {
+    opts.body = JSON.stringify({ action: path, ...(body || {}) });
+  }
+
+  const res = await fetch(url, opts);
+
+  // Si Netlify devuelve HTML/errores raros, esto te lo deja claro.
+  const text = await res.text();
+  let j;
+  try {
+    j = JSON.parse(text);
+  } catch (e) {
+    throw new Error(`Respuesta no-JSON desde backend (${res.status}): ${text.slice(0, 300)}`);
+  }
+
+  if (!res.ok || !j?.ok) {
+    throw new Error(j?.error || `HTTP ${res.status}`);
+  }
+  return j.data;
+}
+
+function get(action, query) {
+  return request(action, { method: "GET", query });
+}
+
+function post(action, body) {
+  return request(action, { method: "POST", body });
+}
+
+// ✅ EXPORT NOMBRADO (lo que tu app.js necesita)
+export const API = {
+  health: () => get("health"),
+
+  colaboradoresList: () => get("colaboradores.list"),
+  canalesList: () => get("canales.list"),
+  flujosList: () => get("flujos.list"),
+
+  flujosUpsert: (flujo, perfiles_requeridos, channel_id) =>
+    post("flujos.upsert", { flujo, perfiles_requeridos, channel_id }),
+  flujosDelete: (flujo) => post("flujos.delete", { flujo }),
+
+  habilitacionesList: () => get("habilitaciones.list"),
+  habilitacionesSet: (idMeli, flujo, habilitado, fijo) =>
+    post("habilitaciones.set", { idMeli, flujo, habilitado, fijo }),
+
+  planificacionGenerar: () => post("planificacion.generar", {}),
+  planificacionList: () => get("planificacion.list"),
+
+  slackOutboxGenerar: () => post("slack.outbox.generar", {}),
+  slackOutboxList: () => get("slack.outbox.list"),
+  slackOutboxUpdate: (row, canal, channel_id, mensaje) =>
+    post("slack.outbox.update", { row, canal, channel_id, mensaje }),
+  slackOutboxAppend: (fechaISO, tipo, canal, channel_id, mensaje, estado) =>
+    post("slack.outbox.append", { fechaISO, tipo, canal, channel_id, mensaje, estado }),
+  slackOutboxEnviar: (row) => post("slack.outbox.enviar", row ? { row } : {}),
+
+  // ✅ scheduling (ya lo agregaste en Code.gs)
+  slackOutboxProgramar: (row, programado_para) =>
+    post("slack.outbox.programar", { row, programado_para }),
+  slackOutboxDesprogramar: (row) =>
+    post("slack.outbox.desprogramar", { row }),
+  slackOutboxListDue: () => post("slack.outbox.listDue", {}),
+
+  presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
+  presentismoStats: (dateYMD) => get("presentismo.stats", { date: dateYMD }),
+  presentismoSetLicencia: (idMeli, desdeYMD, hastaYMD, tipo) =>
+    post("presentismo.licencias.set", { idMeli, desde: desdeYMD, hasta: hastaYMD, tipo }),
+};
+
+// (Opcional) export default por compatibilidad si en algún lado lo usabas así.
+export default API;
