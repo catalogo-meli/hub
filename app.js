@@ -668,19 +668,10 @@ function renderOutbox() {
 async function onOutboxSend(row) {
   setErr("");
   try {
-    const res = await API.slackOutboxEnviar(row);
+    await API.slackSendRow(row);
     S.outbox = await API.slackOutboxList();
     renderOutbox();
-
-    const enviados = res?.enviados ?? 0;
-    const errores = res?.errores ?? 0;
-
-    if (errores > 0) {
-      setErr(`Slack: hubo ${errores} error(es). Revisá el Estado en Slack_Outbox.`);
-      toast("Slack", `Errores: ${errores}`);
-    } else {
-      toast("Slack", `Enviado (${enviados || 1})`);
-    }
+    toast("Slack", "Enviado");
   } catch (e) {
     setErr(`Slack: ${e.message || e}`);
   }
