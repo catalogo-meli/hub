@@ -1149,10 +1149,10 @@ function renderDashboard() {
   const flujosActivos = (S.flujos || []).filter((f) => Number(f.perfiles_requeridos ?? f.cantidad ?? 0) >= 1).length;
 
   kpi.innerHTML = `
-    <div class="kpi"><div class="v">${total}</div><div class="l">Colaboradores</div></div>
+    <div class="kpi"><div class="v">${total}</div><div class="l">En nómina</div></div>
     <div class="kpi"><div class="v">${pres}</div><div class="l">Presentes hoy</div></div>
-    <div class="kpi"><div class="v">${analistasHoy}</div><div class="l">Analistas disponibles hoy</div></div>
-    <div class="kpi"><div class="v">${flujosActivos}</div><div class="l">Flujos activos hoy</div></div>
+    <div class="kpi"><div class="v">${analistasHoy}</div><div class="l">Analistas disponibles</div></div>
+    <div class="kpi"><div class="v">${flujosActivos}</div><div class="l">Flujos activos</div></div>
   `;
 
   tb.innerHTML = rowsRoles.map((r) => `<tr><td>${escapeHtml(r.rol)}</td><td class="right">${r.nomina}</td><td class="right">${r.presentes}</td></tr>`).join("");
