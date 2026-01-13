@@ -1,13 +1,11 @@
-// api.js (ESM)
+// api.js (ESM) - CORREGIDO
 // Front importa: import { API } from "./api.js"
 
 const BASE = "/.netlify/functions/gas";
 
 async function request(action, { method = "GET", query = {}, body } = {}) {
   const qs = new URLSearchParams({ ...query, action });
-
   const url = `${BASE}?${qs.toString()}`;
-
   const opts = { method, headers: {} };
 
   if (method !== "GET") {
@@ -82,5 +80,8 @@ export const API = {
   slackOutboxListDue: () => post("slack.outbox.listDue", {}),
 };
 
-// Debug en DevTools
-try { window.API = API; } catch (e) {}
+// ✅ FIX: Exponer en window de forma segura (evita race conditions)
+if (typeof window !== "undefined") {
+  window.API = API;
+  console.log("[api.js] API expuesto en window.API");
+}
