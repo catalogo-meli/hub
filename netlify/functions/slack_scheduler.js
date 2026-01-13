@@ -4,7 +4,7 @@
 
 exports.schedule = "*/1 * * * *"; // cada 1 minuto
 
-exports.handler = async (event, context) => {
+exports.handler = async () => {
   const GAS_URL = process.env.GAS_URL;
   const API_TOKEN = process.env.API_TOKEN;
   const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
@@ -23,6 +23,19 @@ exports.handler = async (event, context) => {
       }),
     };
   }
+
+  const formatStampAR = (d) => {
+    const fmt = new Intl.DateTimeFormat("es-AR", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    return fmt.format(d).replace(",", "");
+  };
 
   // POST helper a GAS (Apps Script WebApp)
   const gasPost = async (payload) => {
@@ -44,22 +57,35 @@ exports.handler = async (event, context) => {
     return j.data;
   };
 
-  // 1) Pide a GAS los mensajes vencidos
+  // 1) Pide a GAS los mensajes vencidos (solo PROGRAMADO <= now)
   const due = await gasPost({ action: "slack.outbox.listDue" });
   const items = Array.isArray(due) ? due : [];
 
-  let sent = 0,
-    failed = 0;
+  let processed = 0;
+  let claimed = 0;
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
 
   for (const it of items) {
+    processed++;
     const row = Number(it?.row);
-    const channel = String(it?.channel_id || "").trim();
-    const text = String(it?.mensaje || "");
+    if (!row) { skipped++; continue; }
 
-    if (!row) continue;
+    // 2) Claim atómico: evita duplicación si hay overlap/reintentos
+    const claim = await gasPost({ action: "slack.outbox.claimDue", row }).catch(() => null);
+    if (!claim?.claimed) { skipped++; continue; }
+    claimed++;
+
+    // 3) Traer la fila completa (incluye resolución de canal por nombre)
+    const item = await gasPost({ action: "slack.outbox.getRow", row });
+    const channel = String(item?.channel_id || "").trim();
+    const text = String(item?.mensaje || "");
+
+    const stamp = formatStampAR(new Date());
 
     if (!channel) {
-      await gasPost({ action: "slack.outbox.setStatus", row, estado: "ERROR ❌ - SIN CANAL" });
+      await gasPost({ action: "slack.outbox.setStatus", row, estado: `ERROR ❌ ${stamp} - SIN CANAL` });
       failed++;
       continue;
     }
@@ -74,8 +100,6 @@ exports.handler = async (event, context) => {
     })
       .then((r) => r.json())
       .catch(() => null);
-
-    const stamp = new Date().toISOString();
 
     if (slackResp && slackResp.ok) {
       await gasPost({ action: "slack.outbox.setStatus", row, estado: `ENVIADO ✅ ${stamp}` });
@@ -92,6 +116,6 @@ exports.handler = async (event, context) => {
 
   return {
     statusCode: 200,
-    body: JSON.stringify({ ok: true, processed: items.length, sent, failed }),
+    body: JSON.stringify({ ok: true, processed, claimed, sent, failed, skipped }),
   };
 };
