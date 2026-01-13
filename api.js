@@ -1,154 +1,92 @@
-// api.js (ESM) — Contrato estable para app.js
-// Usa el proxy Netlify: /.netlify/functions/gas
-// Requiere token en window.CONFIG.API_TOKEN (o window.APP_CONFIG.API_TOKEN)
+// api.js (ESM) — FIX: incluye token en GET/POST y usa GAS_URL si existe
 
-export const API = (() => {
-  const BASE = "/.netlify/functions/gas";
+const CFG = (typeof window !== "undefined" && window.APP_CONFIG) ? window.APP_CONFIG : {};
 
-  function getToken() {
-    return (
-      window?.CONFIG?.API_TOKEN ||
-      window?.APP_CONFIG?.API_TOKEN ||
-      window?.config?.API_TOKEN ||
-      ""
-    );
+// Si definís GAS_URL en config.js, se usa eso.
+// Si no, cae al proxy de Netlify.
+const BASE = CFG.GAS_URL || "/.netlify/functions/gas";
+const TOKEN = CFG.API_TOKEN || "";
+
+/** Lee JSON seguro aunque el backend devuelva texto */
+async function safeJson(resp) {
+  const text = await resp.text();
+  try { return JSON.parse(text); }
+  catch { return { ok: false, error: `Non-JSON response (${resp.status}): ${text.slice(0, 200)}` }; }
+}
+
+function withTokenParams(params = {}) {
+  // doGet espera token por querystring: ?token=...
+  return TOKEN ? { ...params, token: TOKEN } : params;
+}
+
+function withTokenBody(payload = {}) {
+  // doPost espera token dentro del JSON: { token: "...", ... }
+  return TOKEN ? { ...payload, token: TOKEN } : payload;
+}
+
+async function get(action, params = {}) {
+  const qs = new URLSearchParams({ action, ...withTokenParams(params) });
+  const resp = await fetch(`${BASE}?${qs.toString()}`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
+
+  const data = await safeJson(resp);
+  if (!resp.ok || data?.ok === false) {
+    throw new Error(data?.error || `GET ${action} failed (${resp.status})`);
   }
+  return data.data;
+}
 
-  function assertOkJson(j) {
-    if (!j || typeof j !== "object") throw new Error("Respuesta inválida del servidor");
-    if (j.ok === false) throw new Error(j.error || "Error");
-    // contrato: { ok:true, data: ... }
-    return j.data;
+async function post(action, payload = {}) {
+  const resp = await fetch(BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(withTokenBody({ action, ...payload })),
+  });
+
+  const data = await safeJson(resp);
+  if (!resp.ok || data?.ok === false) {
+    throw new Error(data?.error || `POST ${action} failed (${resp.status})`);
   }
+  return data.data;
+}
 
-  async function request(action, { method = "GET", query = {}, body } = {}) {
-    const token = getToken();
-    if (!token) throw new Error("Falta API_TOKEN en config.js (window.CONFIG.API_TOKEN)");
+export const API = {
+  health: () => get("health"),
 
-    if (!action) throw new Error("Falta action");
+  colaboradoresList: () => get("colaboradores.list"),
+  canalesList: () => get("canales.list"),
 
-    if (method === "GET") {
-      const qs = new URLSearchParams({ action, token, ...query });
-      const resp = await fetch(`${BASE}?${qs.toString()}`, {
-        method: "GET",
-        headers: { "Accept": "application/json" },
-      });
-      const j = await resp.json().catch(() => null);
-      return assertOkJson(j);
-    }
+  flujosList: () => get("flujos.list"),
+  flujosUpsert: (flujo, perfiles_requeridos, channel_id = "") =>
+    post("flujos.upsert", { flujo, perfiles_requeridos, channel_id }),
+  flujosDelete: (flujo) => post("flujos.delete", { flujo }),
 
-    // POST
-    const payload = { action, token, ...(body || {}) };
-    const resp = await fetch(BASE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const j = await resp.json().catch(() => null);
-    return assertOkJson(j);
-  }
+  habilitacionesList: () => get("habilitaciones.list"),
+  habilitacionesSet: (idMeli, flujo, habilitado, fijo) =>
+    post("habilitaciones.set", { idMeli, flujo, habilitado, fijo }),
 
-  // ========= GETs =========
-  const colaboradoresList = () => request("colaboradores.list", { method: "GET" });
-  const canalesList = () => request("canales.list", { method: "GET" });
-  const flujosList = () => request("flujos.list", { method: "GET" });
-  const habilitacionesList = () => request("habilitaciones.list", { method: "GET" });
+  planificacionGenerar: () => post("planificacion.generar", {}),
+  planificacionList: () => get("planificacion.list"),
 
-  const presentismoWeek = (date) =>
-    request("presentismo.week", { method: "GET", query: { date: String(date || "") } });
+  slackOutboxGenerar: () => post("slack.outbox.generar", {}),
+  slackOutboxList: () => get("slack.outbox.list"),
+  slackOutboxUpdate: (row, canal, channel_id, mensaje) =>
+    post("slack.outbox.update", { row, canal, channel_id, mensaje }),
+  slackOutboxAppend: (fechaISO, tipo, canal, channel_id, mensaje, estado) =>
+    post("slack.outbox.append", { fechaISO, tipo, canal, channel_id, mensaje, estado }),
+  slackOutboxEnviar: (row) => post("slack.outbox.enviar", row ? { row } : {}),
 
-  const presentismoStats = (date) =>
-    request("presentismo.stats", { method: "GET", query: { date: String(date || "") } });
+  // scheduling (si tu Code.gs ya lo tiene)
+  slackOutboxProgramar: (row, programado_para) =>
+    post("slack.outbox.programar", { row, programado_para }),
+  slackOutboxDesprogramar: (row) =>
+    post("slack.outbox.desprogramar", { row }),
+  slackOutboxListDue: () => post("slack.outbox.listDue", {}),
 
-  const planificacionList = () => request("planificacion.list", { method: "GET" });
-  const slackOutboxList = () => request("slack.outbox.list", { method: "GET" });
-
-  // ========= POSTs =========
-  const flujosUpsert = (flujo, perfiles_requeridos, channel_id) =>
-    request("flujos.upsert", {
-      method: "POST",
-      body: { flujo, perfiles_requeridos, channel_id },
-    });
-
-  const flujosDelete = (flujo) =>
-    request("flujos.delete", { method: "POST", body: { flujo } });
-
-  const habilitacionesSet = (idMeli, flujo, habilitado, fijo) =>
-    request("habilitaciones.set", {
-      method: "POST",
-      body: { idMeli, flujo, habilitado, fijo },
-    });
-
-  const planificacionGenerar = () =>
-    request("planificacion.generar", { method: "POST", body: {} });
-
-  const slackOutboxGenerar = () =>
-    request("slack.outbox.generar", { method: "POST", body: {} });
-
-  const slackOutboxUpdate = (row, canal, channel_id, mensaje) =>
-    request("slack.outbox.update", {
-      method: "POST",
-      body: { row, canal, channel_id, mensaje },
-    });
-
-  const slackOutboxAppend = (fechaISO, tipo, canal, channel_id, mensaje, estado) =>
-    request("slack.outbox.append", {
-      method: "POST",
-      body: { fechaISO, tipo, canal, channel_id, mensaje, estado },
-    });
-
-  // scheduling (Sheets)
-  const slackOutboxProgramar = (row, programado_para) =>
-    request("slack.outbox.programar", {
-      method: "POST",
-      body: { row, programado_para },
-    });
-
-  const slackOutboxDesprogramar = (row) =>
-    request("slack.outbox.desprogramar", { method: "POST", body: { row } });
-
-  // Envío (vía Apps Script, mantiene compatibilidad)
-  const slackSendRow = (row) =>
-    request("slack.outbox.enviar", { method: "POST", body: { row } });
-
-  // Licencias
-  const presentismoSetLicencia = (idMeli, desde, hasta, tipo) =>
-    request("presentismo.licencias.set", {
-      method: "POST",
-      body: { idMeli, desde, hasta, tipo },
-    });
-
-  return {
-    request,
-
-    colaboradoresList,
-    canalesList,
-    flujosList,
-    habilitacionesList,
-    presentismoWeek,
-    presentismoStats,
-    planificacionList,
-    slackOutboxList,
-
-    flujosUpsert,
-    flujosDelete,
-    habilitacionesSet,
-    planificacionGenerar,
-
-    slackOutboxGenerar,
-    slackOutboxUpdate,
-    slackOutboxAppend,
-
-    slackOutboxProgramar,
-    slackOutboxDesprogramar,
-
-    slackSendRow,
-    presentismoSetLicencia,
-  };
-})();
-
-// compat opcional (por si algo viejo lo usa global)
-window.API = API;
-
-export default API;
-
+  presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
+  presentismoStats: (dateYMD) => get("presentismo.stats", { date: dateYMD }),
+  presentismoSetLicencia: (idMeli, desdeYMD, hastaYMD, tipo) =>
+    post("presentismo.licencias.set", { idMeli, desde: desdeYMD, hasta: hastaYMD, tipo }),
+};
