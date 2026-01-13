@@ -1,558 +1,701 @@
-// app.js (ESM)
-import * as apiModule from "/api.js";
+/* app.js - HUB Catálogo (Frontend) */
+/* eslint-disable no-console */
 
-// Compat: soporta api.js como named export {API}, default export, o window.API
-const API = (() => {
-  const v = apiModule?.API ?? apiModule?.default ?? globalThis?.API;
-  return (typeof v === "function") ? v() : v;
-})();
+import { API } from "/api.js";
+
+// Exponer API en window para debug/compatibilidad
+window.API = API;
 
 /**
- * app.js
- * UI HUB Catálogo — Equipo & Planificación
- * (sin frameworks; Tailwind + fetch a Netlify Functions)
+ * ------------------------------------------------------------
+ * Estado global (simple, sin frameworks)
+ * ------------------------------------------------------------
  */
 
-/* =========================
-   Utils
-========================= */
+const state = {
+  tab: "dashboard",
+  data: {
+    colaboradores: [],
+    canales: [],
+    flujos: [],
+    habilitaciones: null,
+    presentismoWeek: null,
+    presentismoStats: null,
+    planificacion: [],
+    slackOutbox: [],
+  },
+  ui: {
+    loading: false,
+    error: null,
+    theme: "dark",
+  },
+};
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+function setLoading(v) {
+  state.ui.loading = !!v;
+  renderLoading_();
+}
+function setError(msg) {
+  state.ui.error = msg || null;
+  renderError_();
+}
 
-const fmt = {
-  ymd(d) {
-    if (!(d instanceof Date)) d = new Date(d);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  },
-  humanDate(d) {
-    if (!(d instanceof Date)) d = new Date(d);
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const yyyy = d.getFullYear();
-    return `${dd}/${mm}/${yyyy}`;
-  },
-  safe(s) {
-    return String(s ?? "");
-  },
-};
+function safeText_(v) {
+  return (v ?? "").toString();
+}
 
-function toast(msg, type = "info") {
-  const box = $("#toast");
-  if (!box) {
-    console[type === "error" ? "error" : "log"](msg);
+function escapeHtml_(s) {
+  return String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function formatDateDMY_(ymd) {
+  if (!ymd) return "";
+  // ymd puede venir "dd/MM/yyyy" desde GAS o "yyyy-MM-dd" en algunos casos
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(ymd)) return ymd;
+  const m = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  return String(ymd);
+}
+
+function toDatetimeLocal_(s) {
+  // acepta yyyy-MM-dd'T'HH:mm o Date string; devuelve yyyy-MM-ddTHH:mm
+  if (!s) return "";
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return "";
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const HH = String(d.getHours()).padStart(2, "0");
+  const MM = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}T${HH}:${MM}`;
+}
+
+function toast_(msg, type = "info") {
+  const root = $("#toast");
+  if (!root) {
+    console.log(`[${type}]`, msg);
     return;
   }
-  box.textContent = msg;
-  box.classList.remove("hidden");
-  box.dataset.type = type;
-  clearTimeout(box._t);
-  box._t = setTimeout(() => box.classList.add("hidden"), 3500);
+  root.textContent = msg;
+  root.dataset.type = type;
+  root.classList.add("show");
+  setTimeout(() => root.classList.remove("show"), 2500);
 }
 
-function setLoading(on) {
-  const el = $("#loading");
-  if (!el) return;
-  el.classList.toggle("hidden", !on);
-}
-
-/* =========================
-   State
-========================= */
-const S = {
-  tab: "dashboard",
-  colabs: [],
-  canales: [],
-  flujos: [],
-  hab: null,
-  presentismo: null,
-  planificacion: [],
-  outbox: [],
-  selectedDateYMD: fmt.ymd(new Date()),
-};
-
-/* =========================
-   Rendering: Tabs
-========================= */
-function setActiveTab(tab) {
-  S.tab = tab;
-  $$(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-  $$(".tab-pane").forEach((p) => p.classList.toggle("hidden", p.id !== `tab-${tab}`));
-}
-
-function bindTabs() {
-  $$(".tab-btn").forEach((b) => {
-    b.addEventListener("click", () => setActiveTab(b.dataset.tab));
-  });
-}
-
-/* =========================
-   Dashboard (simple)
-========================= */
-function renderDashboard() {
-  // Placeholder: el dashboard real lo tenías ya armado con tus cards.
-  // No toco nada “de negocio” acá.
-}
-
-/* =========================
-   Flujos (Operativa diaria)
-========================= */
-function renderFlujos() {
-  const tbody = $("#flujos-tbody");
-  if (!tbody) return;
-  tbody.innerHTML = "";
-
-  S.flujos.forEach((f) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="px-3 py-2 font-medium">${fmt.safe(f.flujo)}</td>
-      <td class="px-3 py-2 text-right">${Number(f.perfiles_requeridos || 0)}</td>
-      <td class="px-3 py-2">${fmt.safe(f.channel_id || "")}</td>
-      <td class="px-3 py-2 text-right">
-        <button class="btn btn-sm" data-act="del" data-flujo="${encodeURIComponent(f.flujo)}">Eliminar</button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-
-  // acciones
-  $$("button[data-act='del']", tbody).forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const flujo = decodeURIComponent(btn.dataset.flujo || "");
-      if (!flujo) return;
-      if (!confirm(`Eliminar flujo "${flujo}"?`)) return;
-      try {
-        setLoading(true);
-        await API.flujosDelete(flujo);
-        await refreshAll();
-        toast("Flujo eliminado", "info");
-      } catch (e) {
-        toast(e.message || String(e), "error");
-      } finally {
-        setLoading(false);
-      }
-    });
-  });
-}
-
-async function onAddFlujo() {
-  const inFlujo = $("#new-flujo");
-  const inReq = $("#new-req");
-  const inChan = $("#new-chan");
-  const flujo = fmt.safe(inFlujo?.value).trim();
-  const req = Number(inReq?.value || 0);
-  const chan = fmt.safe(inChan?.value).trim();
-
-  if (!flujo) return toast("Flujo requerido", "error");
-
-  try {
-    setLoading(true);
-    await API.flujosUpsert(flujo, req, chan);
-    if (inFlujo) inFlujo.value = "";
-    if (inReq) inReq.value = "";
-    if (inChan) inChan.value = "";
-    await refreshAll();
-    toast("Flujo guardado", "info");
-  } catch (e) {
-    toast(e.message || String(e), "error");
-  } finally {
-    setLoading(false);
-  }
-}
-
-/* =========================
-   Colaboradores
-========================= */
-function renderColaboradores() {
-  const tbody = $("#colabs-tbody");
-  if (!tbody) return;
-  tbody.innerHTML = "";
-  S.colabs.forEach((c) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="px-3 py-2">${fmt.safe(c.ID_MELI || c.id_meli || "")}</td>
-      <td class="px-3 py-2">${fmt.safe(c.Nombre || c.nombre || "")}</td>
-      <td class="px-3 py-2">${fmt.safe(c.Rol || c.rol || "")}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-/* =========================
-   Habilitaciones
-========================= */
-function renderHabilitaciones() {
-  const wrap = $("#hab-table-wrap");
-  if (!wrap) return;
-  wrap.innerHTML = "";
-
-  if (!S.hab) {
-    wrap.innerHTML = `<div class="muted">Sin datos.</div>`;
-    return;
-  }
-
-  const { flujos, rows } = S.hab;
-
-  const table = document.createElement("table");
-  table.className = "table w-full";
-  const thead = document.createElement("thead");
-  const trh = document.createElement("tr");
-  trh.innerHTML = `<th class="px-3 py-2">ID_MELI</th>` + flujos.map((f) => `<th class="px-3 py-2">${fmt.safe(f)}</th>`).join("");
-  thead.appendChild(trh);
-  table.appendChild(thead);
-
-  const tbody = document.createElement("tbody");
-  rows.forEach((r) => {
-    const tr = document.createElement("tr");
-    const tds = [];
-    tds.push(`<td class="px-3 py-2 font-medium">${fmt.safe(r.id_meli)}</td>`);
-    flujos.forEach((f) => {
-      const hKey = `H_${f}`;
-      const fKey = `F_${f}`;
-      const hVal = !!r[hKey];
-      const fVal = !!r[fKey];
-
-      tds.push(`
-        <td class="px-3 py-2">
-          <div class="flex items-center gap-2">
-            <label class="inline-flex items-center gap-1">
-              <input type="checkbox" data-hab="1" data-id="${encodeURIComponent(r.id_meli)}" data-flujo="${encodeURIComponent(f)}" ${hVal ? "checked" : ""}/>
-              <span class="text-xs">Hab</span>
-            </label>
-            <label class="inline-flex items-center gap-1">
-              <input type="checkbox" data-fijo="1" data-id="${encodeURIComponent(r.id_meli)}" data-flujo="${encodeURIComponent(f)}" ${fVal ? "checked" : ""} ${hVal ? "" : "disabled"}/>
-              <span class="text-xs">Fijo</span>
-            </label>
-          </div>
-        </td>
-      `);
-    });
-    tr.innerHTML = tds.join("");
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  wrap.appendChild(table);
-
-  // listeners
-  $$("input[data-hab='1']", wrap).forEach((ch) => {
-    ch.addEventListener("change", onHabChange);
-  });
-  $$("input[data-fijo='1']", wrap).forEach((ch) => {
-    ch.addEventListener("change", onFijoChange);
-  });
-}
-
-async function onHabChange(e) {
-  const el = e.target;
-  const id = decodeURIComponent(el.dataset.id || "");
-  const flujo = decodeURIComponent(el.dataset.flujo || "");
-  const habilitado = !!el.checked;
-
-  const fijoEl = $(`input[data-fijo='1'][data-id="${CSS.escape(encodeURIComponent(id))}"][data-flujo="${CSS.escape(encodeURIComponent(flujo))}"]`);
-  const fijo = fijoEl ? !!fijoEl.checked : false;
-
-  try {
-    setLoading(true);
-    await API.habilitacionesSet(id, flujo, habilitado, habilitado ? fijo : false);
-    await refreshHabilitacionesOnly();
-  } catch (err) {
-    toast(err.message || String(err), "error");
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function onFijoChange(e) {
-  const el = e.target;
-  const id = decodeURIComponent(el.dataset.id || "");
-  const flujo = decodeURIComponent(el.dataset.flujo || "");
-  const fijo = !!el.checked;
-
-  const habEl = $(`input[data-hab='1'][data-id="${CSS.escape(encodeURIComponent(id))}"][data-flujo="${CSS.escape(encodeURIComponent(flujo))}"]`);
-  const habilitado = habEl ? !!habEl.checked : false;
-
-  try {
-    setLoading(true);
-    await API.habilitacionesSet(id, flujo, habilitado, fijo);
-    await refreshHabilitacionesOnly();
-  } catch (err) {
-    toast(err.message || String(err), "error");
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function refreshHabilitacionesOnly() {
-  S.hab = await API.habilitacionesList();
-  renderHabilitaciones();
-}
-
-/* =========================
-   Presentismo
-========================= */
-function renderPresentismo() {
-  const inDate = $("#pres-date");
-  if (inDate) inDate.value = S.selectedDateYMD;
-
-  const wrap = $("#pres-wrap");
-  if (!wrap) return;
-  wrap.innerHTML = "";
-
-  if (!S.presentismo) {
-    wrap.innerHTML = `<div class="muted">Sin datos.</div>`;
-    return;
-  }
-
-  const { days, rows } = S.presentismo;
-
-  const table = document.createElement("table");
-  table.className = "table w-full";
-  const thead = document.createElement("thead");
-  const trh = document.createElement("tr");
-  trh.innerHTML =
-    `<th class="px-3 py-2">ID</th><th class="px-3 py-2">Nombre</th>` +
-    days.map((d) => `<th class="px-3 py-2">${fmt.safe(d.label)}</th>`).join("");
-  thead.appendChild(trh);
-  table.appendChild(thead);
-
-  const tbody = document.createElement("tbody");
-  rows.forEach((r) => {
-    const tr = document.createElement("tr");
-    const tds = [];
-    tds.push(`<td class="px-3 py-2 font-medium">${fmt.safe(r.id_meli)}</td>`);
-    tds.push(`<td class="px-3 py-2">${fmt.safe(r.nombre || "")}</td>`);
-    days.forEach((d) => {
-      const v = r.vals?.[d.key] ?? "";
-      tds.push(`<td class="px-3 py-2 text-center">${fmt.safe(v)}</td>`);
-    });
-    tr.innerHTML = tds.join("");
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  wrap.appendChild(table);
-}
-
-async function onPresRefresh() {
-  try {
-    setLoading(true);
-    S.presentismo = await API.presentismoWeek(S.selectedDateYMD);
-    renderPresentismo();
-  } catch (e) {
-    toast(e.message || String(e), "error");
-  } finally {
-    setLoading(false);
-  }
-}
-
-/* =========================
-   Planificación
-========================= */
-function renderPlanificacion() {
-  const tbody = $("#plan-tbody");
-  if (!tbody) return;
-  tbody.innerHTML = "";
-  S.planificacion.forEach((r) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="px-3 py-2">${fmt.safe(r.fecha)}</td>
-      <td class="px-3 py-2 font-medium">${fmt.safe(r.flujo)}</td>
-      <td class="px-3 py-2">${fmt.safe(r.id_meli)}</td>
-      <td class="px-3 py-2">${fmt.safe(r.nombre)}</td>
-      <td class="px-3 py-2">${fmt.safe(r.es_fijo)}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-async function onGenerarPlanificacion() {
-  try {
-    setLoading(true);
-    await API.planificacionGenerar();
-    await refreshPlanificacionOnly();
-    toast("Planificación generada", "info");
-  } catch (e) {
-    toast(e.message || String(e), "error");
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function refreshPlanificacionOnly() {
-  S.planificacion = await API.planificacionList();
-  renderPlanificacion();
-}
-
-/* =========================
-   Slack Outbox
-========================= */
-function renderOutbox() {
-  const tbody = $("#outbox-tbody");
-  if (!tbody) return;
-  tbody.innerHTML = "";
-
-  S.outbox.forEach((r) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="px-3 py-2">${Number(r.row)}</td>
-      <td class="px-3 py-2">${fmt.safe(r.fecha)}</td>
-      <td class="px-3 py-2">${fmt.safe(r.canal)}</td>
-      <td class="px-3 py-2">${fmt.safe(r.channel_id)}</td>
-      <td class="px-3 py-2 whitespace-pre-wrap">${fmt.safe(r.mensaje)}</td>
-      <td class="px-3 py-2">${fmt.safe(r.estado)}</td>
-      <td class="px-3 py-2">
-        <div class="flex flex-col gap-2">
-          <button class="btn btn-sm" data-act="send" data-row="${r.row}">Enviar</button>
-          <button class="btn btn-sm" data-act="programar" data-row="${r.row}">Programar</button>
-          <button class="btn btn-sm" data-act="desprogramar" data-row="${r.row}">Desprogramar</button>
-        </div>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-
-  $$("button[data-act='send']", tbody).forEach((b) => b.addEventListener("click", () => onOutboxSend(Number(b.dataset.row))));
-  $$("button[data-act='programar']", tbody).forEach((b) => b.addEventListener("click", () => onOutboxProgramar(Number(b.dataset.row))));
-  $$("button[data-act='desprogramar']", tbody).forEach((b) => b.addEventListener("click", () => onOutboxDesprogramar(Number(b.dataset.row))));
-}
-
-async function refreshOutboxOnly() {
-  S.outbox = await API.slackOutboxList();
-  renderOutbox();
-}
-
-async function onGenerarOutbox() {
-  try {
-    setLoading(true);
-    await API.slackOutboxGenerar();
-    await refreshOutboxOnly();
-    toast("Outbox generado", "info");
-  } catch (e) {
-    toast(e.message || String(e), "error");
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function onOutboxSend(row) {
-  try {
-    setLoading(true);
-    // Si tu Netlify function expone slack.sendRow, perfecto.
-    // Si no existe, esto va a tirar error y lo verás en toast (no “congela”).
-    if (typeof API.slackSendRow === "function") {
-      await API.slackSendRow(row);
-    } else {
-      // fallback legacy
-      await API.slackOutboxEnviar(row);
-    }
-    await refreshOutboxOnly();
-    toast(`Enviado row ${row}`, "info");
-  } catch (e) {
-    toast(e.message || String(e), "error");
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function onOutboxProgramar(row) {
-  const when = prompt("Programar para (YYYY-MM-DDTHH:mm):");
-  if (!when) return;
-
-  try {
-    setLoading(true);
-    await API.slackOutboxProgramar(row, when);
-    await refreshOutboxOnly();
-    toast(`Programado row ${row}`, "info");
-  } catch (e) {
-    toast(e.message || String(e), "error");
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function onOutboxDesprogramar(row) {
-  try {
-    setLoading(true);
-    await API.slackOutboxDesprogramar(row);
-    await refreshOutboxOnly();
-    toast(`Desprogramado row ${row}`, "info");
-  } catch (e) {
-    toast(e.message || String(e), "error");
-  } finally {
-    setLoading(false);
-  }
-}
-
-/* =========================
-   Refresh / Init
-========================= */
-async function refreshAll() {
-  // Nota: orden importa (habilitaciones depende de flujos)
-  S.colabs = await API.colaboradoresList();
-  S.canales = await API.canalesList();
-  S.flujos = await API.flujosList();
-  S.hab = await API.habilitacionesList();
-  S.planificacion = await API.planificacionList();
-  S.outbox = await API.slackOutboxList();
-
-  renderDashboard();
-  renderColaboradores();
-  renderFlujos();
-  renderHabilitaciones();
-  renderPlanificacion();
-  renderOutbox();
-
-  // presentismo por fecha actual
-  S.presentismo = await API.presentismoWeek(S.selectedDateYMD);
-  renderPresentismo();
-}
-
+/**
+ * ------------------------------------------------------------
+ * Inicialización
+ * ------------------------------------------------------------
+ */
 async function main() {
-  // Guard rail: si API no existe, no “congeles” toda la app
-  if (!API || typeof API.health !== "function") {
-    console.error("API no disponible o mal importada:", API);
-    toast("API no disponible (revisá api.js / imports)", "error");
-    return;
-  }
-
-  bindTabs();
-  setActiveTab("dashboard");
-
-  $("#btn-refresh")?.addEventListener("click", async () => {
-    try {
-      setLoading(true);
-      await refreshAll();
-      toast("Actualizado", "info");
-    } catch (e) {
-      toast(e.message || String(e), "error");
-    } finally {
-      setLoading(false);
-    }
-  });
-
-  $("#btn-add-flujo")?.addEventListener("click", onAddFlujo);
-  $("#btn-planif-gen")?.addEventListener("click", onGenerarPlanificacion);
-  $("#btn-outbox-gen")?.addEventListener("click", onGenerarOutbox);
-
-  $("#pres-date")?.addEventListener("change", async (e) => {
-    S.selectedDateYMD = e.target.value || fmt.ymd(new Date());
-    await onPresRefresh();
-  });
-  $("#btn-pres-refresh")?.addEventListener("click", onPresRefresh);
-
+  bindEvents_();
+  hydrateTheme_();
+  setLoading(true);
   try {
-    setLoading(true);
-    await API.health(); // sanity check rápido
-    await refreshAll();
+    await preload_();
+    render_();
   } catch (e) {
-    toast(e.message || String(e), "error");
+    console.error(e);
+    setError(e?.message || String(e));
   } finally {
     setLoading(false);
   }
 }
 
 document.addEventListener("DOMContentLoaded", main);
+
+/**
+ * ------------------------------------------------------------
+ * Preload
+ * ------------------------------------------------------------
+ */
+async function preload_() {
+  // Health (opcional; si falla no rompemos)
+  try {
+    await API.health();
+  } catch (e) {
+    console.warn("health failed", e);
+  }
+
+  // Datos base
+  const [colabs, canales, flujos, hab] = await Promise.all([
+    API.colaboradoresList(),
+    API.canalesList(),
+    API.flujosList(),
+    API.habilitacionesList(),
+  ]);
+
+  state.data.colaboradores = colabs || [];
+  state.data.canales = canales || [];
+  state.data.flujos = flujos || [];
+  state.data.habilitaciones = hab || null;
+
+  // Datos dinámicos iniciales
+  await refreshAll_();
+}
+
+/**
+ * ------------------------------------------------------------
+ * Refresh por pestaña
+ * ------------------------------------------------------------
+ */
+async function refreshAll_() {
+  // refresca lo que el usuario ve (y lo que el dashboard necesita)
+  const tasks = [];
+
+  // Planificación + outbox siempre alimentan dashboard
+  tasks.push(API.planificacionList().then((x) => (state.data.planificacion = x || [])));
+  tasks.push(API.slackOutboxList().then((x) => (state.data.slackOutbox = x || [])));
+
+  // Presentismo stats (hoy)
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, "0");
+  const dd = String(today.getDate()).padStart(2, "0");
+  const ymd = `${yyyy}-${mm}-${dd}`;
+
+  tasks.push(
+    API.presentismoStats(ymd).then((x) => {
+      state.data.presentismoStats = x || null;
+    })
+  );
+
+  await Promise.all(tasks);
+}
+
+/**
+ * ------------------------------------------------------------
+ * Eventos UI
+ * ------------------------------------------------------------
+ */
+function bindEvents_() {
+  // Tabs
+  $$(".tab").forEach((b) => {
+    b.addEventListener("click", () => {
+      const tab = b.dataset.tab;
+      if (!tab) return;
+      state.tab = tab;
+      render_();
+    });
+  });
+
+  // Botón actualizar global
+  const btnRefresh = $("#btnRefresh");
+  if (btnRefresh) {
+    btnRefresh.addEventListener("click", async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        await refreshAll_();
+        render_();
+        toast_("Actualizado", "ok");
+      } catch (e) {
+        console.error(e);
+        setError(e?.message || String(e));
+      } finally {
+        setLoading(false);
+      }
+    });
+  }
+
+  // Theme toggle
+  const btnTheme = $("#btnTheme");
+  if (btnTheme) {
+    btnTheme.addEventListener("click", () => {
+      state.ui.theme = state.ui.theme === "dark" ? "light" : "dark";
+      persistTheme_();
+      applyTheme_();
+    });
+  }
+
+  // Delegación para botones dentro de tablas
+  document.addEventListener("click", async (ev) => {
+    const t = ev.target;
+
+    // Slack outbox: programar
+    const btnProg = t.closest?.("[data-action='outbox-programar']");
+    if (btnProg) {
+      ev.preventDefault();
+      await onOutboxProgramar_(btnProg);
+      return;
+    }
+
+    // Slack outbox: desprogramar
+    const btnDes = t.closest?.("[data-action='outbox-desprogramar']");
+    if (btnDes) {
+      ev.preventDefault();
+      await onOutboxDesprogramar_(btnDes);
+      return;
+    }
+
+    // Slack outbox: enviar (si tu UI lo tiene)
+    const btnSend = t.closest?.("[data-action='outbox-enviar']");
+    if (btnSend) {
+      ev.preventDefault();
+      await onOutboxEnviar_(btnSend);
+      return;
+    }
+
+    // Habilitaciones: toggle (si tu UI lo tiene)
+    const btnHab = t.closest?.("[data-action='hab-toggle']");
+    if (btnHab) {
+      ev.preventDefault();
+      await onHabToggle_(btnHab);
+      return;
+    }
+  });
+
+  // Delegación para inputs (datetime-local) en outbox
+  document.addEventListener("change", (ev) => {
+    const el = ev.target;
+    if (el?.matches?.("input[data-field='programado_para']")) {
+      // No hacemos nada acá; se confirma con botón Programar
+    }
+  });
+}
+
+/**
+ * ------------------------------------------------------------
+ * Theme
+ * ------------------------------------------------------------
+ */
+function hydrateTheme_() {
+  const saved = localStorage.getItem("hub_theme");
+  if (saved === "light" || saved === "dark") state.ui.theme = saved;
+  applyTheme_();
+}
+function persistTheme_() {
+  localStorage.setItem("hub_theme", state.ui.theme);
+}
+function applyTheme_() {
+  document.documentElement.dataset.theme = state.ui.theme;
+  const btnTheme = $("#btnTheme");
+  if (btnTheme) btnTheme.title = state.ui.theme === "dark" ? "Modo claro" : "Modo oscuro";
+}
+
+/**
+ * ------------------------------------------------------------
+ * Render base
+ * ------------------------------------------------------------
+ */
+function render_() {
+  renderTabs_();
+  renderError_();
+  renderLoading_();
+
+  // Render por pestaña
+  if (state.tab === "dashboard") renderDashboard_();
+  else if (state.tab === "operativa") renderOperativa_();
+  else if (state.tab === "colaboradores") renderColaboradores_();
+  else if (state.tab === "habilitaciones") renderHabilitaciones_();
+  else if (state.tab === "presentismo") renderPresentismo_();
+  else renderDashboard_();
+}
+
+function renderTabs_() {
+  $$(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
+  $$(".view").forEach((v) => v.classList.toggle("hidden", v.dataset.view !== state.tab));
+}
+
+function renderError_() {
+  const el = $("#errorBox");
+  if (!el) return;
+  if (!state.ui.error) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    return;
+  }
+  el.classList.remove("hidden");
+  el.textContent = state.ui.error;
+}
+
+function renderLoading_() {
+  const el = $("#loading");
+  if (!el) return;
+  el.classList.toggle("hidden", !state.ui.loading);
+}
+
+/**
+ * ------------------------------------------------------------
+ * DASHBOARD
+ * ------------------------------------------------------------
+ */
+function renderDashboard_() {
+  // KPIs básicos
+  const colabs = state.data.colaboradores || [];
+  const plan = state.data.planificacion || [];
+  const outbox = state.data.slackOutbox || [];
+  const stats = state.data.presentismoStats || { presentes: 0, ausentes: 0, total: 0 };
+
+  // Distribución por rol
+  const byRol = {};
+  for (const c of colabs) {
+    const rol = safeText_(c?.Rol || c?.rol || "Sin rol").trim() || "Sin rol";
+    byRol[rol] = (byRol[rol] || 0) + 1;
+  }
+
+  // Render distribución por rol
+  const tbl = $("#dashRolTableBody");
+  if (tbl) {
+    const rows = Object.entries(byRol)
+      .sort((a, b) => b[1] - a[1])
+      .map(([rol, cnt]) => {
+        return `<tr>
+          <td>${escapeHtml_(rol)}</td>
+          <td class="num">${cnt}</td>
+        </tr>`;
+      })
+      .join("");
+    tbl.innerHTML = rows || `<tr><td colspan="2" class="muted">Sin datos</td></tr>`;
+  }
+
+  // Mini KPIs
+  const kpiPresentes = $("#kpiPresentes");
+  const kpiAusentes = $("#kpiAusentes");
+  const kpiTotal = $("#kpiTotal");
+  if (kpiPresentes) kpiPresentes.textContent = String(stats.presentes ?? 0);
+  if (kpiAusentes) kpiAusentes.textContent = String(stats.ausentes ?? 0);
+  if (kpiTotal) kpiTotal.textContent = String(stats.total ?? 0);
+
+  const kpiPlan = $("#kpiPlan");
+  if (kpiPlan) kpiPlan.textContent = String(plan.length || 0);
+
+  const kpiOutboxPend = $("#kpiOutboxPend");
+  if (kpiOutboxPend) {
+    const pend = outbox.filter((x) => String(x.estado || "").toUpperCase().startsWith("PENDIENTE")).length;
+    kpiOutboxPend.textContent = String(pend);
+  }
+}
+
+/**
+ * ------------------------------------------------------------
+ * OPERATIVA DIARIA (Planificación + Outbox)
+ * ------------------------------------------------------------
+ */
+function renderOperativa_() {
+  renderPlanificacionTable_();
+  renderOutboxTable_();
+}
+
+function renderPlanificacionTable_() {
+  const data = state.data.planificacion || [];
+  const body = $("#planTableBody");
+  if (!body) return;
+
+  const rows = data
+    .map((r) => {
+      return `<tr>
+        <td>${escapeHtml_(formatDateDMY_(r.fecha))}</td>
+        <td>${escapeHtml_(r.flujo)}</td>
+        <td>${escapeHtml_(r.id_meli)}</td>
+        <td>${escapeHtml_(r.nombre || "")}</td>
+        <td>${escapeHtml_(r.rol || "")}</td>
+        <td>${escapeHtml_(r.es_fijo || "")}</td>
+      </tr>`;
+    })
+    .join("");
+
+  body.innerHTML = rows || `<tr><td colspan="6" class="muted">Sin planificación</td></tr>`;
+}
+
+function renderOutboxTable_() {
+  const data = state.data.slackOutbox || [];
+  const body = $("#outboxTableBody");
+  if (!body) return;
+
+  const rows = data
+    .map((r) => {
+      const prog = toDatetimeLocal_(r.programado_para || "");
+      return `<tr>
+        <td class="num">${r.row}</td>
+        <td>${escapeHtml_(formatDateDMY_(r.fecha))}</td>
+        <td>${escapeHtml_(r.canal || "")}</td>
+        <td class="mono">${escapeHtml_(r.channel_id || "")}</td>
+        <td class="msg">${escapeHtml_(r.mensaje || "")}</td>
+        <td>${escapeHtml_(r.estado || "")}</td>
+        <td>
+          <input type="datetime-local" data-field="programado_para" data-row="${r.row}" value="${escapeHtml_(prog)}">
+        </td>
+        <td class="actions">
+          <button class="btn small" data-action="outbox-programar" data-row="${r.row}">Programar</button>
+          <button class="btn small ghost" data-action="outbox-desprogramar" data-row="${r.row}">Desprogramar</button>
+        </td>
+      </tr>`;
+    })
+    .join("");
+
+  body.innerHTML = rows || `<tr><td colspan="8" class="muted">Sin mensajes</td></tr>`;
+}
+
+/**
+ * ------------------------------------------------------------
+ * COLABORADORES
+ * ------------------------------------------------------------
+ */
+function renderColaboradores_() {
+  const data = state.data.colaboradores || [];
+  const body = $("#colabsTableBody");
+  if (!body) return;
+
+  const rows = data
+    .map((c) => {
+      const id = c?.ID_MELI ?? c?.id_meli ?? "";
+      const nombre = c?.Nombre ?? c?.nombre ?? "";
+      const rol = c?.Rol ?? c?.rol ?? "";
+      const slack = c?.Slack_ID ?? c?.slack_id ?? "";
+      return `<tr>
+        <td class="mono">${escapeHtml_(id)}</td>
+        <td>${escapeHtml_(nombre)}</td>
+        <td>${escapeHtml_(rol)}</td>
+        <td class="mono">${escapeHtml_(slack)}</td>
+      </tr>`;
+    })
+    .join("");
+
+  body.innerHTML = rows || `<tr><td colspan="4" class="muted">Sin colaboradores</td></tr>`;
+}
+
+/**
+ * ------------------------------------------------------------
+ * HABILITACIONES
+ * ------------------------------------------------------------
+ */
+function renderHabilitaciones_() {
+  const hab = state.data.habilitaciones;
+  const flujos = hab?.flujos || [];
+  const rows = hab?.rows || [];
+
+  const head = $("#habTableHead");
+  const body = $("#habTableBody");
+  if (!head || !body) return;
+
+  // Header
+  const h = [
+    `<th>ID_MELI</th>`,
+    ...flujos.map((f) => `<th>${escapeHtml_(f)}</th><th>Fijo</th>`),
+  ].join("");
+  head.innerHTML = `<tr>${h}</tr>`;
+
+  // Body
+  const out = rows
+    .map((r) => {
+      const id = r.id_meli;
+      const tds = [`<td class="mono">${escapeHtml_(id)}</td>`];
+      flujos.forEach((f) => {
+        const hVal = !!r[`H_${f}`];
+        const fVal = !!r[`F_${f}`];
+        tds.push(
+          `<td>
+            <button class="pill ${hVal ? "on" : "off"}" data-action="hab-toggle" data-id="${escapeHtml_(
+              id
+            )}" data-flujo="${escapeHtml_(f)}" data-field="habilitado">${hVal ? "SI" : "NO"}</button>
+          </td>`
+        );
+        tds.push(
+          `<td>
+            <button class="pill ${fVal ? "on" : "off"} ${hVal ? "" : "disabled"}" data-action="hab-toggle" data-id="${escapeHtml_(
+              id
+            )}" data-flujo="${escapeHtml_(f)}" data-field="fijo">${fVal ? "SI" : "NO"}</button>
+          </td>`
+        );
+      });
+      return `<tr>${tds.join("")}</tr>`;
+    })
+    .join("");
+
+  body.innerHTML = out || `<tr><td colspan="${1 + flujos.length * 2}" class="muted">Sin datos</td></tr>`;
+}
+
+/**
+ * ------------------------------------------------------------
+ * PRESENTISMO
+ * ------------------------------------------------------------
+ */
+function renderPresentismo_() {
+  // Vista inicial: semana actual
+  renderPresentismoWeek_();
+}
+
+async function renderPresentismoWeek_() {
+  const wrap = $("#presTableWrap");
+  if (!wrap) return;
+
+  const dateInput = $("#presDate");
+  const ymd = dateInput?.value || "";
+  setLoading(true);
+  setError(null);
+
+  try {
+    const data = await API.presentismoWeek(ymd);
+    state.data.presentismoWeek = data;
+
+    const days = data?.days || [];
+    const rows = data?.rows || [];
+
+    const ths = [
+      `<th>ID_MELI</th>`,
+      `<th>Nombre</th>`,
+      ...days.map((d) => `<th>${escapeHtml_(d.label || d.key)}</th>`),
+    ].join("");
+
+    const bodyRows = rows
+      .map((r) => {
+        const tds = [
+          `<td class="mono">${escapeHtml_(r.id_meli)}</td>`,
+          `<td>${escapeHtml_(r.nombre || "")}</td>`,
+        ];
+        days.forEach((d) => {
+          const v = r.vals?.[d.key] ?? "";
+          const cls =
+            v === "P" ? "pres-p" : v ? "pres-a" : "";
+          const badge = v ? escapeHtml_(v) : "";
+          tds.push(`<td class="${cls}">${badge}</td>`);
+        });
+        return `<tr>${tds.join("")}</tr>`;
+      })
+      .join("");
+
+    wrap.innerHTML = `
+      <table class="table">
+        <thead><tr>${ths}</tr></thead>
+        <tbody>${bodyRows || `<tr><td colspan="${2 + days.length}" class="muted">Sin datos</td></tr>`}</tbody>
+      </table>
+    `;
+  } catch (e) {
+    console.error(e);
+    setError(e?.message || String(e));
+  } finally {
+    setLoading(false);
+  }
+}
+
+/**
+ * ------------------------------------------------------------
+ * Actions
+ * ------------------------------------------------------------
+ */
+
+async function onOutboxProgramar_(btn) {
+  const row = Number(btn.dataset.row);
+  if (!row) return;
+
+  const input = $(`input[data-field='programado_para'][data-row='${row}']`);
+  const v = input?.value || "";
+
+  if (!v) {
+    toast_("Seleccioná fecha y hora", "warn");
+    return;
+  }
+
+  setLoading(true);
+  setError(null);
+  try {
+    await API.slackOutboxProgramar(row, v);
+    await API.slackOutboxList().then((x) => (state.data.slackOutbox = x || []));
+    renderOutboxTable_();
+    toast_("Programado", "ok");
+  } catch (e) {
+    console.error(e);
+    setError(e?.message || String(e));
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function onOutboxDesprogramar_(btn) {
+  const row = Number(btn.dataset.row);
+  if (!row) return;
+
+  setLoading(true);
+  setError(null);
+  try {
+    await API.slackOutboxDesprogramar(row);
+    await API.slackOutboxList().then((x) => (state.data.slackOutbox = x || []));
+    renderOutboxTable_();
+    toast_("Desprogramado", "ok");
+  } catch (e) {
+    console.error(e);
+    setError(e?.message || String(e));
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function onOutboxEnviar_(btn) {
+  // Si tu UI tiene botón enviar y tu backend soporta el action,
+  // lo dejamos “compat”. (No cambia tu lógica si no lo usás.)
+  const row = Number(btn.dataset.row);
+  if (!row) return;
+
+  setLoading(true);
+  setError(null);
+  try {
+    // esto depende de si tu api.js expone slackOutboxEnviar
+    if (typeof API.slackOutboxEnviar !== "function") {
+      toast_("Enviar no está habilitado en este front", "warn");
+      return;
+    }
+    await API.slackOutboxEnviar(row);
+    await API.slackOutboxList().then((x) => (state.data.slackOutbox = x || []));
+    renderOutboxTable_();
+    toast_("Enviado", "ok");
+  } catch (e) {
+    console.error(e);
+    setError(e?.message || String(e));
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function onHabToggle_(btn) {
+  const id = btn.dataset.id;
+  const flujo = btn.dataset.flujo;
+  const field = btn.dataset.field; // "habilitado" | "fijo"
+  if (!id || !flujo || !field) return;
+
+  // tomamos el estado actual desde state
+  const hab = state.data.habilitaciones;
+  const row = hab?.rows?.find((r) => r.id_meli === id);
+  if (!row) return;
+
+  const curH = !!row[`H_${flujo}`];
+  const curF = !!row[`F_${flujo}`];
+
+  let nextH = curH;
+  let nextF = curF;
+
+  if (field === "habilitado") {
+    nextH = !curH;
+    // si se deshabilita, fijo debe caer
+    if (!nextH) nextF = false;
+  } else if (field === "fijo") {
+    // si no está habilitado, no dejamos fijar
+    if (!curH) return;
+    nextF = !curF;
+  }
+
+  setLoading(true);
+  setError(null);
+
+  try {
+    await API.habilitacionesSet(id, flujo, nextH, nextF);
+    // refresh habilitaciones
+    state.data.habilitaciones = await API.habilitacionesList();
+    renderHabilitaciones_();
+    toast_("Guardado", "ok");
+  } catch (e) {
+    console.error(e);
+    setError(e?.message || String(e));
+  } finally {
+    setLoading(false);
+  }
+}
