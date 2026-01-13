@@ -1,75 +1,67 @@
-// api.js (ESM) — FIX: incluye token en GET/POST y usa GAS_URL si existe
+// api.js (ESM)
+// Front importa: import { API } from "./api.js"
 
-const CFG = (typeof window !== "undefined" && window.APP_CONFIG) ? window.APP_CONFIG : {};
+const BASE = "/.netlify/functions/gas";
 
-// Si definís GAS_URL en config.js, se usa eso.
-// Si no, cae al proxy de Netlify.
-const BASE = CFG.GAS_URL || "/.netlify/functions/gas";
-const TOKEN = CFG.API_TOKEN || "";
+async function request(action, { method = "GET", query = {}, body } = {}) {
+  const qs = new URLSearchParams({ ...query, action });
 
-/** Lee JSON seguro aunque el backend devuelva texto */
-async function safeJson(resp) {
-  const text = await resp.text();
-  try { return JSON.parse(text); }
-  catch { return { ok: false, error: `Non-JSON response (${resp.status}): ${text.slice(0, 200)}` }; }
-}
+  const url = `${BASE}?${qs.toString()}`;
 
-function withTokenParams(params = {}) {
-  // doGet espera token por querystring: ?token=...
-  return TOKEN ? { ...params, token: TOKEN } : params;
-}
+  const opts = { method, headers: {} };
 
-function withTokenBody(payload = {}) {
-  // doPost espera token dentro del JSON: { token: "...", ... }
-  return TOKEN ? { ...payload, token: TOKEN } : payload;
-}
-
-async function get(action, params = {}) {
-  const qs = new URLSearchParams({ action, ...withTokenParams(params) });
-  const resp = await fetch(`${BASE}?${qs.toString()}`, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-  });
-
-  const data = await safeJson(resp);
-  if (!resp.ok || data?.ok === false) {
-    throw new Error(data?.error || `GET ${action} failed (${resp.status})`);
+  if (method !== "GET") {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify({ action, ...(body || {}) });
   }
-  return data.data;
+
+  const res = await fetch(url, opts);
+  const json = await res.json().catch(() => null);
+
+  if (!json) throw new Error("Respuesta inválida (no JSON)");
+  if (!json.ok) throw new Error(json.error || "Error API");
+
+  return json.data;
 }
 
-async function post(action, payload = {}) {
-  const resp = await fetch(BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(withTokenBody({ action, ...payload })),
-  });
+function get(action, query) {
+  return request(action, { method: "GET", query });
+}
 
-  const data = await safeJson(resp);
-  if (!resp.ok || data?.ok === false) {
-    throw new Error(data?.error || `POST ${action} failed (${resp.status})`);
-  }
-  return data.data;
+function post(action, body) {
+  return request(action, { method: "POST", body });
 }
 
 export const API = {
+  // Health
   health: () => get("health"),
 
+  // Datos base
   colaboradoresList: () => get("colaboradores.list"),
   canalesList: () => get("canales.list"),
-
   flujosList: () => get("flujos.list"),
-  flujosUpsert: (flujo, perfiles_requeridos, channel_id = "") =>
+  habilitacionesList: () => get("habilitaciones.list"),
+
+  // Flujos
+  flujosUpsert: (flujo, perfiles_requeridos, channel_id) =>
     post("flujos.upsert", { flujo, perfiles_requeridos, channel_id }),
   flujosDelete: (flujo) => post("flujos.delete", { flujo }),
 
-  habilitacionesList: () => get("habilitaciones.list"),
+  // Habilitaciones
   habilitacionesSet: (idMeli, flujo, habilitado, fijo) =>
     post("habilitaciones.set", { idMeli, flujo, habilitado, fijo }),
 
-  planificacionGenerar: () => post("planificacion.generar", {}),
-  planificacionList: () => get("planificacion.list"),
+  // Presentismo
+  presentismoWeek: (date) => get("presentismo.week", { date }),
+  presentismoStats: (date) => get("presentismo.stats", { date }),
+  presentismoSetLicencia: (idMeli, desde, hasta, tipo) =>
+    post("presentismo.licencias.set", { idMeli, desde, hasta, tipo }),
 
+  // Planificación
+  planificacionList: () => get("planificacion.list"),
+  planificacionGenerar: () => post("planificacion.generar", {}),
+
+  // Slack Outbox
   slackOutboxGenerar: () => post("slack.outbox.generar", {}),
   slackOutboxList: () => get("slack.outbox.list"),
   slackOutboxUpdate: (row, canal, channel_id, mensaje) =>
@@ -78,15 +70,17 @@ export const API = {
     post("slack.outbox.append", { fechaISO, tipo, canal, channel_id, mensaje, estado }),
   slackOutboxEnviar: (row) => post("slack.outbox.enviar", row ? { row } : {}),
 
-  // scheduling (si tu Code.gs ya lo tiene)
+  // Slack Direct (Netlify manda a Slack y luego setea estado)
+  slackOutboxGetRow: (row) => post("slack.outbox.getRow", { row }),
+  slackOutboxSetStatus: (row, estado) => post("slack.outbox.setStatus", { row, estado }),
+
+  // Scheduler (programar / desprogramar / listar vencidos)
   slackOutboxProgramar: (row, programado_para) =>
     post("slack.outbox.programar", { row, programado_para }),
   slackOutboxDesprogramar: (row) =>
     post("slack.outbox.desprogramar", { row }),
   slackOutboxListDue: () => post("slack.outbox.listDue", {}),
-
-  presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
-  presentismoStats: (dateYMD) => get("presentismo.stats", { date: dateYMD }),
-  presentismoSetLicencia: (idMeli, desdeYMD, hastaYMD, tipo) =>
-    post("presentismo.licencias.set", { idMeli, desde: desdeYMD, hasta: hastaYMD, tipo }),
 };
+
+// Debug en DevTools
+try { window.API = API; } catch (e) {}
