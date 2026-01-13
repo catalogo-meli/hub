@@ -76,7 +76,7 @@ function fmtDateAny(val) {
 
   // dd/mm/yyyy
   const m1 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m1) return `${String(m1[1]).padStart(2,"0")}-${String(m1[2]).padStart(2,"0")}-${m1[3]}`;
+  if (m1) return `${String(m1[1]).padStart(2, "0")}-${String(m1[2]).padStart(2, "0")}-${m1[3]}`;
 
   // dd-mm-yyyy already
   if (/^\d{2}-\d{2}-\d{4}$/.test(s)) return s;
@@ -97,7 +97,17 @@ function roleBucket(raw) {
   const r = norm(raw);
   if (r.includes("qa")) return "Analista QA";
   if (r.includes("kv")) return "Analista KV";
-  if (r.includes("team leader") || r === "tl" || r.includes(" tl") || r.includes("coordin") || r.includes("cp") || r.includes("project manager") || r.includes("pm lider") || r.includes("pm líder") || r.includes("lider")) {
+  if (
+    r.includes("team leader") ||
+    r === "tl" ||
+    r.includes(" tl") ||
+    r.includes("coordin") ||
+    r.includes("cp") ||
+    r.includes("project manager") ||
+    r.includes("pm lider") ||
+    r.includes("pm líder") ||
+    r.includes("lider")
+  ) {
     return "Líderes";
   }
   return "Analista PM";
@@ -120,6 +130,8 @@ function debounce(fn, ms = 350) {
   };
 }
 
+let msSemanaPresCtrl = null;
+
 function mountTableSort_(tableId, sortState, onChange) {
   const tbl = $(tableId);
   if (!tbl) return;
@@ -137,7 +149,7 @@ function mountTableSort_(tableId, sortState, onChange) {
     }
     th.onclick = () => {
       const nextKey = k;
-      const nextDir = (nextKey === key) ? (dir * -1) : 1;
+      const nextDir = nextKey === key ? dir * -1 : 1;
       onChange?.({ key: nextKey, dir: nextDir });
     };
   });
@@ -201,15 +213,21 @@ function mountMultiSelect(targetId, { title, items, onChange }) {
     else value.textContent = `${state.selected.size} seleccionados`;
   }
 
-  function close() { host.classList.remove("open"); }
-  btn.addEventListener("click", (e) => { e.stopPropagation(); host.classList.toggle("open"); });
+  function close() {
+    host.classList.remove("open");
+  }
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    host.classList.toggle("open");
+  });
   document.addEventListener("click", () => close());
   panel.addEventListener("click", (e) => e.stopPropagation());
 
   // Limpiar => vuelve a "Todos" (sin filtros)
   bClear.addEventListener("click", () => {
     state.selected.clear();
-    renderList(); renderValue();
+    renderList();
+    renderValue();
     onChange?.(new Set(state.selected));
   });
 
@@ -219,9 +237,118 @@ function mountMultiSelect(targetId, { title, items, onChange }) {
   return {
     clear: () => {
       state.selected.clear();
-      renderList(); renderValue();
+      renderList();
+      renderValue();
       onChange?.(new Set(state.selected));
     },
+  };
+}
+
+/* ========= SingleSelect (mismo patrón UI que MultiSelect) ========= */
+/**
+ * Selector de un solo valor con el mismo patrón visual/UX del MultiSelect (ms).
+ * - Incluye opción "Actual" (value="") como primera.
+ * - Botón "Limpiar" vuelve a "Actual".
+ */
+function mountSingleSelectMs(targetId, { title, items, emptyLabel = "Actual", onChange }) {
+  const host = $(targetId);
+  if (!host) return null;
+
+  host.className = "ms";
+  host.innerHTML = `
+    <div class="ms-btn">
+      <div>
+        <div class="label">${title}</div>
+        <div class="value" data-ms-value>${emptyLabel}</div>
+      </div>
+      <div class="muted">▾</div>
+    </div>
+    <div class="ms-panel">
+      <div data-ms-list></div>
+      <div class="ms-actions">
+        <button class="btn ghost" type="button" data-ms-clear>Limpiar</button>
+      </div>
+    </div>
+  `;
+
+  const state = { value: "" }; // "" => Actual
+
+  const btn = host.querySelector(".ms-btn");
+  const panel = host.querySelector(".ms-panel");
+  const list = host.querySelector("[data-ms-list]");
+  const value = host.querySelector("[data-ms-value]");
+  const bClear = host.querySelector("[data-ms-clear]");
+
+  const name = `ms_${targetId}_single`;
+
+  function renderValue() {
+    value.textContent = state.value ? state.value : emptyLabel;
+  }
+
+  function close() {
+    host.classList.remove("open");
+  }
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    host.classList.toggle("open");
+  });
+  document.addEventListener("click", () => close());
+  panel.addEventListener("click", (e) => e.stopPropagation());
+
+  function renderList(nextItems) {
+    const opts = (Array.isArray(nextItems) ? nextItems : items || []).filter(Boolean);
+
+    list.innerHTML = [
+      `<label class="ms-item">
+        <input type="radio" name="${name}" value="" />
+        <div>${escapeHtml(emptyLabel)}</div>
+      </label>`,
+      ...opts.map(
+        (it) => `
+        <label class="ms-item">
+          <input type="radio" name="${name}" value="${escapeAttr(it)}" />
+          <div>${escapeHtml(it)}</div>
+        </label>
+      `
+      ),
+    ].join("");
+
+    list.querySelectorAll("input[type=radio]").forEach((rb) => {
+      rb.checked = String(rb.value) === String(state.value);
+      rb.addEventListener("change", () => {
+        state.value = String(rb.value || "");
+        renderValue();
+        onChange?.(state.value);
+      });
+    });
+  }
+
+  bClear.addEventListener("click", () => {
+    state.value = "";
+    renderList();
+    renderValue();
+    onChange?.(state.value);
+  });
+
+  renderList();
+  renderValue();
+
+  return {
+    setItems: (arr) => {
+      renderList(arr);
+    },
+    setValue: (v) => {
+      state.value = String(v || "");
+      renderList();
+      renderValue();
+    },
+    clear: () => {
+      state.value = "";
+      renderList();
+      renderValue();
+      onChange?.(state.value);
+    },
+    getValue: () => state.value,
   };
 }
 
@@ -238,7 +365,11 @@ function mountSearch(inputId, wrapId, clearId, onChange) {
     onChange?.(v);
   }
   inp.addEventListener("input", sync);
-  clr.addEventListener("click", () => { inp.value = ""; sync(); inp.focus(); });
+  clr.addEventListener("click", () => {
+    inp.value = "";
+    sync();
+    inp.focus();
+  });
   sync();
 }
 
@@ -296,7 +427,11 @@ function mountTabs() {
       });
 
       if (key === "dashboard") renderDashboard();
-      if (key === "daily") { renderFlujos(); renderPlan(); renderOutbox(); }
+      if (key === "daily") {
+        renderFlujos();
+        renderPlan();
+        renderOutbox();
+      }
       if (key === "colabs") renderColabs();
       if (key === "habil") renderHabil();
       if (key === "pres") renderPresentismo();
@@ -357,11 +492,7 @@ async function loadCore() {
   setErr("");
   try {
     setBusy("Cargando", "Sincronizando datos...");
-    const [colabs, canales, flujos] = await Promise.all([
-      API.colaboradoresList(),
-      API.canalesList(),
-      API.flujosList(),
-    ]);
+    const [colabs, canales, flujos] = await Promise.all([API.colaboradoresList(), API.canalesList(), API.flujosList()]);
     S.colabs = colabs || [];
     S.canales = canales || [];
     S.flujos = flujos || [];
@@ -394,8 +525,12 @@ async function refreshPlanAndOutbox() {
 }
 
 async function refreshHabil() {
-  try { S.habil = await API.habilitacionesList(); }
-  catch (e) { setErr(`Habilitaciones: ${e.message || e}`); S.habil = null; }
+  try {
+    S.habil = await API.habilitacionesList();
+  } catch (e) {
+    setErr(`Habilitaciones: ${e.message || e}`);
+    S.habil = null;
+  }
 }
 
 function todayYMD() {
@@ -429,7 +564,7 @@ async function refreshPresentismo() {
       return;
     }
 
-    // default: semana de "hoy"
+    // default: semana "Actual"
     const d = todayYMD();
     const [week, stats] = await Promise.all([API.presentismoWeek(d), API.presentismoStats(d)]);
     S.presWeek = week;
@@ -441,224 +576,224 @@ async function refreshPresentismo() {
   }
 }
 
-function syncPresSemanaSelect_() {
-  const sel = $("presSemana");
-  if (!sel) return;
+/* ========= Dashboard ========= */
+function renderDashboard() {
+  const rolesAgg = new Map();
+  let presentesTotal = 0;
+  let total = 0;
 
-  const opts = (S.presSemanas || []).filter(Boolean);
-  // Mantengo selección si existe; si no, vacío => "hoy"
-  const current = S.presSemanaSel;
+  // Presentismo stats
+  const stats = S.presStats || {};
+  const byRole = stats.byRole || [];
 
-  sel.innerHTML = [`<option value="">Hoy</option>`]
-    .concat(opts.map((w) => `<option value="${escapeAttr(w)}">${escapeHtml(w)}</option>`))
-    .join("");
+  byRole.forEach((r) => {
+    const rol = r.rol || r.role || r.Rol || "";
+    const bucket = roleBucket(rol);
 
-  // restore selection
-  if (current && opts.includes(current)) sel.value = current;
-  else sel.value = "";
+    const t = Number(r.total || r.Total || 0);
+    const p = Number(r.presentes || r.Presentes || 0);
+
+    total += t;
+    presentesTotal += p;
+
+    const prev = rolesAgg.get(bucket) || { rol: bucket, total: 0, presentes: 0 };
+    prev.total += t;
+    prev.presentes += p;
+    rolesAgg.set(bucket, prev);
+  });
+
+  $("dashPresentes").textContent = presentesTotal ? String(presentesTotal) : "—";
+  $("dashPresentes2").textContent = total ? `${presentesTotal}/${total}` : "—";
+
+  // Flujos activos hoy (>= 1 requerido)
+  const flActivos = (S.flujos || []).filter((f) => Number(f.perfiles_requeridos || f.Perfiles_Requeridos || 0) > 0);
+  $("dashFlujosActivos").textContent = String(flActivos.length || 0);
+  $("dashFlujosActivos2").textContent = flActivos.length ? flActivos.map((x) => x.flujo || x.Flujo).join(" · ") : "—";
+
+  // Outbox pendientes
+  const out = S.outbox || [];
+  const pend = out.filter((x) => !String(x.estado || x.Estado || "").toUpperCase().includes("ENVIADO"));
+  $("dashOutboxPend").textContent = String(pend.length || 0);
+  $("dashOutboxPend2").textContent = pend.length ? "Hay mensajes pendientes" : "—";
+
+  // Tabla roles
+  const arr = [...rolesAgg.values()];
+  const st = S.sort.dashRoles || { key: "rol", dir: 1 };
+  arr.sort((a, b) => {
+    if (st.key === "total") return st.dir * (a.total - b.total);
+    if (st.key === "presentes") return st.dir * (a.presentes - b.presentes);
+    return st.dir * String(a.rol).localeCompare(String(b.rol));
+  });
+
+  const tb = $("tblDashRoles")?.querySelector("tbody");
+  if (tb) {
+    if (!arr.length) {
+      tb.innerHTML = `<tr><td colspan="3" class="muted">Sin datos.</td></tr>`;
+    } else {
+      tb.innerHTML = arr
+        .map((r) => `<tr><td>${escapeHtml(r.rol)}</td><td class="right">${r.total}</td><td class="right">${r.presentes}</td></tr>`)
+        .join("");
+    }
+  }
+
+  mountTableSort_("tblDashRoles", S.sort.dashRoles, (next) => {
+    S.sort.dashRoles = next;
+    renderDashboard();
+  });
 }
 
-/* ========= Operativa diaria: Flujos autosave ========= */
-const saveFlujoDebounced = debounce(async (flujo, perfiles) => {
-  setErr("");
-  try {
-    $("dailyStatus").textContent = "Guardando...";
-    await API.flujosUpsert(flujo, perfiles, "");
-    S.flujos = await API.flujosList();
-    renderFlujos();
-    toast("Guardado", flujo);
-  } catch (e) {
-    setErr(`Flujos: ${e.message || e}`);
-  } finally {
-    $("dailyStatus").textContent = "Listo";
-  }
-}, 420);
-
-async function onFlujoDelete(flujo) {
-  setErr("");
-  try {
-    $("dailyStatus").textContent = "Borrando...";
-    await API.flujosDelete(flujo);
-    S.flujos = await API.flujosList();
-    renderFlujos();
-    toast("Borrado", flujo);
-  } catch (e) {
-    setErr(`Flujos: ${e.message || e}`);
-  } finally {
-    $("dailyStatus").textContent = "Listo";
-  }
-}
-
+/* ========= Operativa diaria ========= */
 function renderFlujos() {
-  const tb = $("tblFlujos")?.querySelector("tbody");
-  if (!tb) return;
+  const tbl = $("tblFlujos")?.querySelector("tbody");
+  if (!tbl) return;
 
-  const rows = (S.flujos || []).slice().sort((a, b) => String(a.flujo).localeCompare(String(b.flujo)));
-  tb.innerHTML = rows
+  const fl = (S.flujos || []).slice().sort((a, b) => String(a.flujo || a.Flujo).localeCompare(String(b.flujo || b.Flujo)));
+
+  if (!fl.length) {
+    tbl.innerHTML = `<tr><td colspan="3" class="muted">Sin flujos.</td></tr>`;
+    return;
+  }
+
+  tbl.innerHTML = fl
     .map((f) => {
-      const name = f.flujo ?? "";
-      const req = Number(f.perfiles_requeridos ?? f.cantidad ?? 0) || 0;
+      const flujo = f.flujo || f.Flujo;
+      const req = Number(f.perfiles_requeridos ?? f.Perfiles_Requeridos ?? 0);
       return `
-        <tr data-flujo="${escapeAttr(name)}">
-          <td><b>${escapeHtml(name)}</b></td>
-          <td class="right nowrap" style="min-width:140px">
-            <input class="input smallnum" type="number" min="0" step="1" value="${req}" data-req />
+        <tr>
+          <td><b>${escapeHtml(flujo)}</b></td>
+          <td class="right">
+            <input class="input" style="max-width:120px;text-align:right" data-flujo="${escapeAttr(flujo)}" type="number" min="0" step="1" value="${req}" />
           </td>
-          <td class="right nowrap">
-            <button class="xbtn" title="Eliminar flujo" data-del>×</button>
+          <td class="right">
+            <button class="btn ghost" data-del="${escapeAttr(flujo)}">Eliminar</button>
           </td>
         </tr>
       `;
     })
     .join("");
 
-  tb.querySelectorAll("tr").forEach((tr) => {
-    const flujo = tr.getAttribute("data-flujo");
-    const inp = tr.querySelector("[data-req]");
-    // autosave on input (debounced) + blur (for mobile)
-    inp.addEventListener("input", () => {
-      const perfiles = Number(inp.value || 0) || 0;
-      saveFlujoDebounced(unescapeAttr(flujo), perfiles);
-    });
-    inp.addEventListener("blur", () => {
-      const perfiles = Number(inp.value || 0) || 0;
-      saveFlujoDebounced(unescapeAttr(flujo), perfiles);
-    });
-
-    tr.querySelector("[data-del]")?.addEventListener("click", async () => {
-      if (!confirm(`Eliminar flujo "${unescapeAttr(flujo)}"?`)) return;
-      await onFlujoDelete(unescapeAttr(flujo));
-    });
+  // on change perfiles requeridos
+  tbl.querySelectorAll("input[data-flujo]").forEach((inp) => {
+    inp.addEventListener(
+      "input",
+      debounce(async (e) => {
+        const flujo = e.target.getAttribute("data-flujo");
+        const perfiles = Number(e.target.value || 0);
+        try {
+          await API.flujosUpsert(flujo, perfiles);
+          S.flujos = await API.flujosList();
+          renderDashboard();
+        } catch (err) {
+          setErr(`Operativa diaria: ${err.message || err}`);
+        }
+      }, 450)
+    );
   });
 
-  // Alerta: perfiles disponibles vs requeridos (basado en presentes hoy)
-  const alertEl = $("dailyAssignAlert");
-  if (alertEl) {
-    const disponibles = countAnalistasDisponiblesHoy_();
-    const requeridos = rows.reduce((acc, f) => acc + (Number(f.perfiles_requeridos ?? f.cantidad ?? 0) || 0), 0);
-    const diff = disponibles - requeridos;
+  // delete
+  tbl.querySelectorAll("button[data-del]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const flujo = b.getAttribute("data-del");
+      try {
+        setBusy("Operativa diaria", "Eliminando flujo...");
+        await API.flujosDelete(flujo);
+        S.flujos = await API.flujosList();
+        renderFlujos();
+        renderDashboard();
+      } catch (err) {
+        setErr(`Operativa diaria: ${err.message || err}`);
+      } finally {
+        clearBusy();
+      }
+    });
+  });
+}
 
-    let cls = "";
-    let msg = "";
-    if (diff > 0) {
-      cls = "warn";
-      msg = `Faltan asignar: ${diff} (presentes hoy: ${disponibles} / requeridos: ${requeridos})`;
-    } else if (diff < 0) {
-      cls = "bad";
-      msg = `Faltan cubrir: ${Math.abs(diff)} (presentes hoy: ${disponibles} / requeridos: ${requeridos})`;
-    } else {
-      cls = "ok";
-      msg = `Asignación al día (presentes hoy: ${disponibles} / requeridos: ${requeridos})`;
-    }
-    alertEl.className = `pill ${cls}`;
-    alertEl.innerHTML = `<b>Equipo</b> ${escapeHtml(msg)}`;
-  }
-
-}/* ========= Planificación: columnas + generar mensaje por flujo ========= */
 function renderPlan() {
-  const host = $("planGrid");
-  if (!host) return;
+  const wrap = $("planGrid");
+  if (!wrap) return;
 
-  const plan = (S.plan || []).filter((r) => r?.flujo);
+  const plan = S.plan || [];
   if (!plan.length) {
-    host.innerHTML = `<div class="muted">Sin planificación cargada.</div>`;
+    wrap.innerHTML = `<div class="muted">Sin planificación generada.</div>`;
     return;
   }
 
-  const by = {};
-  for (const r of plan) {
-    const f = r.flujo;
-    by[f] = by[f] || [];
-    by[f].push(r);
-  }
-  const flujosOrden = Object.keys(by).sort((a, b) => a.localeCompare(b));
+  // group by flujo
+  const g = new Map();
+  plan.forEach((p) => {
+    const flujo = p.flujo || p.Flujo || "—";
+    if (!g.has(flujo)) g.set(flujo, []);
+    g.get(flujo).push(p);
+  });
 
-  host.innerHTML = flujosOrden
-    .map((f) => {
-      const items = by[f] || [];
-      const lis = items
-        .map((x) => {
-          const fijo = x.es_fijo === "SI" ? " F" : "";
-          const name = x.nombre || x.id_meli || "";
-          return `<li>${escapeHtml(name)}${fijo}</li>`;
+  const flujos = [...g.keys()].sort((a, b) => String(a).localeCompare(String(b)));
+
+  wrap.innerHTML = flujos
+    .map((flujo) => {
+      const items = g.get(flujo) || [];
+      const req = Number((S.flujos || []).find((f) => (f.flujo || f.Flujo) === flujo)?.perfiles_requeridos || 0);
+
+      const ul = items
+        .map((r) => {
+          const id = r.id_meli || r.ID_MELI || "";
+          const fijo = String(r.fijo || r.Fijo || "").toUpperCase() === "SI";
+          return `<li>${escapeHtml(id)}${fijo ? ` <span class="muted">(fijo)</span>` : ""}</li>`;
         })
         .join("");
 
       return `
-        <div class="flow-col" data-flow="${escapeAttr(f)}">
-          <h3>
-            <span>${escapeHtml(f)}</span>
-            <button class="btn ghost" style="padding:8px 10px;border-radius:12px" data-genmsg>Generar mensaje</button>
-          </h3>
-          <ul>${lis || `<li class="muted">—</li>`}</ul>
+        <div class="flow-col">
+          <h3>${escapeHtml(flujo)} <span class="muted">${items.length}/${req}</span></h3>
+          <ul>${ul || `<li class="muted">Sin asignaciones.</li>`}</ul>
+          <div class="row" style="margin-top:10px;justify-content:flex-end">
+            <button class="btn" data-gen-msg="${escapeAttr(flujo)}">Generar mensaje</button>
+          </div>
         </div>
       `;
     })
     .join("");
 
-  host.querySelectorAll("[data-genmsg]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const flow = btn.closest("[data-flow]")?.getAttribute("data-flow");
-      if (!flow) return;
-      await generarMensajePorFlujo_(unescapeAttr(flow));
+  wrap.querySelectorAll("button[data-gen-msg]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const flujo = b.getAttribute("data-gen-msg");
+      try {
+        setBusy("Operativa diaria", `Generando mensaje ${flujo}...`);
+        // el backend expone el mensaje por flujo dentro de planificacion.list
+        // (si tu backend lo devolviera por endpoint, acá lo llamarías)
+        const plan2 = await API.planificacionList();
+        S.plan = plan2 || [];
+        // busca msg
+        const msg = (S.plan || []).find((x) => (x.flujo || x.Flujo) === flujo)?.mensaje || "";
+        if (msg) copyToClipboard(msg);
+        else toast("Sin mensaje", "No hay mensaje para este flujo");
+      } catch (err) {
+        setErr(`Operativa diaria: ${err.message || err}`);
+      } finally {
+        clearBusy();
+      }
     });
   });
 }
 
-async function generarMensajePorFlujo_(flujo) {
+async function onGenPlan() {
   setErr("");
   try {
-    const items = (S.plan || []).filter((x) => x?.flujo === flujo && x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES");
-    if (!items.length) return toast("Mensaje", "No hay perfiles asignados");
-
-    // map slack ids
-    const map = new Map((S.colabs || []).map((c) => {
-      const v = colabRowView(c);
-      return [v.id, v.slackId];
-    }));
-
-    const mentions = items.map((x) => {
-      const slackId = map.get(x.id_meli);
-      return slackId ? `<@${slackId}>` : x.nombre || x.id_meli;
-    }).join(" - ");
-
-    const msg = `*${flujo}*\n${mentions}`;
-
-    const fechaISO = todayYMD();
-    await API.slackOutboxAppend(fechaISO, "POR_FLUJO", flujo, "", msg, "PENDIENTE - SIN CANAL");
-    S.outbox = await API.slackOutboxList();
+    setBusy("Operativa diaria", "Generando planificación...");
+    await API.planificacionGenerar();
+    await refreshPlanAndOutbox();
+    renderPlan();
     renderOutbox();
-    toast("Outbox", `Mensaje generado: ${flujo}`);
+    renderDashboard();
+    toast("Operativa diaria", "Planificación generada");
   } catch (e) {
-    setErr(`Mensaje por flujo: ${e.message || e}`);
+    setErr(`Operativa diaria: ${e.message || e}`);
+  } finally {
+    clearBusy();
   }
 }
 
-/* ========= Slack Outbox: autosave ========= */
-function channelOptionsHtml(selectedId = "") {
-  const opts = [`<option value="">—</option>`].concat(
-    (S.canales || []).map((c) => {
-      const id = c.channel_id || "";
-      const name = c.canal || "";
-      const sel = id === selectedId ? "selected" : "";
-      return `<option value="${escapeAttr(id)}" ${sel}>${escapeHtml(name)} (${escapeHtml(id)})</option>`;
-    })
-  );
-  return opts.join("");
-}
-
-const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
-  setErr("");
-  try {
-    const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
-    await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
-    // no refresco todo para no “parpadear”; solo toast
-    toast("Outbox", "Guardado");
-  } catch (e) {
-    setErr(`Outbox: ${e.message || e}`);
-  }
-}, 500);
-
+/* ========= Slack Outbox ========= */
 function renderOutbox() {
   const tb = $("tblOutbox")?.querySelector("tbody");
   if (!tb) return;
@@ -669,347 +804,50 @@ function renderOutbox() {
     return;
   }
 
-  // Convierte ISO Z a dd/mm/yyyy HH:mm (hora local del navegador)
-  const formatEstado = (estado) => {
-    const s = String(estado || "");
-    const m = s.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/);
-    if (!m) return s;
-
-    const d = new Date(m[1]);
-    if (isNaN(d.getTime())) return s;
-
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const yyyy = d.getFullYear();
-    const HH = String(d.getHours()).padStart(2, "0");
-    const MM = String(d.getMinutes()).padStart(2, "0");
-
-    return s.replace(m[1], `${dd}/${mm}/${yyyy} ${HH}:${MM}`);
-  };
-
   tb.innerHTML = out
     .map((r) => {
-      const rawEstado = r.estado || "";
-      const estado = formatEstado(rawEstado);
-
-      const estUp = String(rawEstado || "").toUpperCase();
-      const isErr = estUp.includes("ERROR");
-      const isSent = estUp.includes("ENVIADO");
-      const isProg = estUp.includes("PROGRAMADO");
-
-      const badge = isErr ? "badge bad" : isSent ? "badge ok" : "badge";
+      const estado = r.estado || "";
+      const isErr = estado.toUpperCase().includes("ERROR");
+      const badge = isErr ? "pill bad" : estado.toUpperCase().includes("ENVIADO") ? "pill ok" : "pill";
       const date = r.fecha || "";
       const chId = r.channel_id || "";
+      const canal = r.canal || "";
       const msg = r.mensaje || "";
-      const row = r.row;
-
-      // Acciones:
-      // - ENVIADO: no mostrar programar/enviar ni el datetime
-      // - PROGRAMADO: mostrar datetime solo lectura y sin botones
-      // - PENDIENTE/ERROR: mostrar todo
-      const accionesHtml = isSent
-        ? ""
-        : isProg
-          ? `
-            <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-              <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" disabled />
-              <div style="display:flex;gap:8px;justify-content:flex-end">
-                <button class="btn ghost" data-prog disabled title="Ya está programado">Programar</button>
-                <button class="btn primary" data-send disabled title="Ya está programado">Enviar</button>
-              </div>
-            </div>
-          `
-          : `
-            <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-              <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" />
-              <div style="display:flex;gap:8px;justify-content:flex-end">
-                <button class="btn ghost" data-prog>Programar</button>
-                <button class="btn primary" data-send>Enviar</button>
-              </div>
-            </div>
-          `;
 
       return `
-        <tr data-row="${row}" data-sent="${isSent ? "1" : "0"}" data-prog="${isProg ? "1" : "0"}">
+        <tr>
           <td class="nowrap">${escapeHtml(date)}</td>
-          <td>
-            <select data-ch ${isSent ? "disabled" : ""}>${channelOptionsHtml(chId)}</select>
+          <td class="nowrap">${escapeHtml(canal)}<div class="muted" style="font-size:11px">${escapeHtml(chId)}</div></td>
+          <td style="max-width:520px">
+            <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(msg)}</div>
           </td>
-          <td>
-            <textarea data-msg ${isSent ? "disabled" : ""}>${escapeHtml(msg)}</textarea>
+          <td><span class="${badge}"><b>Estado</b> ${escapeHtml(estado || "PENDIENTE")}</span></td>
+          <td class="right">
+            <button class="btn" data-copy="${escapeAttr(msg)}">Copiar</button>
           </td>
-          <td class="nowrap"><span class="${badge}">${escapeHtml(estado)}</span></td>
-          <td class="right nowrap">${accionesHtml}</td>
         </tr>
       `;
     })
     .join("");
 
-  tb.querySelectorAll("tr").forEach((tr) => {
-    const row = Number(tr.getAttribute("data-row"));
-    const isSent = tr.getAttribute("data-sent") === "1";
-    const isProg = tr.getAttribute("data-prog") === "1";
-
-    const sel = tr.querySelector("[data-ch]");
-    const txt = tr.querySelector("[data-msg]");
-    const when = tr.querySelector("[data-when]");
-
-    // Si ya fue enviado, no hay listeners (evita autosave y acciones)
-    if (isSent) return;
-
-    const triggerSave = () => outboxAutosave(row, sel.value, txt.value);
-
-    sel?.addEventListener("change", triggerSave);
-    txt?.addEventListener("input", triggerSave);
-    txt?.addEventListener("blur", triggerSave);
-
-    tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
-      setErr("");
-      try {
-        // Si ya está programado, no permitir reprogramar desde UI (evita duplicados)
-        if (isProg) return;
-
-        const v = (when?.value || "").trim();
-        if (!v) throw new Error("Elegí fecha y hora para programar.");
-
-        // guardo antes de programar
-        const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
-        await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
-
-        await API.slackOutboxProgramar(row, v);
-        S.outbox = await API.slackOutboxList();
-        renderOutbox();
-        toast("Outbox", "Programado");
-      } catch (e) {
-        setErr(`Programar: ${e.message || e}`);
-      }
-    });
-
-    tr.querySelector("[data-send]")?.addEventListener("click", async () => {
-      // Si ya está programado, no permitir enviar manual (evita duplicados)
-      if (isProg) return;
-
-      // guardo antes de enviar
-      const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
-      await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
-
-      await onOutboxSend(row);
-    });
+  tb.querySelectorAll("button[data-copy]").forEach((b) => {
+    b.addEventListener("click", () => copyToClipboard(unescapeAttr(b.getAttribute("data-copy"))));
   });
 }
 
-async function onOutboxSend(row) {
+async function onGenOutbox() {
   setErr("");
   try {
-    setBusy("Slack", "Enviando mensaje...");
-    await API.slackSendRow(row);
+    setBusy("Slack Outbox", "Generando outbox...");
+    await API.slackOutboxGenerar();
     S.outbox = await API.slackOutboxList();
     renderOutbox();
-    toast("Slack", "Enviado");
+    renderDashboard();
+    toast("Slack Outbox", "Outbox generada");
   } catch (e) {
-    setErr(`Slack: ${e.message || e}`);
+    setErr(`Slack Outbox: ${e.message || e}`);
   } finally {
     clearBusy();
-  }
-}
-
-/* ========= Colaboradores ========= */
-function renderColabs() {
-  const tb = $("tblColabs")?.querySelector("tbody");
-  if (!tb) return;
-
-  const filtered = applySectionFilter(S.colabs || [], S.fColabs).map(colabRowView);
-
-  // sort
-  const { key, dir } = S.sort.colabs || { key: "", dir: 1 };
-  const sorted = filtered.slice().sort((a, b) => {
-    const av = a?.[key] ?? "";
-    const bv = b?.[key] ?? "";
-    // ingreso as date-friendly
-    if (key === "ingreso") {
-      return dir * fmtDateAny(av).localeCompare(fmtDateAny(bv));
-    }
-    return dir * String(av).localeCompare(String(bv));
-  });
-
-  // selection pill
-  const pill = $("colabsSelPill");
-  if (pill) pill.innerHTML = `<b>Seleccionados</b> ${S.selColabs.size}`;
-
-  // select-all checkbox reflects filtered selection state
-  const selAll = $("colabsSelectAll");
-  if (selAll) {
-    const allIds = sorted.map((x) => x.id).filter(Boolean);
-    const allSelected = allIds.length > 0 && allIds.every((id) => S.selColabs.has(id));
-    selAll.checked = allSelected;
-    selAll.indeterminate = !allSelected && allIds.some((id) => S.selColabs.has(id));
-  }
-
-  if (!sorted.length) {
-    tb.innerHTML = `<tr><td colspan="9" class="muted">Sin resultados.</td></tr>`;
-    return;
-  }
-
-  tb.innerHTML = sorted
-    .map((v) => {
-      const checked = S.selColabs.has(v.id) ? "checked" : "";
-      return `
-        <tr data-id="${escapeAttr(v.id)}">
-          <td class="nowrap"><input type="checkbox" data-sel ${checked} /></td>
-          <td class="copyable" data-copy="${escapeAttr(v.id)}">${escapeHtml(v.id)}</td>
-          <td>${escapeHtml(v.nombre)}</td>
-          <td>${escapeHtml(roleBucket(v.rol))}</td>
-          <td>${escapeHtml(v.equipo)}</td>
-          <td>${escapeHtml(v.ubic)}</td>
-          <td class="copyable" data-copy="${escapeAttr(v.mailProd)}">${escapeHtml(v.mailProd)}</td>
-          <td class="copyable" data-copy="${escapeAttr(v.mailExt)}">${escapeHtml(v.mailExt)}</td>
-          <td class="nowrap">${escapeHtml(fmtDateAny(v.ingreso))}</td>
-        </tr>
-      `;
-    })
-    .join("");
-
-  // single-cell copy
-  tb.querySelectorAll("[data-copy]").forEach((el) => {
-    el.addEventListener("click", () => copyToClipboard(el.getAttribute("data-copy")));
-  });
-
-  // row selection
-  tb.querySelectorAll("input[data-sel]").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      const id = cb.closest("tr")?.getAttribute("data-id");
-      if (!id) return;
-      if (cb.checked) S.selColabs.add(unescapeAttr(id));
-      else S.selColabs.delete(unescapeAttr(id));
-      renderColabs(); // refresh pill + indeterminate
-    });
-  });
-
-  // sortable headers + indicators
-  mountTableSort_("tblColabs", S.sort.colabs, (next) => {
-    S.sort.colabs = next;
-    renderColabs();
-  });
-}
-
-/* ========= Habilitaciones (igual) ========= */
-function renderHabil() {
-  const head = $("tblHabilHead");
-  const body = $("tblHabilBody");
-  if (!head || !body) return;
-
-  if (!S.habil || !S.habil.flujos || !S.habil.rows) {
-    head.innerHTML = `<tr><th>Estado</th></tr>`;
-    body.innerHTML = `<tr><td class="muted">No se pudo cargar habilitaciones.</td></tr>`;
-    return;
-  }
-
-  const flujos = (S.habil.flujos || []).slice().sort((a, b) => a.localeCompare(b));
-  head.innerHTML = `
-    <tr>
-      <th style="min-width:220px">Colaborador</th>
-      ${flujos.map((f) => `<th class="nowrap">${escapeHtml(f)}<div class="muted" style="font-size:11px;margin-top:2px">H / F</div></th>`).join("")}
-    </tr>
-  `;
-
-  const colabsById = new Map();
-  for (const c of S.colabs || []) {
-    const v = colabRowView(c);
-    if (v.id) colabsById.set(v.id, v);
-  }
-
-  const rows = (S.habil.rows || []).map((r) => {
-    const id = r.id_meli || r.ID_MELI || r.Id_Meli;
-    const meta = colabsById.get(id) || { id, nombre: id, rol: "", equipo: "" };
-    return { ...r, _meta: meta };
-  });
-
-  const filtered = rows.filter((r) => {
-    const rb = roleBucket(r._meta.rol);
-    if (S.fHabil.roles.size > 0 && !S.fHabil.roles.has(rb)) return false;
-    if (S.fHabil.equipos.size > 0 && !S.fHabil.equipos.has(r._meta.equipo)) return false;
-
-    const q = norm(S.fHabil.q);
-    if (q) {
-      const hay =
-        norm(r._meta.id).includes(q) ||
-        norm(r._meta.nombre).includes(q) ||
-        norm(r._meta.rol).includes(q) ||
-        norm(r._meta.equipo).includes(q);
-      if (!hay) return false;
-    }
-    return true;
-  });
-
-  if (!filtered.length) {
-    body.innerHTML = `<tr><td colspan="${1 + flujos.length}" class="muted">Sin resultados.</td></tr>`;
-    return;
-  }
-
-  body.innerHTML = filtered
-    .map((r) => {
-      const id = r.id_meli;
-      const label = `${r._meta.nombre || id} (${id})`;
-      const cells = flujos
-        .map((f) => {
-          const keyH = `H_${f}`;
-          const keyF = `F_${f}`;
-          const hab = !!r[keyH];
-          const fijo = !!r[keyF];
-          return `
-            <td class="nowrap">
-              <label class="row" style="gap:10px;margin:0">
-                <input type="checkbox" data-h="1" data-id="${escapeAttr(id)}" data-flujo="${escapeAttr(f)}" ${hab ? "checked" : ""} />
-                <span class="muted">H</span>
-                <input type="checkbox" data-f="1" data-id="${escapeAttr(id)}" data-flujo="${escapeAttr(f)}" ${fijo ? "checked" : ""} />
-                <span class="muted">F</span>
-              </label>
-            </td>
-          `;
-        })
-        .join("");
-
-      return `<tr><td>${escapeHtml(label)}</td>${cells}</tr>`;
-    })
-    .join("");
-
-  body.querySelectorAll("input[data-h]").forEach((cb) => {
-    cb.addEventListener("change", async () => {
-      const idMeli = cb.getAttribute("data-id");
-      const flujo = cb.getAttribute("data-flujo");
-      const habilitado = cb.checked;
-      const fijoCb = body.querySelector(`input[data-f][data-id="${cssEsc(idMeli)}"][data-flujo="${cssEsc(flujo)}"]`);
-      const fijo = fijoCb ? fijoCb.checked : false;
-      if (!habilitado && fijoCb) fijoCb.checked = false;
-
-      await setHabilitacion(idMeli, flujo, habilitado, habilitado ? fijo : false);
-    });
-  });
-
-  body.querySelectorAll("input[data-f]").forEach((cb) => {
-    cb.addEventListener("change", async () => {
-      const idMeli = cb.getAttribute("data-id");
-      const flujo = cb.getAttribute("data-flujo");
-      const fijo = cb.checked;
-
-      const habCb = body.querySelector(`input[data-h][data-id="${cssEsc(idMeli)}"][data-flujo="${cssEsc(flujo)}"]`);
-      const habilitado = habCb ? habCb.checked : false;
-
-      if (fijo && habCb && !habilitado) habCb.checked = true;
-      await setHabilitacion(idMeli, flujo, fijo ? true : habilitado, fijo);
-    });
-  });
-}
-
-async function setHabilitacion(idMeli, flujo, habilitado, fijo) {
-  setErr("");
-  try {
-    await API.habilitacionesSet(idMeli, flujo, !!habilitado, !!fijo);
-    S.habil = await API.habilitacionesList();
-    renderHabil();
-    toast("Habilitaciones", "Actualizado");
-  } catch (e) {
-    setErr(`Habilitaciones: ${e.message || e}`);
   }
 }
 
@@ -1023,7 +861,21 @@ function mountPresentismoSelect() {
     .filter((x) => x.id)
     .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
 
-  sel.innerHTML = rows.map((x) => `<option value="${escapeAttr(x.id)}">${escapeHtml(x.nombre)} (${escapeHtml(x.id)})</option>`).join("");
+  sel.innerHTML = rows
+    .map((x) => `<option value="${escapeAttr(x.id)}">${escapeHtml(x.nombre)} (${escapeHtml(x.id)})</option>`)
+    .join("");
+}
+
+function syncPresSemanaSelect_() {
+  // Semana: mismo patrón UI que Roles/Equipo (ms). No cambio lógica de semanas; solo UI.
+  const opts = (S.presSemanas || []).filter(Boolean);
+  if (msSemanaPresCtrl) {
+    msSemanaPresCtrl.setItems(opts);
+    // Mantengo selección si existe; si no, vacío => "Actual"
+    const current = S.presSemanaSel;
+    if (current && opts.includes(current)) msSemanaPresCtrl.setValue(current);
+    else msSemanaPresCtrl.setValue("");
+  }
 }
 
 function renderPresentismo() {
@@ -1039,10 +891,12 @@ function renderPresentismo() {
   const days = S.presWeek.days; // includes isFeriado
   const rows = S.presWeek.rows;
 
-  const colabsById = new Map((S.colabs || []).map((c) => {
-    const v = colabRowView(c);
-    return [v.id, v];
-  }));
+  const colabsById = new Map(
+    (S.colabs || []).map((c) => {
+      const v = colabRowView(c);
+      return [v.id, v];
+    })
+  );
 
   const filtered = rows.filter((r) => {
     const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
@@ -1053,11 +907,7 @@ function renderPresentismo() {
 
     const q = norm(S.fPres.q);
     if (q) {
-      const hay =
-        norm(meta.id).includes(q) ||
-        norm(meta.nombre).includes(q) ||
-        norm(meta.rol).includes(q) ||
-        norm(meta.equipo).includes(q);
+      const hay = norm(meta.id).includes(q) || norm(meta.nombre).includes(q) || norm(meta.rol).includes(q) || norm(meta.equipo).includes(q);
       if (!hay) return false;
     }
     return true;
@@ -1079,7 +929,10 @@ function renderPresentismo() {
     </tr>
   `;
 
-  mountTableSort_("tblPresWeek", S.sort.pres, (next) => { S.sort.pres = next; renderPresentismo(); });
+  mountTableSort_("tblPresWeek", S.sort.pres, (next) => {
+    S.sort.pres = next;
+    renderPresentismo();
+  });
 
   const tbody = tbl.querySelector("tbody");
   if (!filtered.length) {
@@ -1093,7 +946,7 @@ function renderPresentismo() {
       const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
       const tds = days
         .map((d) => {
-          const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
+          const v = r.vals && r.vals[d.key] ? String(r.vals[d.key]) : "";
           const cls = d.isFeriado ? "feriado" : "";
           const isLic = v && String(v).trim() !== "P";
           const c2 = [cls, isLic ? "lic" : ""].filter(Boolean).join(" ");
@@ -1107,21 +960,23 @@ function renderPresentismo() {
 
 async function onSetLicencia() {
   setErr("");
+  const idMeli = $("presSelectColab")?.value || "";
+  const tipo = $("presTipo")?.value || "";
+  const desde = $("presDesde")?.value || "";
+  const hasta = $("presHasta")?.value || "";
+
+  if (!idMeli || !tipo || !desde || !hasta) {
+    toast("Faltan datos", "Completar colaborador, tipo, desde y hasta");
+    return;
+  }
+
   try {
-    setBusy("Presentismo", "Guardando licencia...");
-    const idMeli = $("presSelectColab").value;
-    const tipo = $("presTipo").value;
-    const desde = $("presDesde").value;
-    const hasta = $("presHasta").value || desde;
-
-    if (!idMeli) throw new Error("Seleccioná un colaborador.");
-    if (!desde) throw new Error("Seleccioná fecha Desde.");
-
+    setBusy("Presentismo", "Guardando...");
     await API.presentismoSetLicencia(idMeli, desde, hasta, tipo);
     await refreshPresentismo();
     renderPresentismo();
     renderDashboard();
-    toast("Presentismo", "Licencia guardada");
+    toast("Presentismo", "Guardado");
   } catch (e) {
     setErr(`Presentismo: ${e.message || e}`);
   } finally {
@@ -1129,187 +984,216 @@ async function onSetLicencia() {
   }
 }
 
-/* ========= Dashboard ========= */
-function countAnalistasDisponiblesHoy_() {
-  // usa presWeek (hoy) para no inventar
-  if (!S.presWeek?.days?.length || !S.presWeek?.rows?.length) return 0;
+/* ========= Colaboradores ========= */
+function renderColabs() {
+  const tbl = $("tblColabs")?.querySelector("tbody");
+  if (!tbl) return;
 
-  const today = todayYMD();
-  const colabsById = new Map((S.colabs || []).map((c) => {
-    const v = colabRowView(c);
-    return [v.id, v];
-  }));
+  const list = applySectionFilter(S.colabs || [], S.fColabs).map(colabRowView);
 
-  let n = 0;
-  for (const r of S.presWeek.rows) {
-    const v = r.vals?.[today];
-    if (String(v || "").trim() !== "P") continue;
-
-    const meta = colabsById.get(r.id_meli);
-    const bucket = roleBucket(meta?.rol || "");
-    if (bucket === "Líderes") continue;
-    n++;
-  }
-  return n;
-}
-
-function renderDashboard() {
-  const kpi = $("dashKpis");
-  const tb = $("tblDashRoles")?.querySelector("tbody");
-  if (!kpi || !tb) return;
-
-  const colabs = (S.colabs || []).map(colabRowView).filter((x) => x.id);
-  const total = colabs.length;
-
-  const counts = new Map();
-  for (const c of colabs) {
-    const b = roleBucket(c.rol);
-    counts.set(b, (counts.get(b) || 0) + 1);
-  }
-
-  // presentes hoy por rol (cruza presWeek + colaboradores)
-  const presentesPorRol = new Map();
-  if (S.presWeek?.rows?.length) {
-    const today = todayYMD();
-    const colabsById = new Map((S.colabs || []).map((c) => {
-      const v = colabRowView(c);
-      return [v.id, v];
-    }));
-    for (const r of S.presWeek.rows) {
-      const vday = String(r.vals?.[today] || "").trim();
-      if (vday !== "P") continue;
-      const meta = colabsById.get(r.id_meli);
-      const bucket = roleBucket(meta?.rol || "");
-      presentesPorRol.set(bucket, (presentesPorRol.get(bucket) || 0) + 1);
-    }
-  }
-
-  // tabla base
-  let rowsRoles = ROLES_BUCKETS.map((k) => ({
-    rol: k,
-    nomina: counts.get(k) || 0,
-    presentes: presentesPorRol.get(k) || 0,
-  }));
-
-  // sort
-  const ss = S.sort?.dashRoles || { key: "rol", dir: 1 };
-  const key = ss.key || "rol";
-  const dir = ss.dir || 1;
-  rowsRoles.sort((a, b) => {
-    const va = a[key];
-    const vb = b[key];
-    if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
-    return String(va).localeCompare(String(vb)) * dir;
+  const st = S.sort.colabs || { key: "nombre", dir: 1 };
+  list.sort((a, b) => {
+    const ka = a[st.key] ?? "";
+    const kb = b[st.key] ?? "";
+    if (typeof ka === "number" && typeof kb === "number") return st.dir * (ka - kb);
+    return st.dir * String(ka).localeCompare(String(kb));
   });
 
-  const pres = S.presStats?.presentes ?? 0;
-  const analistasHoy = countAnalistasDisponiblesHoy_();
-  const flujosActivos = (S.flujos || []).filter((f) => Number(f.perfiles_requeridos ?? f.cantidad ?? 0) >= 1).length;
+  if (!list.length) {
+    tbl.innerHTML = `<tr><td colspan="10" class="muted">Sin resultados.</td></tr>`;
+    return;
+  }
 
-  kpi.innerHTML = `
-    <div class="kpi"><div class="v">${total}</div><div class="l">En nómina</div></div>
-    <div class="kpi"><div class="v">${pres}</div><div class="l">Presentes hoy</div></div>
-    <div class="kpi"><div class="v">${analistasHoy}</div><div class="l">Analistas disponibles</div></div>
-    <div class="kpi"><div class="v">${flujosActivos}</div><div class="l">Flujos activos</div></div>
+  tbl.innerHTML = list
+    .map((r) => {
+      const checked = S.selColabs.has(r.id) ? "checked" : "";
+      return `
+        <tr>
+          <td class="right"><input type="checkbox" data-sel="${escapeAttr(r.id)}" ${checked} /></td>
+          <td><b>${escapeHtml(r.nombre)}</b></td>
+          <td class="nowrap">${escapeHtml(r.id)}</td>
+          <td>${escapeHtml(roleBucket(r.rol))}</td>
+          <td>${escapeHtml(r.equipo)}</td>
+          <td>${escapeHtml(r.ubic)}</td>
+          <td class="nowrap">${escapeHtml(r.slackId)}</td>
+          <td>${escapeHtml(r.mailProd)}</td>
+          <td>${escapeHtml(r.mailExt)}</td>
+          <td class="nowrap">${escapeHtml(fmtDateAny(r.ingreso))}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  tbl.querySelectorAll("input[type=checkbox][data-sel]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const id = cb.getAttribute("data-sel");
+      if (!id) return;
+      if (cb.checked) S.selColabs.add(id);
+      else S.selColabs.delete(id);
+      syncColabsSelPill();
+    });
+  });
+
+  mountTableSort_("tblColabs", S.sort.colabs, (next) => {
+    S.sort.colabs = next;
+    renderColabs();
+  });
+
+  syncColabsSelPill();
+}
+
+function syncColabsSelPill() {
+  const pill = $("colabsSelPill");
+  if (!pill) return;
+  pill.innerHTML = `<b>Seleccionados</b> ${S.selColabs.size}`;
+}
+
+function copySelected(field) {
+  const arr = (S.colabs || []).map(colabRowView).filter((x) => S.selColabs.has(x.id));
+  const out = arr.map((x) => x[field]).filter(Boolean).join("\n");
+  if (!out) toast("Nada para copiar", "");
+  else copyToClipboard(out);
+}
+
+/* ========= Habilitaciones ========= */
+function renderHabil() {
+  const tbl = $("tblHabil");
+  if (!tbl) return;
+
+  if (!S.habil || !S.habil.headers || !S.habil.rows) {
+    tbl.querySelector("thead").innerHTML = `<tr><th>Estado</th></tr>`;
+    tbl.querySelector("tbody").innerHTML = `<tr><td class="muted">No se pudo cargar.</td></tr>`;
+    return;
+  }
+
+  const headers = S.habil.headers;
+  const rows = S.habil.rows;
+
+  // headers: first columns are base fields; the rest are flujos
+  const fixed = ["ID_MELI", "Nombre", "Rol", "Equipo"];
+  const flCols = headers.filter((h) => !fixed.includes(h));
+
+  const colabsById = new Map(
+    (S.colabs || []).map((c) => {
+      const v = colabRowView(c);
+      return [v.id, v];
+    })
+  );
+
+  const filtered = rows.filter((r) => {
+    const id = r.ID_MELI || r.id_meli || "";
+    const meta = colabsById.get(id) || { id, rol: r.Rol || "", equipo: r.Equipo || "" };
+    const rb = roleBucket(meta.rol);
+
+    if (S.fHabil.roles.size > 0 && !S.fHabil.roles.has(rb)) return false;
+    if (S.fHabil.equipos.size > 0 && !S.fHabil.equipos.has(meta.equipo)) return false;
+
+    const q = norm(S.fHabil.q);
+    if (q) {
+      const hay =
+        norm(id).includes(q) ||
+        norm(meta.nombre || r.Nombre || "").includes(q) ||
+        norm(meta.rol || r.Rol || "").includes(q) ||
+        norm(meta.equipo || r.Equipo || "").includes(q);
+      if (!hay) return false;
+    }
+    return true;
+  });
+
+  // header render
+  tbl.querySelector("thead").innerHTML = `
+    <tr>
+      <th>ID_MELI</th>
+      <th>Nombre</th>
+      <th>Rol</th>
+      <th>Equipo</th>
+      ${flCols.map((c) => `<th class="right">${escapeHtml(c)}</th>`).join("")}
+    </tr>
   `;
 
-  tb.innerHTML = rowsRoles.map((r) => `<tr><td>${escapeHtml(r.rol)}</td><td class="right">${r.nomina}</td><td class="right">${r.presentes}</td></tr>`).join("");
-}
-
-
-/* ========= Generar planificación (también genera outbox) ========= */
-async function onGenerarPlanificacionYOutbox_() {
-  setErr("");
-  try {
-    setBusy("Operativa diaria", "Generando planificación...");
-    $("dailyStatus").textContent = "Generando...";
-    await API.planificacionGenerar();
-    // Solo mensaje GENERAL (los POR_FLUJO se generan desde cada flujo)
-    await API.slackOutboxGenerarGeneral();
-    await refreshPlanAndOutbox();
-    await refreshPresentismo();
-    renderPlan();
-    renderOutbox();
-    renderDashboard();
-    toast("OK", "Planificación + Outbox generados");
-  } catch (e) {
-    setErr(`Planificación/Outbox: ${e.message || e}`);
-  } finally {
-    $("dailyStatus").textContent = "Listo";
-    clearBusy();
+  // body render
+  const tb = tbl.querySelector("tbody");
+  if (!filtered.length) {
+    tb.innerHTML = `<tr><td colspan="${4 + flCols.length}" class="muted">Sin resultados.</td></tr>`;
+    return;
   }
+
+  tb.innerHTML = filtered
+    .map((r) => {
+      const id = r.ID_MELI || r.id_meli || "";
+      const nombre = r.Nombre || "";
+      const rol = r.Rol || "";
+      const equipo = r.Equipo || "";
+      const tds = flCols
+        .map((f) => {
+          const v = String(r[f] || "").toUpperCase();
+          const on = v === "SI" || v === "TRUE" || v === "1" || v === "HABILITADO";
+          return `<td class="right">${on ? "✅" : ""}</td>`;
+        })
+        .join("");
+
+      return `<tr>
+        <td class="nowrap">${escapeHtml(id)}</td>
+        <td><b>${escapeHtml(nombre)}</b></td>
+        <td>${escapeHtml(roleBucket(rol))}</td>
+        <td>${escapeHtml(equipo)}</td>
+        ${tds}
+      </tr>`;
+    })
+    .join("");
 }
 
-/* ========= Wire UI ========= */
+/* ========= HTML helpers ========= */
 function escapeHtml(s) {
   return String(s ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 function escapeAttr(s) {
-  return escapeHtml(s).replaceAll('"', "&quot;");
+  return escapeHtml(String(s ?? "")).replace(/`/g, "&#096;");
 }
 function unescapeAttr(s) {
-  return String(s ?? "").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+  return String(s ?? "");
 }
-function cssEsc(s) { return String(s ?? "").replaceAll('"', '\\"'); }
 
+/* ========= main ========= */
 async function main() {
   applyTheme();
   mountTabs();
-
-  // Dashboard: sorting (roles)
-  mountTableSort_("tblDashRoles", S.sort.dashRoles, (st) => { S.sort.dashRoles = st; renderDashboard(); });
 
   $("btnTheme")?.addEventListener("click", () => {
     S.theme = S.theme === "dark" ? "light" : "dark";
     applyTheme();
   });
 
-  // Operativa
-  $("btnGenerarPlan")?.addEventListener("click", onGenerarPlanificacionYOutbox_);
-
-  $("btnAddFlujo")?.addEventListener("click", async () => {
-    const name = $("newFlujoName")?.value?.trim() || "";
-    const req = Number($("newFlujoReq")?.value || 0) || 0;
-    if (!name) return setErr("Flujos: escribí el nombre del flujo.");
-
-    try {
-      $("dailyStatus").textContent = "Guardando...";
-      await API.flujosUpsert(name, req, "");
-      S.flujos = await API.flujosList();
-      renderFlujos();
-      toast("Flujo agregado", name);
-      $("newFlujoName").value = "";
-      $("newFlujoReq").value = "";
-    } catch (e) {
-      setErr(`Flujos: ${e.message || e}`);
-    } finally {
-      $("dailyStatus").textContent = "Listo";
-    }
+  $("btnReloadAll")?.addEventListener("click", async () => {
+    setErr("");
+    setBusy("Cargando", "Actualizando todo...");
+    await loadCore();
+    clearBusy();
   });
 
-  // Reload buttons
-  $("btnReloadDash")?.addEventListener("click", async () => {
-    await refreshPlanAndOutbox();
-    await refreshPresentismo();
-    renderDashboard();
-    toast("Dashboard", "Actualizado");
-  });
   $("btnReloadColabs")?.addEventListener("click", async () => {
+    setErr("");
+    setBusy("Colaboradores", "Actualizando...");
     S.colabs = await API.colaboradoresList();
     renderColabs();
-    renderDashboard();
+    clearBusy();
     toast("Colaboradores", "Actualizado");
   });
+
   $("btnReloadHabil")?.addEventListener("click", async () => {
+    setErr("");
+    setBusy("Habilitaciones", "Actualizando...");
     await refreshHabil();
     renderHabil();
+    clearBusy();
     toast("Habilitaciones", "Actualizado");
   });
+
   $("btnReloadPres")?.addEventListener("click", async () => {
     setBusy("Presentismo", "Actualizando...");
     await refreshPresentismo();
@@ -1320,14 +1204,8 @@ async function main() {
     toast("Presentismo", "Actualizado");
   });
 
-  $("presSemana")?.addEventListener("change", async (e) => {
-    S.presSemanaSel = String(e?.target?.value || "").trim();
-    setBusy("Presentismo", S.presSemanaSel ? `Cargando ${S.presSemanaSel}...` : "Cargando semana actual...");
-    await refreshPresentismo();
-    renderPresentismo();
-    renderDashboard();
-    clearBusy();
-  });
+  $("btnGenPlan")?.addEventListener("click", onGenPlan);
+  $("btnGenOutbox")?.addEventListener("click", onGenOutbox);
 
   $("btnSetLicencia")?.addEventListener("click", onSetLicencia);
 
@@ -1335,77 +1213,121 @@ async function main() {
   const rolesList = ["Analista KV", "Analista PM", "Analista QA", "Líderes"];
   const rolesListHab = ["Analista KV", "Analista PM", "Analista QA"];
 
-  const msRolesCol = mountMultiSelect("msRolesColabs", { title: "Roles", items: rolesList, onChange: (set) => { S.fColabs.roles = set; renderColabs(); }});
-  const msEquipCol = mountMultiSelect("msEquiposColabs", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fColabs.equipos = set; renderColabs(); }});
+  const msRolesCol = mountMultiSelect("msRolesColabs", {
+    title: "Roles",
+    items: rolesList,
+    onChange: (set) => {
+      S.fColabs.roles = set;
+      renderColabs();
+    },
+  });
+  const msEquipCol = mountMultiSelect("msEquiposColabs", {
+    title: "Equipo",
+    items: EQUIPOS_PRESET,
+    onChange: (set) => {
+      S.fColabs.equipos = set;
+      renderColabs();
+    },
+  });
 
-  const msRolesHab = mountMultiSelect("msRolesHabil", { title: "Roles", items: rolesListHab, onChange: (set) => { S.fHabil.roles = set; renderHabil(); }});
-  const msEquipHab = mountMultiSelect("msEquiposHabil", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fHabil.equipos = set; renderHabil(); }});
+  const msRolesHab = mountMultiSelect("msRolesHabil", {
+    title: "Roles",
+    items: rolesListHab,
+    onChange: (set) => {
+      S.fHabil.roles = set;
+      renderHabil();
+    },
+  });
+  const msEquipHab = mountMultiSelect("msEquiposHabil", {
+    title: "Equipo",
+    items: EQUIPOS_PRESET,
+    onChange: (set) => {
+      S.fHabil.equipos = set;
+      renderHabil();
+    },
+  });
 
-  const msRolesPres = mountMultiSelect("msRolesPres", { title: "Roles", items: rolesList, onChange: (set) => { S.fPres.roles = set; renderPresentismo(); }});
-  const msEquipPres = mountMultiSelect("msEquiposPres", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fPres.equipos = set; renderPresentismo(); }});
+  const msRolesPres = mountMultiSelect("msRolesPres", {
+    title: "Roles",
+    items: rolesList,
+    onChange: (set) => {
+      S.fPres.roles = set;
+      renderPresentismo();
+    },
+  });
+  const msEquipPres = mountMultiSelect("msEquiposPres", {
+    title: "Equipo",
+    items: EQUIPOS_PRESET,
+    onChange: (set) => {
+      S.fPres.equipos = set;
+      renderPresentismo();
+    },
+  });
 
-  mountSearch("searchColabs", "searchColabsWrap", "clearSearchColabs", (q) => { S.fColabs.q = q; renderColabs(); });
-  mountSearch("searchHabil", "searchHabilWrap", "clearSearchHabil", (q) => { S.fHabil.q = q; renderHabil(); });
-  mountSearch("searchPres", "searchPresWrap", "clearSearchPres", (q) => { S.fPres.q = q; renderPresentismo(); });
+  // Semana (mismo patrón UI que Roles y Equipo)
+  msSemanaPresCtrl = mountSingleSelectMs("msSemanaPres", {
+    title: "Semana",
+    items: S.presSemanas || [],
+    emptyLabel: "Actual",
+    onChange: async (val) => {
+      S.presSemanaSel = String(val || "").trim(); // "" => semana actual
+      setBusy("Presentismo", S.presSemanaSel ? `Cargando ${S.presSemanaSel}...` : "Cargando semana actual...");
+      await refreshPresentismo();
+      renderPresentismo();
+      renderDashboard();
+      clearBusy();
+    },
+  });
+  syncPresSemanaSelect_();
+
+  mountSearch("searchColabs", "searchColabsWrap", "clearSearchColabs", (q) => {
+    S.fColabs.q = q;
+    renderColabs();
+  });
+  mountSearch("searchHabil", "searchHabilWrap", "clearSearchHabil", (q) => {
+    S.fHabil.q = q;
+    renderHabil();
+  });
+  mountSearch("searchPres", "searchPresWrap", "clearSearchPres", (q) => {
+    S.fPres.q = q;
+    renderPresentismo();
+  });
 
   $("btnClearColabs")?.addEventListener("click", () => {
     S.fColabs = { roles: new Set(), equipos: new Set(), q: "" };
-    msRolesCol?.clear(); msEquipCol?.clear();
-    $("searchColabs").value = ""; $("searchColabsWrap").classList.remove("has");
+    msRolesCol?.clear();
+    msEquipCol?.clear();
+    $("searchColabs").value = "";
+    $("searchColabsWrap").classList.remove("has");
     renderColabs();
-  });
-
-  // Selección masiva (Colaboradores)
-  const syncSelPill = () => { const pill = $("colabsSelPill"); if (pill) pill.innerHTML = `<b>Seleccionados</b> ${S.selColabs.size}`; };
-
-  $("colabsSelectAll")?.addEventListener("change", (e) => {
-    const checked = e.target.checked;
-    const ids = applySectionFilter(S.colabs || [], S.fColabs).map(colabRowView).map((x) => x.id).filter(Boolean);
-    if (checked) ids.forEach((id) => S.selColabs.add(id));
-    else ids.forEach((id) => S.selColabs.delete(id));
-    syncSelPill();
-    renderColabs();
-  });
-
-  $("btnClearSelColabs")?.addEventListener("click", () => {
-    S.selColabs.clear();
-    syncSelPill();
-    renderColabs();
-  });
-
-  function getSelectedColabs_() {
-    const all = (S.colabs || []).map(colabRowView);
-    return all.filter((x) => x.id && S.selColabs.has(x.id));
-  }
-
-  $("btnCopySelIds")?.addEventListener("click", () => {
-    const rows = getSelectedColabs_();
-    if (!rows.length) return toast("Copiar", "No hay seleccionados");
-    copyToClipboard(rows.map((r) => r.id).join("\n"));
-  });
-  $("btnCopySelMailProd")?.addEventListener("click", () => {
-    const rows = getSelectedColabs_().map((r) => r.mailProd).filter(Boolean);
-    if (!rows.length) return toast("Copiar", "No hay mails seleccionados");
-    copyToClipboard(rows.join("\n"));
-  });
-  $("btnCopySelMailExt")?.addEventListener("click", () => {
-    const rows = getSelectedColabs_().map((r) => r.mailExt).filter(Boolean);
-    if (!rows.length) return toast("Copiar", "No hay mails seleccionados");
-    copyToClipboard(rows.join("\n"));
   });
 
   $("btnClearHabil")?.addEventListener("click", () => {
     S.fHabil = { roles: new Set(), equipos: new Set(), q: "" };
-    msRolesHab?.clear(); msEquipHab?.clear();
-    $("searchHabil").value = ""; $("searchHabilWrap").classList.remove("has");
+    msRolesHab?.clear();
+    msEquipHab?.clear();
+    $("searchHabil").value = "";
+    $("searchHabilWrap").classList.remove("has");
     renderHabil();
   });
+
   $("btnClearPres")?.addEventListener("click", () => {
     S.fPres = { roles: new Set(), equipos: new Set(), q: "" };
-    msRolesPres?.clear(); msEquipPres?.clear();
-    $("searchPres").value = ""; $("searchPresWrap").classList.remove("has");
+    msRolesPres?.clear();
+    msEquipPres?.clear();
+    $("searchPres").value = "";
+    $("searchPresWrap").classList.remove("has");
     renderPresentismo();
   });
+
+  $("btnClearSelColabs")?.addEventListener("click", () => {
+    S.selColabs.clear();
+    renderColabs();
+  });
+
+  $("btnCopySelIds")?.addEventListener("click", () => copySelected("id"));
+  $("btnCopySelMailProd")?.addEventListener("click", () => copySelected("mailProd"));
+  $("btnCopySelMailExt")?.addEventListener("click", () => copySelected("mailExt"));
 
   await loadCore();
 }
@@ -1413,6 +1335,3 @@ async function main() {
 document.addEventListener("DOMContentLoaded", () => {
   main().catch((e) => setErr(`Error: ${e.message || e}`));
 });
-
-
-
