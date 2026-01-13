@@ -1,4 +1,4 @@
-// api.js (ESM)
+// api.js (ESM)// api.js (ESM)
 const BASE = "/.netlify/functions/gas";
 
 async function safeJson(resp) {
@@ -91,12 +91,6 @@ export const API = {
 
   presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
   presentismoStats: (dateYMD) => get("presentismo.stats", { date: dateYMD }),
-
-  presentismoSemanas: () => get("presentismo.semanas"),
-  presentismoWeekBySemana: (semana) => get("presentismo.weekBySemana", { semana }),
-  presentismoStatsBySemana: (semana) => get("presentismo.statsBySemana", { semana }),
-
   presentismoSetLicencia: (idMeli, desdeYMD, hastaYMD, tipo) =>
     post("presentismo.licencias.set", { idMeli, desde: desdeYMD, hasta: hastaYMD, tipo }),
 };
-
