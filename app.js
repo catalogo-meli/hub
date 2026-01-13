@@ -143,8 +143,8 @@ function mountMultiSelect(targetId, { title, items, onChange }) {
     <div class="ms-panel">
       <div data-ms-list></div>
       <div class="ms-actions">
-        <button class="btn ghost" type="button" data-ms-all>Todos</button>
-        <button class="btn ghost" type="button" data-ms-none>Ninguno</button>
+        <button class="btn ghost" type="button" data-ms-clear>Limpiar</button>
+        <button class="btn ghost" type="button" data-ms-all>Seleccionar todos</button>
       </div>
     </div>
   `;
@@ -155,8 +155,8 @@ function mountMultiSelect(targetId, { title, items, onChange }) {
   const panel = host.querySelector(".ms-panel");
   const list = host.querySelector("[data-ms-list]");
   const value = host.querySelector("[data-ms-value]");
+  const bClear = host.querySelector("[data-ms-clear]");
   const bAll = host.querySelector("[data-ms-all]");
-  const bNone = host.querySelector("[data-ms-none]");
 
   function renderList() {
     list.innerHTML = items
@@ -191,12 +191,15 @@ function mountMultiSelect(targetId, { title, items, onChange }) {
   document.addEventListener("click", () => close());
   panel.addEventListener("click", (e) => e.stopPropagation());
 
-  bAll.addEventListener("click", () => {
+  // Limpiar => vuelve a "Todos" (sin filtros)
+  bClear.addEventListener("click", () => {
     state.selected.clear();
     renderList(); renderValue();
     onChange?.(new Set(state.selected));
   });
-  bNone.addEventListener("click", () => {
+
+  // Seleccionar todos => filtra explícitamente por todos los items
+  bAll.addEventListener("click", () => {
     state.selected = new Set(items);
     renderList(); renderValue();
     onChange?.(new Set(state.selected));
@@ -254,6 +257,7 @@ const S = {
     colabs: { key: "nombre", dir: 1 },
     habil: { key: "", dir: 1 },
     pres: { key: "nombre", dir: 1 },
+    dashRoles: { key: "rol", dir: 1 },
   },
 };
 
@@ -474,9 +478,31 @@ function renderFlujos() {
       await onFlujoDelete(unescapeAttr(flujo));
     });
   });
-}
 
-/* ========= Planificación: columnas + generar mensaje por flujo ========= */
+  // Alerta: perfiles disponibles vs requeridos (basado en presentes hoy)
+  const alertEl = $("dailyAssignAlert");
+  if (alertEl) {
+    const disponibles = countAnalistasDisponiblesHoy_();
+    const requeridos = rows.reduce((acc, f) => acc + (Number(f.perfiles_requeridos ?? f.cantidad ?? 0) || 0), 0);
+    const diff = disponibles - requeridos;
+
+    let cls = "";
+    let msg = "";
+    if (diff > 0) {
+      cls = "warn";
+      msg = `Faltan asignar: ${diff} (presentes hoy: ${disponibles} / requeridos: ${requeridos})`;
+    } else if (diff < 0) {
+      cls = "bad";
+      msg = `Faltan cubrir: ${Math.abs(diff)} (presentes hoy: ${disponibles} / requeridos: ${requeridos})`;
+    } else {
+      cls = "ok";
+      msg = `Asignación al día (presentes hoy: ${disponibles} / requeridos: ${requeridos})`;
+    }
+    alertEl.className = `pill ${cls}`;
+    alertEl.innerHTML = `<b>Equipo</b> ${escapeHtml(msg)}`;
+  }
+
+}/* ========= Planificación: columnas + generar mensaje por flujo ========= */
 function renderPlan() {
   const host = $("planGrid");
   if (!host) return;
@@ -1083,8 +1109,40 @@ function renderDashboard() {
     counts.set(b, (counts.get(b) || 0) + 1);
   }
 
-  // orden fijo para que no te “baile” la tabla
-  const ordered = ROLES_BUCKETS.map((k) => [k, counts.get(k) || 0]);
+  // presentes hoy por rol (cruza presWeek + colaboradores)
+  const presentesPorRol = new Map();
+  if (S.presWeek?.rows?.length) {
+    const today = todayYMD();
+    const colabsById = new Map((S.colabs || []).map((c) => {
+      const v = colabRowView(c);
+      return [v.id, v];
+    }));
+    for (const r of S.presWeek.rows) {
+      const vday = String(r.vals?.[today] || "").trim();
+      if (vday !== "P") continue;
+      const meta = colabsById.get(r.id_meli);
+      const bucket = roleBucket(meta?.rol || "");
+      presentesPorRol.set(bucket, (presentesPorRol.get(bucket) || 0) + 1);
+    }
+  }
+
+  // tabla base
+  let rowsRoles = ROLES_BUCKETS.map((k) => ({
+    rol: k,
+    nomina: counts.get(k) || 0,
+    presentes: presentesPorRol.get(k) || 0,
+  }));
+
+  // sort
+  const ss = S.sort?.dashRoles || { key: "rol", dir: 1 };
+  const key = ss.key || "rol";
+  const dir = ss.dir || 1;
+  rowsRoles.sort((a, b) => {
+    const va = a[key];
+    const vb = b[key];
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+    return String(va).localeCompare(String(vb)) * dir;
+  });
 
   const pres = S.presStats?.presentes ?? 0;
   const analistasHoy = countAnalistasDisponiblesHoy_();
@@ -1097,8 +1155,9 @@ function renderDashboard() {
     <div class="kpi"><div class="v">${flujosActivos}</div><div class="l">Flujos activos hoy</div></div>
   `;
 
-  tb.innerHTML = ordered.map(([rol, n]) => `<tr><td>${escapeHtml(rol)}</td><td class="right">${n}</td></tr>`).join("");
+  tb.innerHTML = rowsRoles.map((r) => `<tr><td>${escapeHtml(r.rol)}</td><td class="right">${r.nomina}</td><td class="right">${r.presentes}</td></tr>`).join("");
 }
+
 
 /* ========= Generar planificación (también genera outbox) ========= */
 async function onGenerarPlanificacionYOutbox_() {
@@ -1140,6 +1199,9 @@ function cssEsc(s) { return String(s ?? "").replaceAll('"', '\\"'); }
 async function main() {
   applyTheme();
   mountTabs();
+
+  // Dashboard: sorting (roles)
+  mountTableSort_("tblDashRoles", S.sort.dashRoles, (st) => { S.sort.dashRoles = st; renderDashboard(); });
 
   $("btnTheme")?.addEventListener("click", () => {
     S.theme = S.theme === "dark" ? "light" : "dark";
