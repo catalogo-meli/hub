@@ -1,10 +1,16 @@
-/* app.js - HUB Catálogo (Frontend) */
+/* app.js - HUB Catálogo (Frontend) - CORREGIDO */
 /* eslint-disable no-console */
 
 import { API } from "/api.js";
 
-// Exponer API en window para debug/compatibilidad
-window.API = API;
+// ✅ FIX: Validar que API se cargó correctamente
+if (!API || typeof API.health !== "function") {
+  console.error("[app.js] ERROR CRÍTICO: API no se cargó correctamente");
+  alert("Error al cargar módulos. Recargá la página.");
+  throw new Error("API module failed to load");
+}
+
+console.log("[app.js] API cargado OK");
 
 /**
  * ------------------------------------------------------------
@@ -30,6 +36,10 @@ const state = {
     theme: "dark",
   },
 };
+
+// ✅ FIX: Exponer state como window.S para debug/compatibilidad
+window.S = state;
+console.log("[app.js] state expuesto como window.S");
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -58,7 +68,6 @@ function escapeHtml_(s) {
 
 function formatDateDMY_(ymd) {
   if (!ymd) return "";
-  // ymd puede venir "dd/MM/yyyy" desde GAS o "yyyy-MM-dd" en algunos casos
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(ymd)) return ymd;
   const m = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (m) return `${m[3]}/${m[2]}/${m[1]}`;
@@ -66,7 +75,6 @@ function formatDateDMY_(ymd) {
 }
 
 function toDatetimeLocal_(s) {
-  // acepta yyyy-MM-dd'T'HH:mm o Date string; devuelve yyyy-MM-ddTHH:mm
   if (!s) return "";
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) return s;
   const d = new Date(s);
@@ -97,14 +105,16 @@ function toast_(msg, type = "info") {
  * ------------------------------------------------------------
  */
 async function main() {
+  console.log("[app.js] main() iniciando...");
   bindEvents_();
   hydrateTheme_();
   setLoading(true);
   try {
     await preload_();
     render_();
+    console.log("[app.js] main() completado OK");
   } catch (e) {
-    console.error(e);
+    console.error("[app.js] main() ERROR:", e);
     setError(e?.message || String(e));
   } finally {
     setLoading(false);
@@ -119,11 +129,14 @@ document.addEventListener("DOMContentLoaded", main);
  * ------------------------------------------------------------
  */
 async function preload_() {
+  console.log("[app.js] preload_() iniciando...");
+  
   // Health (opcional; si falla no rompemos)
   try {
     await API.health();
+    console.log("[app.js] health OK");
   } catch (e) {
-    console.warn("health failed", e);
+    console.warn("[app.js] health falló:", e);
   }
 
   // Datos base
@@ -139,6 +152,12 @@ async function preload_() {
   state.data.flujos = flujos || [];
   state.data.habilitaciones = hab || null;
 
+  console.log("[app.js] datos base cargados:", {
+    colaboradores: state.data.colaboradores.length,
+    canales: state.data.canales.length,
+    flujos: state.data.flujos.length,
+  });
+
   // Datos dinámicos iniciales
   await refreshAll_();
 }
@@ -149,14 +168,12 @@ async function preload_() {
  * ------------------------------------------------------------
  */
 async function refreshAll_() {
-  // refresca lo que el usuario ve (y lo que el dashboard necesita)
+  console.log("[app.js] refreshAll_() iniciando...");
   const tasks = [];
 
-  // Planificación + outbox siempre alimentan dashboard
   tasks.push(API.planificacionList().then((x) => (state.data.planificacion = x || [])));
   tasks.push(API.slackOutboxList().then((x) => (state.data.slackOutbox = x || [])));
 
-  // Presentismo stats (hoy)
   const today = new Date();
   const yyyy = today.getFullYear();
   const mm = String(today.getMonth() + 1).padStart(2, "0");
@@ -170,6 +187,7 @@ async function refreshAll_() {
   );
 
   await Promise.all(tasks);
+  console.log("[app.js] refreshAll_() completado");
 }
 
 /**
@@ -221,7 +239,6 @@ function bindEvents_() {
   document.addEventListener("click", async (ev) => {
     const t = ev.target;
 
-    // Slack outbox: programar
     const btnProg = t.closest?.("[data-action='outbox-programar']");
     if (btnProg) {
       ev.preventDefault();
@@ -229,7 +246,6 @@ function bindEvents_() {
       return;
     }
 
-    // Slack outbox: desprogramar
     const btnDes = t.closest?.("[data-action='outbox-desprogramar']");
     if (btnDes) {
       ev.preventDefault();
@@ -237,7 +253,6 @@ function bindEvents_() {
       return;
     }
 
-    // Slack outbox: enviar (si tu UI lo tiene)
     const btnSend = t.closest?.("[data-action='outbox-enviar']");
     if (btnSend) {
       ev.preventDefault();
@@ -245,20 +260,11 @@ function bindEvents_() {
       return;
     }
 
-    // Habilitaciones: toggle (si tu UI lo tiene)
     const btnHab = t.closest?.("[data-action='hab-toggle']");
     if (btnHab) {
       ev.preventDefault();
       await onHabToggle_(btnHab);
       return;
-    }
-  });
-
-  // Delegación para inputs (datetime-local) en outbox
-  document.addEventListener("change", (ev) => {
-    const el = ev.target;
-    if (el?.matches?.("input[data-field='programado_para']")) {
-      // No hacemos nada acá; se confirma con botón Programar
     }
   });
 }
@@ -292,7 +298,6 @@ function render_() {
   renderError_();
   renderLoading_();
 
-  // Render por pestaña
   if (state.tab === "dashboard") renderDashboard_();
   else if (state.tab === "operativa") renderOperativa_();
   else if (state.tab === "colaboradores") renderColaboradores_();
@@ -330,20 +335,17 @@ function renderLoading_() {
  * ------------------------------------------------------------
  */
 function renderDashboard_() {
-  // KPIs básicos
   const colabs = state.data.colaboradores || [];
   const plan = state.data.planificacion || [];
   const outbox = state.data.slackOutbox || [];
   const stats = state.data.presentismoStats || { presentes: 0, ausentes: 0, total: 0 };
 
-  // Distribución por rol
   const byRol = {};
   for (const c of colabs) {
     const rol = safeText_(c?.Rol || c?.rol || "Sin rol").trim() || "Sin rol";
     byRol[rol] = (byRol[rol] || 0) + 1;
   }
 
-  // Render distribución por rol
   const tbl = $("#dashRolTableBody");
   if (tbl) {
     const rows = Object.entries(byRol)
@@ -358,7 +360,6 @@ function renderDashboard_() {
     tbl.innerHTML = rows || `<tr><td colspan="2" class="muted">Sin datos</td></tr>`;
   }
 
-  // Mini KPIs
   const kpiPresentes = $("#kpiPresentes");
   const kpiAusentes = $("#kpiAusentes");
   const kpiTotal = $("#kpiTotal");
@@ -378,7 +379,7 @@ function renderDashboard_() {
 
 /**
  * ------------------------------------------------------------
- * OPERATIVA DIARIA (Planificación + Outbox)
+ * OPERATIVA DIARIA
  * ------------------------------------------------------------
  */
 function renderOperativa_() {
@@ -478,14 +479,12 @@ function renderHabilitaciones_() {
   const body = $("#habTableBody");
   if (!head || !body) return;
 
-  // Header
   const h = [
     `<th>ID_MELI</th>`,
     ...flujos.map((f) => `<th>${escapeHtml_(f)}</th><th>Fijo</th>`),
   ].join("");
   head.innerHTML = `<tr>${h}</tr>`;
 
-  // Body
   const out = rows
     .map((r) => {
       const id = r.id_meli;
@@ -521,7 +520,6 @@ function renderHabilitaciones_() {
  * ------------------------------------------------------------
  */
 function renderPresentismo_() {
-  // Vista inicial: semana actual
   renderPresentismoWeek_();
 }
 
@@ -555,8 +553,7 @@ async function renderPresentismoWeek_() {
         ];
         days.forEach((d) => {
           const v = r.vals?.[d.key] ?? "";
-          const cls =
-            v === "P" ? "pres-p" : v ? "pres-a" : "";
+          const cls = v === "P" ? "pres-p" : v ? "pres-a" : "";
           const badge = v ? escapeHtml_(v) : "";
           tds.push(`<td class="${cls}">${badge}</td>`);
         });
@@ -631,15 +628,12 @@ async function onOutboxDesprogramar_(btn) {
 }
 
 async function onOutboxEnviar_(btn) {
-  // Si tu UI tiene botón enviar y tu backend soporta el action,
-  // lo dejamos “compat”. (No cambia tu lógica si no lo usás.)
   const row = Number(btn.dataset.row);
   if (!row) return;
 
   setLoading(true);
   setError(null);
   try {
-    // esto depende de si tu api.js expone slackOutboxEnviar
     if (typeof API.slackOutboxEnviar !== "function") {
       toast_("Enviar no está habilitado en este front", "warn");
       return;
@@ -659,10 +653,9 @@ async function onOutboxEnviar_(btn) {
 async function onHabToggle_(btn) {
   const id = btn.dataset.id;
   const flujo = btn.dataset.flujo;
-  const field = btn.dataset.field; // "habilitado" | "fijo"
+  const field = btn.dataset.field;
   if (!id || !flujo || !field) return;
 
-  // tomamos el estado actual desde state
   const hab = state.data.habilitaciones;
   const row = hab?.rows?.find((r) => r.id_meli === id);
   if (!row) return;
@@ -675,10 +668,8 @@ async function onHabToggle_(btn) {
 
   if (field === "habilitado") {
     nextH = !curH;
-    // si se deshabilita, fijo debe caer
     if (!nextH) nextF = false;
   } else if (field === "fijo") {
-    // si no está habilitado, no dejamos fijar
     if (!curH) return;
     nextF = !curF;
   }
@@ -688,7 +679,6 @@ async function onHabToggle_(btn) {
 
   try {
     await API.habilitacionesSet(id, flujo, nextH, nextF);
-    // refresh habilitaciones
     state.data.habilitaciones = await API.habilitacionesList();
     renderHabilitaciones_();
     toast_("Guardado", "ok");
