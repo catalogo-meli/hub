@@ -129,51 +129,45 @@ function mountTableSort_(tableId, sortState, onChange) {
 /* ========= MultiSelect ========= */
 function mountMultiSelect(targetId, { title, items, onChange }) {
   const host = $(targetId);
-  if (!host) return null;
+  if (!host) return;
 
-  host.className = "ms";
+  const state = { open: false, selected: new Set() }; // vacío = sin filtro (Todos)
+
   host.innerHTML = `
-    <div class="ms-btn">
-      <div>
-        <div class="label">${title}</div>
-        <div class="value" data-ms-value>Todos</div>
-      </div>
-      <div class="muted">▾</div>
+    <div class="ms-box">
+      <div class="ms-title">${title}</div>
+      <button class="ms-value" type="button" data-ms-value></button>
     </div>
     <div class="ms-panel">
       <div data-ms-list></div>
       <div class="ms-actions">
-        <button class="btn ghost" type="button" data-ms-all>Todos</button>
-        <button class="btn ghost" type="button" data-ms-none>Ninguno</button>
+        <button class="btn ghost" type="button" data-ms-clear>Limpiar</button>
       </div>
     </div>
   `;
 
-  const state = { selected: new Set() };
-
-  const btn = host.querySelector(".ms-btn");
+  const box = host.querySelector(".ms-box");
   const panel = host.querySelector(".ms-panel");
   const list = host.querySelector("[data-ms-list]");
   const value = host.querySelector("[data-ms-value]");
-  const bAll = host.querySelector("[data-ms-all]");
-  const bNone = host.querySelector("[data-ms-none]");
+  const bClear = host.querySelector("[data-ms-clear]");
 
   function renderList() {
     list.innerHTML = items
       .map(
         (it) => `
       <label class="ms-item">
-        <input type="checkbox" value="${String(it).replace(/"/g, "&quot;")}" />
+        <input type="checkbox" data-ms-item value="${String(it).replace(/"/g, "&quot;")}" ${state.selected.has(it) ? "checked" : ""} />
         <div>${it}</div>
       </label>`
       )
       .join("");
 
-    list.querySelectorAll("input[type=checkbox]").forEach((cb) => {
-      cb.checked = state.selected.has(cb.value);
-      cb.addEventListener("change", () => {
-        if (cb.checked) state.selected.add(cb.value);
-        else state.selected.delete(cb.value);
+    list.querySelectorAll("input[data-ms-item]").forEach((inp) => {
+      inp.addEventListener("change", () => {
+        const v = inp.value;
+        if (inp.checked) state.selected.add(v);
+        else state.selected.delete(v);
         renderValue();
         onChange?.(new Set(state.selected));
       });
@@ -181,35 +175,48 @@ function mountMultiSelect(targetId, { title, items, onChange }) {
   }
 
   function renderValue() {
-    if (state.selected.size === 0) value.textContent = "Todos";
-    else if (state.selected.size === 1) value.textContent = [...state.selected][0];
-    else value.textContent = `${state.selected.size} seleccionados`;
+    if (state.selected.size === 0) {
+      value.textContent = "Todos";
+      return;
+    }
+    // muestra “N seleccionados” (evita texto larguísimo)
+    value.textContent = `${state.selected.size} seleccionados`;
   }
 
-  function close() { host.classList.remove("open"); }
-  btn.addEventListener("click", (e) => { e.stopPropagation(); host.classList.toggle("open"); });
+  function open() {
+    state.open = true;
+    host.classList.add("open");
+  }
+  function close() {
+    state.open = false;
+    host.classList.remove("open");
+  }
+
+  box.addEventListener("click", (e) => {
+    e.stopPropagation();
+    state.open ? close() : open();
+  });
   document.addEventListener("click", () => close());
   panel.addEventListener("click", (e) => e.stopPropagation());
 
-  bAll.addEventListener("click", () => {
+  bClear.addEventListener("click", () => {
+    // Limpiar = sin filtro (equivale a "Todos")
     state.selected.clear();
     renderList(); renderValue();
     onChange?.(new Set(state.selected));
-  });
-  bNone.addEventListener("click", () => {
-    state.selected = new Set(items);
-    renderList(); renderValue();
-    onChange?.(new Set(state.selected));
+    close();
   });
 
   renderList();
   renderValue();
 
   return {
-    clear: () => {
-      state.selected.clear();
+    setSelected(vals) {
+      state.selected = new Set(vals || []);
       renderList(); renderValue();
-      onChange?.(new Set(state.selected));
+    },
+    getSelected() {
+      return new Set(state.selected);
     },
   };
 }
@@ -282,7 +289,7 @@ function mountTabs() {
       });
 
       if (key === "dashboard") renderDashboard();
-      if (key === "daily") { renderFlujos(); renderPlan(); renderOutbox(); }
+      if (key === "daily") { renderFlujos(); renderPlan(); renderOutbox(); updateDailyMissingAlert_(); }
       if (key === "colabs") renderColabs();
       if (key === "habil") renderHabil();
       if (key === "pres") renderPresentismo();
@@ -474,6 +481,7 @@ function renderFlujos() {
       await onFlujoDelete(unescapeAttr(flujo));
     });
   });
+updateDailyMissingAlert_();
 }
 
 /* ========= Planificación: columnas + generar mensaje por flujo ========= */
@@ -1069,35 +1077,92 @@ function countAnalistasDisponiblesHoy_() {
   return n;
 }
 
-function renderDashboard() {
-  const kpi = $("dashKpis");
-  const tb = $("tblDashRoles")?.querySelector("tbody");
-  if (!kpi || !tb) return;
+function updateDailyMissingAlert_() {
+  const el = $("dailyMissing");
+  if (!el) return;
 
-  const colabs = (S.colabs || []).map(colabRowView).filter((x) => x.id);
-  const total = colabs.length;
+  const reqTotal = (S.flujos || []).reduce(
+    (acc, f) => acc + (Number(f.perfiles_requeridos ?? f.cantidad ?? 0) || 0),
+    0
+  );
+
+  const analistasHoy = countAnalistasDisponiblesHoy_();
+  const faltan = Math.max(0, reqTotal - analistasHoy);
+
+  if (faltan > 0) {
+    el.innerHTML = `<span class="badge bad">Faltan asignar: ${faltan}</span>`;
+  } else {
+    el.innerHTML = `<span class="badge ok">Cobertura OK</span>`;
+  }
+}
+
+function renderDashboard() {
+  const host = $("dashKpis");
+  if (!host) return;
+
+  // KPIs
+  const total = (S.colabs || []).length;
+  const analistas = (S.colabs || []).filter((c) => isAnalista_(colabRowView(c).rol)).length;
+  const analistasHoy = countAnalistasDisponiblesHoy_();
+
+  host.innerHTML = `
+    <div class="kpi"><div class="k">${total}</div><div class="t">Total</div></div>
+    <div class="kpi"><div class="k">${analistas}</div><div class="t">Analistas (nómina)</div></div>
+    <div class="kpi"><div class="k">${analistasHoy}</div><div class="t">Presentes hoy</div></div>
+  `;
+
+  // Distribución por rol (nómina)
+  const tb = $("tblDashRoles")?.querySelector("tbody");
+  if (!tb) return;
 
   const counts = new Map();
-  for (const c of colabs) {
-    const b = roleBucket(c.rol);
+  for (const c of (S.colabs || [])) {
+    const v = colabRowView(c);
+    const b = roleBucket(v.rol);
     counts.set(b, (counts.get(b) || 0) + 1);
   }
 
-  // orden fijo para que no te “baile” la tabla
-  const ordered = ROLES_BUCKETS.map((k) => [k, counts.get(k) || 0]);
+  // presentes hoy por bucket (usa presWeek)
+  const presByBucket = new Map();
+  if (S.presWeek?.rows?.length) {
+    const today = todayYMD();
+    const colabsById2 = new Map((S.colabs || []).map((c) => {
+      const v = colabRowView(c);
+      return [v.id, v];
+    }));
+    for (const r of S.presWeek.rows) {
+      const v = r.vals?.[today];
+      if (String(v || "").trim() !== "P") continue;
+      const meta = colabsById2.get(r.id_meli);
+      const b = roleBucket(meta?.rol || "");
+      presByBucket.set(b, (presByBucket.get(b) || 0) + 1);
+    }
+  }
 
-  const pres = S.presStats?.presentes ?? 0;
-  const analistasHoy = countAnalistasDisponiblesHoy_();
-  const flujosActivos = (S.flujos || []).filter((f) => Number(f.perfiles_requeridos ?? f.cantidad ?? 0) >= 1).length;
+  const rows = ROLES_BUCKETS.map((rol) => ({
+    rol,
+    nomina: counts.get(rol) || 0,
+    presentes: presByBucket.get(rol) || 0,
+  }));
 
-  kpi.innerHTML = `
-    <div class="kpi"><div class="v">${total}</div><div class="l">Colaboradores</div></div>
-    <div class="kpi"><div class="v">${pres}</div><div class="l">Presentes hoy</div></div>
-    <div class="kpi"><div class="v">${analistasHoy}</div><div class="l">Analistas disponibles hoy</div></div>
-    <div class="kpi"><div class="v">${flujosActivos}</div><div class="l">Flujos activos hoy</div></div>
-  `;
+  // sort
+  const sk = S.sort?.dashRoles?.key || "rol";
+  const sd = S.sort?.dashRoles?.dir || 1;
+  rows.sort((a, b) => {
+    const va = a[sk], vb = b[sk];
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * sd;
+    return String(va).localeCompare(String(vb)) * sd;
+  });
 
-  tb.innerHTML = ordered.map(([rol, n]) => `<tr><td>${escapeHtml(rol)}</td><td class="right">${n}</td></tr>`).join("");
+  tb.innerHTML = rows
+    .map((x) => `<tr><td>${escapeHtml(x.rol)}</td><td class="right">${x.nomina}</td><td class="right">${x.presentes}</td></tr>`)
+    .join("");
+
+  mountTableSort_("tblDashRoles", S.sort.dashRoles, (s) => {
+    S.sort.dashRoles = s;
+    dashRoles: { key: "rol", dir: 1 },
+    renderDashboard();
+  });
 }
 
 /* ========= Generar planificación (también genera outbox) ========= */
