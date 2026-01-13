@@ -106,6 +106,13 @@
     }
     .pill b{color:var(--txt);font-weight:600}
 
+    .pill.ok{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.28);color:var(--txt)}
+    .pill.warn{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.28);color:var(--txt)}
+    .pill.bad{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.28);color:var(--txt)}
+    th.sortable{cursor:pointer;user-select:none}
+    th.sortable .srt{margin-left:6px;color:var(--muted);font-size:11px}
+
+
     .input, select, textarea{
       width:100%;
       background:var(--input);
@@ -340,9 +347,13 @@
         </div>
         <div style="margin-top:12px;overflow:auto">
           <table class="table" id="tblDashRoles">
-            <thead><tr><th>Rol</th><th class="right">Cantidad</th></tr></thead>
-
-
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="rol">Rol <span class="srt"></span></th>
+                <th class="right sortable" data-sort="nomina">En nómina <span class="srt"></span></th>
+                <th class="right sortable" data-sort="presentes">Presentes hoy <span class="srt"></span></th>
+              </tr>
+            </thead>
             <tbody></tbody>
           </table>
         </div>
@@ -365,6 +376,7 @@
           <div class="pill"><b>Flujos</b> (perfiles requeridos)</div>
           <div class="spacer"></div>
           <div class="pill" id="dailyStatus">Listo</div>
+          <div class="pill warn" id="dailyAssignAlert" title="Basado en Presentismo (presentes hoy)"></div>
 
         </div>
 
