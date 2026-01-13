@@ -1,63 +1,1127 @@
-/* app.js - HUB Catálogo (Frontend) - CORREGIDO */
-/* eslint-disable no-console */
-
+// app.js (ESM)
 import { API } from "/api.js";
 
-// ✅ FIX: Validar que API se cargó correctamente
-if (!API || typeof API.health !== "function") {
-  console.error("[app.js] ERROR CRÍTICO: API no se cargó correctamente");
-  alert("Error al cargar módulos. Recargá la página.");
-  throw new Error("API module failed to load");
+const ROLES_BUCKETS = ["Analista PM", "Líderes", "Analista KV", "Analista QA"];
+
+const EQUIPOS_PRESET = [
+  "Celeste Cignoli",
+  "José Puentes",
+  "Matías López",
+  "Matías Minczuk",
+];
+
+const $ = (id) => document.getElementById(id);
+
+function toast(t1, t2 = "") {
+  const box = $("toast");
+  if (!box) return;
+  $("toastT1").textContent = t1;
+  $("toastT2").textContent = t2;
+  box.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => box.classList.remove("show"), 3200);
 }
 
-console.log("[app.js] API cargado OK");
+function setErr(msg = "") {
+  const el = $("errBar");
+  if (!el) return;
+  if (!msg) {
+    el.classList.remove("show");
+    el.textContent = "";
+    return;
+  }
+  el.textContent = msg;
+  el.classList.add("show");
+}
 
-/**
- * ------------------------------------------------------------
- * Estado global (simple, sin frameworks)
- * ------------------------------------------------------------
- */
+function fmtDateDMY(isoYMD) {
+  if (!isoYMD) return "";
+  const [y, m, d] = isoYMD.split("-").map(Number);
+  if (!y || !m || !d) return isoYMD;
+  return `${String(d).padStart(2, "0")}-${String(m).padStart(2, "0")}-${y}`;
+}
 
-const state = {
-  tab: "dashboard",
-  data: {
-    colaboradores: [],
-    canales: [],
-    flujos: [],
-    habilitaciones: null,
-    presentismoWeek: null,
-    presentismoStats: null,
-    planificacion: [],
-    slackOutbox: [],
-  },
-  ui: {
-    loading: false,
-    error: null,
-    theme: "dark",
+function fmtDateAny(val) {
+  if (!val) return "";
+  // Date instance
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, "0");
+    const d = String(val.getDate()).padStart(2, "0");
+    return `${d}-${m}-${y}`;
+  }
+
+  const s = String(val).trim();
+  if (!s) return "";
+
+  // ISO yyyy-mm-dd
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return fmtDateDMY(s);
+
+  // dd/mm/yyyy
+  const m1 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m1) return `${String(m1[1]).padStart(2,"0")}-${String(m1[2]).padStart(2,"0")}-${m1[3]}`;
+
+  // dd-mm-yyyy already
+  if (/^\d{2}-\d{2}-\d{4}$/.test(s)) return s;
+
+  return s;
+}
+
+function norm(s) {
+  return String(s || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
+}
+
+/** Clasificación de rol más estricta para evitar delirios en el dashboard */
+function roleBucket(raw) {
+  const r = norm(raw);
+  if (r.includes("qa")) return "Analista QA";
+  if (r.includes("kv")) return "Analista KV";
+  if (r.includes("team leader") || r === "tl" || r.includes(" tl") || r.includes("coordin") || r.includes("cp") || r.includes("project manager") || r.includes("pm lider") || r.includes("pm líder") || r.includes("lider")) {
+    return "Líderes";
+  }
+  return "Analista PM";
+}
+
+function copyToClipboard(text) {
+  const t = String(text ?? "");
+  if (!t) return;
+  navigator.clipboard?.writeText(t).then(
+    () => toast("Copiado", t),
+    () => toast("No se pudo copiar", t)
+  );
+}
+
+function debounce(fn, ms = 350) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  };
+}
+
+function mountTableSort_(tableId, sortState, onChange) {
+  const tbl = $(tableId);
+  if (!tbl) return;
+
+  const key = sortState?.key || "";
+  const dir = sortState?.dir || 1;
+
+  // indicators
+  tbl.querySelectorAll("th.sortable").forEach((th) => {
+    const k = th.getAttribute("data-sort");
+    const srt = th.querySelector(".srt");
+    if (srt) {
+      if (k === key) srt.textContent = dir === 1 ? "▲" : "▼";
+      else srt.textContent = "";
+    }
+    th.onclick = () => {
+      const nextKey = k;
+      const nextDir = (nextKey === key) ? (dir * -1) : 1;
+      onChange?.({ key: nextKey, dir: nextDir });
+    };
+  });
+}
+
+/* ========= MultiSelect ========= */
+function mountMultiSelect(targetId, { title, items, onChange }) {
+  const host = $(targetId);
+  if (!host) return null;
+
+  host.className = "ms";
+  host.innerHTML = `
+    <div class="ms-btn">
+      <div>
+        <div class="label">${title}</div>
+        <div class="value" data-ms-value>Todos</div>
+      </div>
+      <div class="muted">▾</div>
+    </div>
+    <div class="ms-panel">
+      <div data-ms-list></div>
+      <div class="ms-actions">
+        <button class="btn ghost" type="button" data-ms-all>Todos</button>
+        <button class="btn ghost" type="button" data-ms-none>Ninguno</button>
+      </div>
+    </div>
+  `;
+
+  const state = { selected: new Set() };
+
+  const btn = host.querySelector(".ms-btn");
+  const panel = host.querySelector(".ms-panel");
+  const list = host.querySelector("[data-ms-list]");
+  const value = host.querySelector("[data-ms-value]");
+  const bAll = host.querySelector("[data-ms-all]");
+  const bNone = host.querySelector("[data-ms-none]");
+
+  function renderList() {
+    list.innerHTML = items
+      .map(
+        (it) => `
+      <label class="ms-item">
+        <input type="checkbox" value="${String(it).replace(/"/g, "&quot;")}" />
+        <div>${it}</div>
+      </label>`
+      )
+      .join("");
+
+    list.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.checked = state.selected.has(cb.value);
+      cb.addEventListener("change", () => {
+        if (cb.checked) state.selected.add(cb.value);
+        else state.selected.delete(cb.value);
+        renderValue();
+        onChange?.(new Set(state.selected));
+      });
+    });
+  }
+
+  function renderValue() {
+    if (state.selected.size === 0) value.textContent = "Todos";
+    else if (state.selected.size === 1) value.textContent = [...state.selected][0];
+    else value.textContent = `${state.selected.size} seleccionados`;
+  }
+
+  function close() { host.classList.remove("open"); }
+  btn.addEventListener("click", (e) => { e.stopPropagation(); host.classList.toggle("open"); });
+  document.addEventListener("click", () => close());
+  panel.addEventListener("click", (e) => e.stopPropagation());
+
+  bAll.addEventListener("click", () => {
+    state.selected.clear();
+    renderList(); renderValue();
+    onChange?.(new Set(state.selected));
+  });
+  bNone.addEventListener("click", () => {
+    state.selected = new Set(items);
+    renderList(); renderValue();
+    onChange?.(new Set(state.selected));
+  });
+
+  renderList();
+  renderValue();
+
+  return {
+    clear: () => {
+      state.selected.clear();
+      renderList(); renderValue();
+      onChange?.(new Set(state.selected));
+    },
+  };
+}
+
+function mountSearch(inputId, wrapId, clearId, onChange) {
+  const inp = $(inputId);
+  const wrap = $(wrapId);
+  const clr = $(clearId);
+  if (!inp || !wrap || !clr) return;
+
+  function sync() {
+    const v = inp.value || "";
+    if (v.length) wrap.classList.add("has");
+    else wrap.classList.remove("has");
+    onChange?.(v);
+  }
+  inp.addEventListener("input", sync);
+  clr.addEventListener("click", () => { inp.value = ""; sync(); inp.focus(); });
+  sync();
+}
+
+/* ========= State ========= */
+const S = {
+  theme: localStorage.getItem("hub_theme") || "dark",
+
+  colabs: [],
+  canales: [],
+  flujos: [],
+  habil: null,
+  plan: [],
+  outbox: [],
+  presWeek: null,
+  presStats: null,
+
+  fColabs: { roles: new Set(), equipos: new Set(), q: "" },
+  fHabil: { roles: new Set(), equipos: new Set(), q: "" },
+  fPres: { roles: new Set(), equipos: new Set(), q: "" },
+
+  // Selección + sorters
+  selColabs: new Set(),
+  sort: {
+    colabs: { key: "nombre", dir: 1 },
+    habil: { key: "", dir: 1 },
+    pres: { key: "nombre", dir: 1 },
   },
 };
 
-// ✅ FIX: Exponer state como window.S para debug/compatibilidad
-window.S = state;
-console.log("[app.js] state expuesto como window.S");
-
-const $ = (sel, root = document) => root.querySelector(sel);
-const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-
-function setLoading(v) {
-  state.ui.loading = !!v;
-  renderLoading_();
-}
-function setError(msg) {
-  state.ui.error = msg || null;
-  renderError_();
+/* ========= Theme ========= */
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", S.theme);
+  localStorage.setItem("hub_theme", S.theme);
+  const btn = $("btnTheme");
+  if (btn) btn.textContent = S.theme === "dark" ? "☾" : "☀";
 }
 
-function safeText_(v) {
-  return (v ?? "").toString();
+/* ========= Tabs ========= */
+function mountTabs() {
+  const tabs = $("tabs");
+  if (!tabs) return;
+
+  tabs.querySelectorAll(".tab").forEach((t) => {
+    t.addEventListener("click", () => {
+      tabs.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+      t.classList.add("active");
+
+      const key = t.dataset.tab;
+      ["dashboard", "daily", "colabs", "habil", "pres"].forEach((k) => {
+        const sec = $(`tab_${k}`);
+        if (sec) sec.style.display = k === key ? "" : "none";
+      });
+
+      if (key === "dashboard") renderDashboard();
+      if (key === "daily") { renderFlujos(); renderPlan(); renderOutbox(); }
+      if (key === "colabs") renderColabs();
+      if (key === "habil") renderHabil();
+      if (key === "pres") renderPresentismo();
+    });
+  });
 }
 
-function escapeHtml_(s) {
+/* ========= Helpers: data mapping ========= */
+function getField(obj, keys) {
+  for (const k of keys) {
+    if (obj && obj[k] != null && obj[k] !== "") return obj[k];
+  }
+  return "";
+}
+
+function colabRowView(c) {
+  const id = getField(c, ["ID_MELI", "id_meli", "Id_Meli"]);
+  const nombre = getField(c, ["Nombre", "nombre"]);
+  const rol = getField(c, ["Rol", "rol"]);
+  const equipo = getField(c, ["Equipo", "equipo"]);
+  const ubic = getField(c, ["Ubicación", "Ubicacion", "ubicacion"]);
+  const slackId = getField(c, ["Slack_ID", "slack_id", "SlackId"]);
+  // FIX: headers exactos
+  const mailProd = getField(c, ["Mail Productora", "Mail_Productora", "Mail productora", "mail_productora"]);
+  const mailExt = getField(c, ["Mail Externo", "Mail_Externo", "Mail externo", "mail_externo"]);
+  const ingreso = getField(c, ["Fecha Ingreso", "Fecha_Ingreso", "Fecha ingreso", "fecha_ingreso", "Ingreso"]);
+  return { id, nombre, rol, equipo, ubic, slackId, mailProd, mailExt, ingreso };
+}
+
+function applySectionFilter(list, f) {
+  const q = norm(f.q);
+  const rolesSel = f.roles;
+  const equiposSel = f.equipos;
+
+  return list.filter((x) => {
+    const v = colabRowView(x);
+    const rb = roleBucket(v.rol);
+
+    if (rolesSel.size > 0 && !rolesSel.has(rb)) return false;
+    if (equiposSel.size > 0 && !equiposSel.has(v.equipo)) return false;
+
+    if (q) {
+      const hay =
+        norm(v.id).includes(q) ||
+        norm(v.nombre).includes(q) ||
+        norm(v.rol).includes(q) ||
+        norm(v.equipo).includes(q) ||
+        norm(v.mailProd).includes(q) ||
+        norm(v.mailExt).includes(q);
+      if (!hay) return false;
+    }
+    return true;
+  });
+}
+
+/* ========= Data load ========= */
+async function loadCore() {
+  setErr("");
+  try {
+    const [colabs, canales, flujos] = await Promise.all([
+      API.colaboradoresList(),
+      API.canalesList(),
+      API.flujosList(),
+    ]);
+    S.colabs = colabs || [];
+    S.canales = canales || [];
+    S.flujos = flujos || [];
+
+    await refreshPlanAndOutbox();
+    await refreshHabil();
+    await refreshPresentismo();
+    mountPresentismoSelect();
+
+    renderDashboard();
+    renderFlujos();
+    renderPlan();
+    renderOutbox();
+    renderColabs();
+    renderHabil();
+    renderPresentismo();
+
+    toast("Listo", "Datos cargados");
+  } catch (e) {
+    setErr(`Error: ${e.message || e}`);
+  }
+}
+
+async function refreshPlanAndOutbox() {
+  const [plan, outbox] = await Promise.all([API.planificacionList(), API.slackOutboxList()]);
+  S.plan = plan || [];
+  S.outbox = outbox || [];
+}
+
+async function refreshHabil() {
+  try { S.habil = await API.habilitacionesList(); }
+  catch (e) { setErr(`Habilitaciones: ${e.message || e}`); S.habil = null; }
+}
+
+function todayYMD() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+async function refreshPresentismo() {
+  try {
+    const d = todayYMD();
+    const [week, stats] = await Promise.all([API.presentismoWeek(d), API.presentismoStats(d)]);
+    S.presWeek = week;
+    S.presStats = stats;
+  } catch (e) {
+    setErr(`Presentismo: ${e.message || e}`);
+    S.presWeek = null;
+    S.presStats = null;
+  }
+}
+
+/* ========= Operativa diaria: Flujos autosave ========= */
+const saveFlujoDebounced = debounce(async (flujo, perfiles) => {
+  setErr("");
+  try {
+    $("dailyStatus").textContent = "Guardando...";
+    await API.flujosUpsert(flujo, perfiles, "");
+    S.flujos = await API.flujosList();
+    renderFlujos();
+    toast("Guardado", flujo);
+  } catch (e) {
+    setErr(`Flujos: ${e.message || e}`);
+  } finally {
+    $("dailyStatus").textContent = "Listo";
+  }
+}, 420);
+
+async function onFlujoDelete(flujo) {
+  setErr("");
+  try {
+    $("dailyStatus").textContent = "Borrando...";
+    await API.flujosDelete(flujo);
+    S.flujos = await API.flujosList();
+    renderFlujos();
+    toast("Borrado", flujo);
+  } catch (e) {
+    setErr(`Flujos: ${e.message || e}`);
+  } finally {
+    $("dailyStatus").textContent = "Listo";
+  }
+}
+
+function renderFlujos() {
+  const tb = $("tblFlujos")?.querySelector("tbody");
+  if (!tb) return;
+
+  const rows = (S.flujos || []).slice().sort((a, b) => String(a.flujo).localeCompare(String(b.flujo)));
+  tb.innerHTML = rows
+    .map((f) => {
+      const name = f.flujo ?? "";
+      const req = Number(f.perfiles_requeridos ?? f.cantidad ?? 0) || 0;
+      return `
+        <tr data-flujo="${escapeAttr(name)}">
+          <td><b>${escapeHtml(name)}</b></td>
+          <td class="right nowrap" style="min-width:140px">
+            <input class="input smallnum" type="number" min="0" step="1" value="${req}" data-req />
+          </td>
+          <td class="right nowrap">
+            <button class="xbtn" title="Eliminar flujo" data-del>×</button>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  tb.querySelectorAll("tr").forEach((tr) => {
+    const flujo = tr.getAttribute("data-flujo");
+    const inp = tr.querySelector("[data-req]");
+    // autosave on input (debounced) + blur (for mobile)
+    inp.addEventListener("input", () => {
+      const perfiles = Number(inp.value || 0) || 0;
+      saveFlujoDebounced(unescapeAttr(flujo), perfiles);
+    });
+    inp.addEventListener("blur", () => {
+      const perfiles = Number(inp.value || 0) || 0;
+      saveFlujoDebounced(unescapeAttr(flujo), perfiles);
+    });
+
+    tr.querySelector("[data-del]")?.addEventListener("click", async () => {
+      if (!confirm(`Eliminar flujo "${unescapeAttr(flujo)}"?`)) return;
+      await onFlujoDelete(unescapeAttr(flujo));
+    });
+  });
+}
+
+/* ========= Planificación: columnas + generar mensaje por flujo ========= */
+function renderPlan() {
+  const host = $("planGrid");
+  if (!host) return;
+
+  const plan = (S.plan || []).filter((r) => r?.flujo);
+  if (!plan.length) {
+    host.innerHTML = `<div class="muted">Sin planificación cargada.</div>`;
+    return;
+  }
+
+  const by = {};
+  for (const r of plan) {
+    const f = r.flujo;
+    by[f] = by[f] || [];
+    by[f].push(r);
+  }
+  const flujosOrden = Object.keys(by).sort((a, b) => a.localeCompare(b));
+
+  host.innerHTML = flujosOrden
+    .map((f) => {
+      const items = by[f] || [];
+      const lis = items
+        .map((x) => {
+          const fijo = x.es_fijo === "SI" ? " F" : "";
+          const name = x.nombre || x.id_meli || "";
+          return `<li>${escapeHtml(name)}${fijo}</li>`;
+        })
+        .join("");
+
+      return `
+        <div class="flow-col" data-flow="${escapeAttr(f)}">
+          <h3>
+            <span>${escapeHtml(f)}</span>
+            <button class="btn ghost" style="padding:8px 10px;border-radius:12px" data-genmsg>Generar mensaje</button>
+          </h3>
+          <ul>${lis || `<li class="muted">—</li>`}</ul>
+        </div>
+      `;
+    })
+    .join("");
+
+  host.querySelectorAll("[data-genmsg]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const flow = btn.closest("[data-flow]")?.getAttribute("data-flow");
+      if (!flow) return;
+      await generarMensajePorFlujo_(unescapeAttr(flow));
+    });
+  });
+}
+
+async function generarMensajePorFlujo_(flujo) {
+  setErr("");
+  try {
+    const items = (S.plan || []).filter((x) => x?.flujo === flujo && x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES");
+    if (!items.length) return toast("Mensaje", "No hay perfiles asignados");
+
+    // map slack ids
+    const map = new Map((S.colabs || []).map((c) => {
+      const v = colabRowView(c);
+      return [v.id, v.slackId];
+    }));
+
+    const mentions = items.map((x) => {
+      const slackId = map.get(x.id_meli);
+      return slackId ? `<@${slackId}>` : x.nombre || x.id_meli;
+    }).join(" - ");
+
+    const msg = `*${flujo}*\n${mentions}`;
+
+    const fechaISO = todayYMD();
+    await API.slackOutboxAppend(fechaISO, "POR_FLUJO", flujo, "", msg, "PENDIENTE - SIN CANAL");
+    S.outbox = await API.slackOutboxList();
+    renderOutbox();
+    toast("Outbox", `Mensaje generado: ${flujo}`);
+  } catch (e) {
+    setErr(`Mensaje por flujo: ${e.message || e}`);
+  }
+}
+
+/* ========= Slack Outbox: autosave ========= */
+function channelOptionsHtml(selectedId = "") {
+  const opts = [`<option value="">—</option>`].concat(
+    (S.canales || []).map((c) => {
+      const id = c.channel_id || "";
+      const name = c.canal || "";
+      const sel = id === selectedId ? "selected" : "";
+      return `<option value="${escapeAttr(id)}" ${sel}>${escapeHtml(name)} (${escapeHtml(id)})</option>`;
+    })
+  );
+  return opts.join("");
+}
+
+const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
+  setErr("");
+  try {
+    const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
+    await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
+    // no refresco todo para no “parpadear”; solo toast
+    toast("Outbox", "Guardado");
+  } catch (e) {
+    setErr(`Outbox: ${e.message || e}`);
+  }
+}, 500);
+
+function renderOutbox() {
+  const tb = $("tblOutbox")?.querySelector("tbody");
+  if (!tb) return;
+
+  const out = (S.outbox || []).slice().sort((a, b) => (b.row || 0) - (a.row || 0));
+  if (!out.length) {
+    tb.innerHTML = `<tr><td colspan="5" class="muted">Sin mensajes pendientes.</td></tr>`;
+    return;
+  }
+
+  // Convierte ISO Z a dd/mm/yyyy HH:mm (hora local del navegador)
+  const formatEstado = (estado) => {
+    const s = String(estado || "");
+    const m = s.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/);
+    if (!m) return s;
+
+    const d = new Date(m[1]);
+    if (isNaN(d.getTime())) return s;
+
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const HH = String(d.getHours()).padStart(2, "0");
+    const MM = String(d.getMinutes()).padStart(2, "0");
+
+    return s.replace(m[1], `${dd}/${mm}/${yyyy} ${HH}:${MM}`);
+  };
+
+  tb.innerHTML = out
+    .map((r) => {
+      const rawEstado = r.estado || "";
+      const estado = formatEstado(rawEstado);
+
+      const estUp = String(rawEstado || "").toUpperCase();
+      const isErr = estUp.includes("ERROR");
+      const isSent = estUp.includes("ENVIADO");
+      const isProg = estUp.includes("PROGRAMADO");
+
+      const badge = isErr ? "badge bad" : isSent ? "badge ok" : "badge";
+      const date = r.fecha || "";
+      const chId = r.channel_id || "";
+      const msg = r.mensaje || "";
+      const row = r.row;
+
+      // Acciones:
+      // - ENVIADO: no mostrar programar/enviar ni el datetime
+      // - PROGRAMADO: mostrar datetime solo lectura y sin botones
+      // - PENDIENTE/ERROR: mostrar todo
+      const accionesHtml = isSent
+        ? ""
+        : isProg
+          ? `
+            <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+              <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" disabled />
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button class="btn ghost" data-prog disabled title="Ya está programado">Programar</button>
+                <button class="btn primary" data-send disabled title="Ya está programado">Enviar</button>
+              </div>
+            </div>
+          `
+          : `
+            <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+              <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" />
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button class="btn ghost" data-prog>Programar</button>
+                <button class="btn primary" data-send>Enviar</button>
+              </div>
+            </div>
+          `;
+
+      return `
+        <tr data-row="${row}" data-sent="${isSent ? "1" : "0"}" data-prog="${isProg ? "1" : "0"}">
+          <td class="nowrap">${escapeHtml(date)}</td>
+          <td>
+            <select data-ch ${isSent ? "disabled" : ""}>${channelOptionsHtml(chId)}</select>
+          </td>
+          <td>
+            <textarea data-msg ${isSent ? "disabled" : ""}>${escapeHtml(msg)}</textarea>
+          </td>
+          <td class="nowrap"><span class="${badge}">${escapeHtml(estado)}</span></td>
+          <td class="right nowrap">${accionesHtml}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  tb.querySelectorAll("tr").forEach((tr) => {
+    const row = Number(tr.getAttribute("data-row"));
+    const isSent = tr.getAttribute("data-sent") === "1";
+    const isProg = tr.getAttribute("data-prog") === "1";
+
+    const sel = tr.querySelector("[data-ch]");
+    const txt = tr.querySelector("[data-msg]");
+    const when = tr.querySelector("[data-when]");
+
+    // Si ya fue enviado, no hay listeners (evita autosave y acciones)
+    if (isSent) return;
+
+    const triggerSave = () => outboxAutosave(row, sel.value, txt.value);
+
+    sel?.addEventListener("change", triggerSave);
+    txt?.addEventListener("input", triggerSave);
+    txt?.addEventListener("blur", triggerSave);
+
+    tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
+      setErr("");
+      try {
+        // Si ya está programado, no permitir reprogramar desde UI (evita duplicados)
+        if (isProg) return;
+
+        const v = (when?.value || "").trim();
+        if (!v) throw new Error("Elegí fecha y hora para programar.");
+
+        // guardo antes de programar
+        const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
+        await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
+
+        await API.slackOutboxProgramar(row, v);
+        S.outbox = await API.slackOutboxList();
+        renderOutbox();
+        toast("Outbox", "Programado");
+      } catch (e) {
+        setErr(`Programar: ${e.message || e}`);
+      }
+    });
+
+    tr.querySelector("[data-send]")?.addEventListener("click", async () => {
+      // Si ya está programado, no permitir enviar manual (evita duplicados)
+      if (isProg) return;
+
+      // guardo antes de enviar
+      const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
+      await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
+
+      await onOutboxSend(row);
+    });
+  });
+}
+
+async function onOutboxSend(row) {
+  setErr("");
+  try {
+    await API.slackSendRow(row);
+    S.outbox = await API.slackOutboxList();
+    renderOutbox();
+    toast("Slack", "Enviado");
+  } catch (e) {
+    setErr(`Slack: ${e.message || e}`);
+  }
+}
+
+/* ========= Colaboradores ========= */
+function renderColabs() {
+  const tb = $("tblColabs")?.querySelector("tbody");
+  if (!tb) return;
+
+  const filtered = applySectionFilter(S.colabs || [], S.fColabs).map(colabRowView);
+
+  // sort
+  const { key, dir } = S.sort.colabs || { key: "", dir: 1 };
+  const sorted = filtered.slice().sort((a, b) => {
+    const av = a?.[key] ?? "";
+    const bv = b?.[key] ?? "";
+    // ingreso as date-friendly
+    if (key === "ingreso") {
+      return dir * fmtDateAny(av).localeCompare(fmtDateAny(bv));
+    }
+    return dir * String(av).localeCompare(String(bv));
+  });
+
+  // selection pill
+  const pill = $("colabsSelPill");
+  if (pill) pill.innerHTML = `<b>Seleccionados</b> ${S.selColabs.size}`;
+
+  // select-all checkbox reflects filtered selection state
+  const selAll = $("colabsSelectAll");
+  if (selAll) {
+    const allIds = sorted.map((x) => x.id).filter(Boolean);
+    const allSelected = allIds.length > 0 && allIds.every((id) => S.selColabs.has(id));
+    selAll.checked = allSelected;
+    selAll.indeterminate = !allSelected && allIds.some((id) => S.selColabs.has(id));
+  }
+
+  if (!sorted.length) {
+    tb.innerHTML = `<tr><td colspan="9" class="muted">Sin resultados.</td></tr>`;
+    return;
+  }
+
+  tb.innerHTML = sorted
+    .map((v) => {
+      const checked = S.selColabs.has(v.id) ? "checked" : "";
+      return `
+        <tr data-id="${escapeAttr(v.id)}">
+          <td class="nowrap"><input type="checkbox" data-sel ${checked} /></td>
+          <td class="copyable" data-copy="${escapeAttr(v.id)}">${escapeHtml(v.id)}</td>
+          <td>${escapeHtml(v.nombre)}</td>
+          <td>${escapeHtml(roleBucket(v.rol))}</td>
+          <td>${escapeHtml(v.equipo)}</td>
+          <td>${escapeHtml(v.ubic)}</td>
+          <td class="copyable" data-copy="${escapeAttr(v.mailProd)}">${escapeHtml(v.mailProd)}</td>
+          <td class="copyable" data-copy="${escapeAttr(v.mailExt)}">${escapeHtml(v.mailExt)}</td>
+          <td class="nowrap">${escapeHtml(fmtDateAny(v.ingreso))}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  // single-cell copy
+  tb.querySelectorAll("[data-copy]").forEach((el) => {
+    el.addEventListener("click", () => copyToClipboard(el.getAttribute("data-copy")));
+  });
+
+  // row selection
+  tb.querySelectorAll("input[data-sel]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const id = cb.closest("tr")?.getAttribute("data-id");
+      if (!id) return;
+      if (cb.checked) S.selColabs.add(unescapeAttr(id));
+      else S.selColabs.delete(unescapeAttr(id));
+      renderColabs(); // refresh pill + indeterminate
+    });
+  });
+
+  // sortable headers + indicators
+  mountTableSort_("tblColabs", S.sort.colabs, (next) => {
+    S.sort.colabs = next;
+    renderColabs();
+  });
+}
+
+/* ========= Habilitaciones (igual) ========= */
+function renderHabil() {
+  const head = $("tblHabilHead");
+  const body = $("tblHabilBody");
+  if (!head || !body) return;
+
+  if (!S.habil || !S.habil.flujos || !S.habil.rows) {
+    head.innerHTML = `<tr><th>Estado</th></tr>`;
+    body.innerHTML = `<tr><td class="muted">No se pudo cargar habilitaciones.</td></tr>`;
+    return;
+  }
+
+  const flujos = (S.habil.flujos || []).slice().sort((a, b) => a.localeCompare(b));
+  head.innerHTML = `
+    <tr>
+      <th style="min-width:220px">Colaborador</th>
+      ${flujos.map((f) => `<th class="nowrap">${escapeHtml(f)}<div class="muted" style="font-size:11px;margin-top:2px">H / F</div></th>`).join("")}
+    </tr>
+  `;
+
+  const colabsById = new Map();
+  for (const c of S.colabs || []) {
+    const v = colabRowView(c);
+    if (v.id) colabsById.set(v.id, v);
+  }
+
+  const rows = (S.habil.rows || []).map((r) => {
+    const id = r.id_meli || r.ID_MELI || r.Id_Meli;
+    const meta = colabsById.get(id) || { id, nombre: id, rol: "", equipo: "" };
+    return { ...r, _meta: meta };
+  });
+
+  const filtered = rows.filter((r) => {
+    const rb = roleBucket(r._meta.rol);
+    if (S.fHabil.roles.size > 0 && !S.fHabil.roles.has(rb)) return false;
+    if (S.fHabil.equipos.size > 0 && !S.fHabil.equipos.has(r._meta.equipo)) return false;
+
+    const q = norm(S.fHabil.q);
+    if (q) {
+      const hay =
+        norm(r._meta.id).includes(q) ||
+        norm(r._meta.nombre).includes(q) ||
+        norm(r._meta.rol).includes(q) ||
+        norm(r._meta.equipo).includes(q);
+      if (!hay) return false;
+    }
+    return true;
+  });
+
+  if (!filtered.length) {
+    body.innerHTML = `<tr><td colspan="${1 + flujos.length}" class="muted">Sin resultados.</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = filtered
+    .map((r) => {
+      const id = r.id_meli;
+      const label = `${r._meta.nombre || id} (${id})`;
+      const cells = flujos
+        .map((f) => {
+          const keyH = `H_${f}`;
+          const keyF = `F_${f}`;
+          const hab = !!r[keyH];
+          const fijo = !!r[keyF];
+          return `
+            <td class="nowrap">
+              <label class="row" style="gap:10px;margin:0">
+                <input type="checkbox" data-h="1" data-id="${escapeAttr(id)}" data-flujo="${escapeAttr(f)}" ${hab ? "checked" : ""} />
+                <span class="muted">H</span>
+                <input type="checkbox" data-f="1" data-id="${escapeAttr(id)}" data-flujo="${escapeAttr(f)}" ${fijo ? "checked" : ""} />
+                <span class="muted">F</span>
+              </label>
+            </td>
+          `;
+        })
+        .join("");
+
+      return `<tr><td>${escapeHtml(label)}</td>${cells}</tr>`;
+    })
+    .join("");
+
+  body.querySelectorAll("input[data-h]").forEach((cb) => {
+    cb.addEventListener("change", async () => {
+      const idMeli = cb.getAttribute("data-id");
+      const flujo = cb.getAttribute("data-flujo");
+      const habilitado = cb.checked;
+      const fijoCb = body.querySelector(`input[data-f][data-id="${cssEsc(idMeli)}"][data-flujo="${cssEsc(flujo)}"]`);
+      const fijo = fijoCb ? fijoCb.checked : false;
+      if (!habilitado && fijoCb) fijoCb.checked = false;
+
+      await setHabilitacion(idMeli, flujo, habilitado, habilitado ? fijo : false);
+    });
+  });
+
+  body.querySelectorAll("input[data-f]").forEach((cb) => {
+    cb.addEventListener("change", async () => {
+      const idMeli = cb.getAttribute("data-id");
+      const flujo = cb.getAttribute("data-flujo");
+      const fijo = cb.checked;
+
+      const habCb = body.querySelector(`input[data-h][data-id="${cssEsc(idMeli)}"][data-flujo="${cssEsc(flujo)}"]`);
+      const habilitado = habCb ? habCb.checked : false;
+
+      if (fijo && habCb && !habilitado) habCb.checked = true;
+      await setHabilitacion(idMeli, flujo, fijo ? true : habilitado, fijo);
+    });
+  });
+}
+
+async function setHabilitacion(idMeli, flujo, habilitado, fijo) {
+  setErr("");
+  try {
+    await API.habilitacionesSet(idMeli, flujo, !!habilitado, !!fijo);
+    S.habil = await API.habilitacionesList();
+    renderHabil();
+    toast("Habilitaciones", "Actualizado");
+  } catch (e) {
+    setErr(`Habilitaciones: ${e.message || e}`);
+  }
+}
+
+/* ========= Presentismo ========= */
+function mountPresentismoSelect() {
+  const sel = $("presSelectColab");
+  if (!sel) return;
+
+  const rows = (S.colabs || [])
+    .map(colabRowView)
+    .filter((x) => x.id)
+    .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
+
+  sel.innerHTML = rows.map((x) => `<option value="${escapeAttr(x.id)}">${escapeHtml(x.nombre)} (${escapeHtml(x.id)})</option>`).join("");
+}
+
+function renderPresentismo() {
+  const tbl = $("tblPresWeek");
+  if (!tbl) return;
+
+  if (!S.presWeek || !S.presWeek.days || !S.presWeek.rows) {
+    tbl.querySelector("thead").innerHTML = `<tr><th>Estado</th></tr>`;
+    tbl.querySelector("tbody").innerHTML = `<tr><td class="muted">No se pudo cargar.</td></tr>`;
+    return;
+  }
+
+  const days = S.presWeek.days; // includes isFeriado
+  const rows = S.presWeek.rows;
+
+  const colabsById = new Map((S.colabs || []).map((c) => {
+    const v = colabRowView(c);
+    return [v.id, v];
+  }));
+
+  const filtered = rows.filter((r) => {
+    const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
+    const rb = roleBucket(meta.rol);
+
+    if (S.fPres.roles.size > 0 && !S.fPres.roles.has(rb)) return false;
+    if (S.fPres.equipos.size > 0 && !S.fPres.equipos.has(meta.equipo)) return false;
+
+    const q = norm(S.fPres.q);
+    if (q) {
+      const hay =
+        norm(meta.id).includes(q) ||
+        norm(meta.nombre).includes(q) ||
+        norm(meta.rol).includes(q) ||
+        norm(meta.equipo).includes(q);
+      if (!hay) return false;
+    }
+    return true;
+  });
+
+  // sort (solo por colaborador por ahora)
+  const sp = S.sort.pres || { key: "nombre", dir: 1 };
+  filtered.sort((a, b) => {
+    const am = colabsById.get(a.id_meli) || { nombre: a.nombre || a.id_meli };
+    const bm = colabsById.get(b.id_meli) || { nombre: b.nombre || b.id_meli };
+    return sp.dir * String(am.nombre || "").localeCompare(String(bm.nombre || ""));
+  });
+
+  const thead = tbl.querySelector("thead");
+  thead.innerHTML = `
+    <tr>
+      <th class="sortable" data-sort="nombre" style="min-width:240px">Colaborador<span class="srt" data-srt="nombre"></span></th>
+      ${days.map((d) => `<th class="nowrap ${d.isFeriado ? "feriado" : ""}">${fmtDateDMY(d.key)}</th>`).join("")}
+    </tr>
+  `;
+
+  mountTableSort_("tblPresWeek", S.sort.pres, (next) => { S.sort.pres = next; renderPresentismo(); });
+
+  const tbody = tbl.querySelector("tbody");
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="${1 + days.length}" class="muted">Sin resultados.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered
+    .map((r) => {
+      const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
+      const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
+      const tds = days
+        .map((d) => {
+          const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
+          const cls = d.isFeriado ? "feriado" : "";
+          const isLic = v && String(v).trim() !== "P";
+          const c2 = [cls, isLic ? "lic" : ""].filter(Boolean).join(" ");
+          return `<td class="${c2}">${escapeHtml(v)}</td>`;
+        })
+        .join("");
+      return `<tr><td>${escapeHtml(label)}</td>${tds}</tr>`;
+    })
+    .join("");
+}
+
+async function onSetLicencia() {
+  setErr("");
+  try {
+    const idMeli = $("presSelectColab").value;
+    const tipo = $("presTipo").value;
+    const desde = $("presDesde").value;
+    const hasta = $("presHasta").value || desde;
+
+    if (!idMeli) throw new Error("Seleccioná un colaborador.");
+    if (!desde) throw new Error("Seleccioná fecha Desde.");
+
+    await API.presentismoSetLicencia(idMeli, desde, hasta, tipo);
+    await refreshPresentismo();
+    renderPresentismo();
+    renderDashboard();
+    toast("Presentismo", "Licencia guardada");
+  } catch (e) {
+    setErr(`Presentismo: ${e.message || e}`);
+  }
+}
+
+/* ========= Dashboard ========= */
+function countAnalistasDisponiblesHoy_() {
+  // usa presWeek (hoy) para no inventar
+  if (!S.presWeek?.days?.length || !S.presWeek?.rows?.length) return 0;
+
+  const today = todayYMD();
+  const colabsById = new Map((S.colabs || []).map((c) => {
+    const v = colabRowView(c);
+    return [v.id, v];
+  }));
+
+  let n = 0;
+  for (const r of S.presWeek.rows) {
+    const v = r.vals?.[today];
+    if (String(v || "").trim() !== "P") continue;
+
+    const meta = colabsById.get(r.id_meli);
+    const bucket = roleBucket(meta?.rol || "");
+    if (bucket === "Líderes") continue;
+    n++;
+  }
+  return n;
+}
+
+function renderDashboard() {
+  const kpi = $("dashKpis");
+  const tb = $("tblDashRoles")?.querySelector("tbody");
+  if (!kpi || !tb) return;
+
+  const colabs = (S.colabs || []).map(colabRowView).filter((x) => x.id);
+  const total = colabs.length;
+
+  const counts = new Map();
+  for (const c of colabs) {
+    const b = roleBucket(c.rol);
+    counts.set(b, (counts.get(b) || 0) + 1);
+  }
+
+  // orden fijo para que no te “baile” la tabla
+  const ordered = ROLES_BUCKETS.map((k) => [k, counts.get(k) || 0]);
+
+  const pres = S.presStats?.presentes ?? 0;
+  const analistasHoy = countAnalistasDisponiblesHoy_();
+  const flujosActivos = (S.flujos || []).filter((f) => Number(f.perfiles_requeridos ?? f.cantidad ?? 0) >= 1).length;
+
+  kpi.innerHTML = `
+    <div class="kpi"><div class="v">${total}</div><div class="l">Colaboradores</div></div>
+    <div class="kpi"><div class="v">${pres}</div><div class="l">Presentes hoy</div></div>
+    <div class="kpi"><div class="v">${analistasHoy}</div><div class="l">Analistas disponibles hoy</div></div>
+    <div class="kpi"><div class="v">${flujosActivos}</div><div class="l">Flujos activos hoy</div></div>
+  `;
+
+  tb.innerHTML = ordered.map(([rol, n]) => `<tr><td>${escapeHtml(rol)}</td><td class="right">${n}</td></tr>`).join("");
+}
+
+/* ========= Generar planificación (también genera outbox) ========= */
+async function onGenerarPlanificacionYOutbox_() {
+  setErr("");
+  try {
+    $("dailyStatus").textContent = "Generando...";
+    await API.planificacionGenerar();
+    await API.slackOutboxGenerar();
+    await refreshPlanAndOutbox();
+    await refreshPresentismo();
+    renderPlan();
+    renderOutbox();
+    renderDashboard();
+    toast("OK", "Planificación + Outbox generados");
+  } catch (e) {
+    setErr(`Planificación/Outbox: ${e.message || e}`);
+  } finally {
+    $("dailyStatus").textContent = "Listo";
+  }
+}
+
+/* ========= Wire UI ========= */
+function escapeHtml(s) {
   return String(s ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -65,627 +1129,153 @@ function escapeHtml_(s) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
-
-function formatDateDMY_(ymd) {
-  if (!ymd) return "";
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(ymd)) return ymd;
-  const m = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
-  return String(ymd);
+function escapeAttr(s) {
+  return escapeHtml(s).replaceAll('"', "&quot;");
 }
-
-function toDatetimeLocal_(s) {
-  if (!s) return "";
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) return s;
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return "";
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const HH = String(d.getHours()).padStart(2, "0");
-  const MM = String(d.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}T${HH}:${MM}`;
+function unescapeAttr(s) {
+  return String(s ?? "").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
 }
+function cssEsc(s) { return String(s ?? "").replaceAll('"', '\\"'); }
 
-function toast_(msg, type = "info") {
-  const root = $("#toast");
-  if (!root) {
-    console.log(`[${type}]`, msg);
-    return;
-  }
-  root.textContent = msg;
-  root.dataset.type = type;
-  root.classList.add("show");
-  setTimeout(() => root.classList.remove("show"), 2500);
-}
-
-/**
- * ------------------------------------------------------------
- * Inicialización
- * ------------------------------------------------------------
- */
 async function main() {
-  console.log("[app.js] main() iniciando...");
-  bindEvents_();
-  hydrateTheme_();
-  setLoading(true);
-  try {
-    await preload_();
-    render_();
-    console.log("[app.js] main() completado OK");
-  } catch (e) {
-    console.error("[app.js] main() ERROR:", e);
-    setError(e?.message || String(e));
-  } finally {
-    setLoading(false);
-  }
-}
+  applyTheme();
+  mountTabs();
 
-document.addEventListener("DOMContentLoaded", main);
-
-/**
- * ------------------------------------------------------------
- * Preload
- * ------------------------------------------------------------
- */
-async function preload_() {
-  console.log("[app.js] preload_() iniciando...");
-  
-  // Health (opcional; si falla no rompemos)
-  try {
-    await API.health();
-    console.log("[app.js] health OK");
-  } catch (e) {
-    console.warn("[app.js] health falló:", e);
-  }
-
-  // Datos base
-  const [colabs, canales, flujos, hab] = await Promise.all([
-    API.colaboradoresList(),
-    API.canalesList(),
-    API.flujosList(),
-    API.habilitacionesList(),
-  ]);
-
-  state.data.colaboradores = colabs || [];
-  state.data.canales = canales || [];
-  state.data.flujos = flujos || [];
-  state.data.habilitaciones = hab || null;
-
-  console.log("[app.js] datos base cargados:", {
-    colaboradores: state.data.colaboradores.length,
-    canales: state.data.canales.length,
-    flujos: state.data.flujos.length,
+  $("btnTheme")?.addEventListener("click", () => {
+    S.theme = S.theme === "dark" ? "light" : "dark";
+    applyTheme();
   });
 
-  // Datos dinámicos iniciales
-  await refreshAll_();
-}
+  // Operativa
+  $("btnGenerarPlan")?.addEventListener("click", onGenerarPlanificacionYOutbox_);
 
-/**
- * ------------------------------------------------------------
- * Refresh por pestaña
- * ------------------------------------------------------------
- */
-async function refreshAll_() {
-  console.log("[app.js] refreshAll_() iniciando...");
-  const tasks = [];
+  $("btnAddFlujo")?.addEventListener("click", async () => {
+    const name = $("newFlujoName")?.value?.trim() || "";
+    const req = Number($("newFlujoReq")?.value || 0) || 0;
+    if (!name) return setErr("Flujos: escribí el nombre del flujo.");
 
-  tasks.push(API.planificacionList().then((x) => (state.data.planificacion = x || [])));
-  tasks.push(API.slackOutboxList().then((x) => (state.data.slackOutbox = x || [])));
-
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, "0");
-  const dd = String(today.getDate()).padStart(2, "0");
-  const ymd = `${yyyy}-${mm}-${dd}`;
-
-  tasks.push(
-    API.presentismoStats(ymd).then((x) => {
-      state.data.presentismoStats = x || null;
-    })
-  );
-
-  await Promise.all(tasks);
-  console.log("[app.js] refreshAll_() completado");
-}
-
-/**
- * ------------------------------------------------------------
- * Eventos UI
- * ------------------------------------------------------------
- */
-function bindEvents_() {
-  // Tabs
-  $$(".tab").forEach((b) => {
-    b.addEventListener("click", () => {
-      const tab = b.dataset.tab;
-      if (!tab) return;
-      state.tab = tab;
-      render_();
-    });
-  });
-
-  // Botón actualizar global
-  const btnRefresh = $("#btnRefresh");
-  if (btnRefresh) {
-    btnRefresh.addEventListener("click", async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        await refreshAll_();
-        render_();
-        toast_("Actualizado", "ok");
-      } catch (e) {
-        console.error(e);
-        setError(e?.message || String(e));
-      } finally {
-        setLoading(false);
-      }
-    });
-  }
-
-  // Theme toggle
-  const btnTheme = $("#btnTheme");
-  if (btnTheme) {
-    btnTheme.addEventListener("click", () => {
-      state.ui.theme = state.ui.theme === "dark" ? "light" : "dark";
-      persistTheme_();
-      applyTheme_();
-    });
-  }
-
-  // Delegación para botones dentro de tablas
-  document.addEventListener("click", async (ev) => {
-    const t = ev.target;
-
-    const btnProg = t.closest?.("[data-action='outbox-programar']");
-    if (btnProg) {
-      ev.preventDefault();
-      await onOutboxProgramar_(btnProg);
-      return;
-    }
-
-    const btnDes = t.closest?.("[data-action='outbox-desprogramar']");
-    if (btnDes) {
-      ev.preventDefault();
-      await onOutboxDesprogramar_(btnDes);
-      return;
-    }
-
-    const btnSend = t.closest?.("[data-action='outbox-enviar']");
-    if (btnSend) {
-      ev.preventDefault();
-      await onOutboxEnviar_(btnSend);
-      return;
-    }
-
-    const btnHab = t.closest?.("[data-action='hab-toggle']");
-    if (btnHab) {
-      ev.preventDefault();
-      await onHabToggle_(btnHab);
-      return;
+    try {
+      $("dailyStatus").textContent = "Guardando...";
+      await API.flujosUpsert(name, req, "");
+      S.flujos = await API.flujosList();
+      renderFlujos();
+      toast("Flujo agregado", name);
+      $("newFlujoName").value = "";
+      $("newFlujoReq").value = "";
+    } catch (e) {
+      setErr(`Flujos: ${e.message || e}`);
+    } finally {
+      $("dailyStatus").textContent = "Listo";
     }
   });
-}
 
-/**
- * ------------------------------------------------------------
- * Theme
- * ------------------------------------------------------------
- */
-function hydrateTheme_() {
-  const saved = localStorage.getItem("hub_theme");
-  if (saved === "light" || saved === "dark") state.ui.theme = saved;
-  applyTheme_();
-}
-function persistTheme_() {
-  localStorage.setItem("hub_theme", state.ui.theme);
-}
-function applyTheme_() {
-  document.documentElement.dataset.theme = state.ui.theme;
-  const btnTheme = $("#btnTheme");
-  if (btnTheme) btnTheme.title = state.ui.theme === "dark" ? "Modo claro" : "Modo oscuro";
-}
+  // Reload buttons
+  $("btnReloadDash")?.addEventListener("click", async () => {
+    await refreshPlanAndOutbox();
+    await refreshPresentismo();
+    renderDashboard();
+    toast("Dashboard", "Actualizado");
+  });
+  $("btnReloadColabs")?.addEventListener("click", async () => {
+    S.colabs = await API.colaboradoresList();
+    renderColabs();
+    renderDashboard();
+    toast("Colaboradores", "Actualizado");
+  });
+  $("btnReloadHabil")?.addEventListener("click", async () => {
+    await refreshHabil();
+    renderHabil();
+    toast("Habilitaciones", "Actualizado");
+  });
+  $("btnReloadPres")?.addEventListener("click", async () => {
+    await refreshPresentismo();
+    mountPresentismoSelect();
+    renderPresentismo();
+    renderDashboard();
+    toast("Presentismo", "Actualizado");
+  });
 
-/**
- * ------------------------------------------------------------
- * Render base
- * ------------------------------------------------------------
- */
-function render_() {
-  renderTabs_();
-  renderError_();
-  renderLoading_();
+  $("btnSetLicencia")?.addEventListener("click", onSetLicencia);
 
-  if (state.tab === "dashboard") renderDashboard_();
-  else if (state.tab === "operativa") renderOperativa_();
-  else if (state.tab === "colaboradores") renderColaboradores_();
-  else if (state.tab === "habilitaciones") renderHabilitaciones_();
-  else if (state.tab === "presentismo") renderPresentismo_();
-  else renderDashboard_();
-}
+  // Filters
+  const rolesList = ["Analista KV", "Analista PM", "Analista QA", "Líderes"];
+  const rolesListHab = ["Analista KV", "Analista PM", "Analista QA"];
 
-function renderTabs_() {
-  $$(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
-  $$(".view").forEach((v) => v.classList.toggle("hidden", v.dataset.view !== state.tab));
-}
+  const msRolesCol = mountMultiSelect("msRolesColabs", { title: "Roles", items: rolesList, onChange: (set) => { S.fColabs.roles = set; renderColabs(); }});
+  const msEquipCol = mountMultiSelect("msEquiposColabs", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fColabs.equipos = set; renderColabs(); }});
 
-function renderError_() {
-  const el = $("#errorBox");
-  if (!el) return;
-  if (!state.ui.error) {
-    el.classList.add("hidden");
-    el.textContent = "";
-    return;
-  }
-  el.classList.remove("hidden");
-  el.textContent = state.ui.error;
-}
+  const msRolesHab = mountMultiSelect("msRolesHabil", { title: "Roles", items: rolesListHab, onChange: (set) => { S.fHabil.roles = set; renderHabil(); }});
+  const msEquipHab = mountMultiSelect("msEquiposHabil", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fHabil.equipos = set; renderHabil(); }});
 
-function renderLoading_() {
-  const el = $("#loading");
-  if (!el) return;
-  el.classList.toggle("hidden", !state.ui.loading);
-}
+  const msRolesPres = mountMultiSelect("msRolesPres", { title: "Roles", items: rolesList, onChange: (set) => { S.fPres.roles = set; renderPresentismo(); }});
+  const msEquipPres = mountMultiSelect("msEquiposPres", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fPres.equipos = set; renderPresentismo(); }});
 
-/**
- * ------------------------------------------------------------
- * DASHBOARD
- * ------------------------------------------------------------
- */
-function renderDashboard_() {
-  const colabs = state.data.colaboradores || [];
-  const plan = state.data.planificacion || [];
-  const outbox = state.data.slackOutbox || [];
-  const stats = state.data.presentismoStats || { presentes: 0, ausentes: 0, total: 0 };
+  mountSearch("searchColabs", "searchColabsWrap", "clearSearchColabs", (q) => { S.fColabs.q = q; renderColabs(); });
+  mountSearch("searchHabil", "searchHabilWrap", "clearSearchHabil", (q) => { S.fHabil.q = q; renderHabil(); });
+  mountSearch("searchPres", "searchPresWrap", "clearSearchPres", (q) => { S.fPres.q = q; renderPresentismo(); });
 
-  const byRol = {};
-  for (const c of colabs) {
-    const rol = safeText_(c?.Rol || c?.rol || "Sin rol").trim() || "Sin rol";
-    byRol[rol] = (byRol[rol] || 0) + 1;
+  $("btnClearColabs")?.addEventListener("click", () => {
+    S.fColabs = { roles: new Set(), equipos: new Set(), q: "" };
+    msRolesCol?.clear(); msEquipCol?.clear();
+    $("searchColabs").value = ""; $("searchColabsWrap").classList.remove("has");
+    renderColabs();
+  });
+
+  // Selección masiva (Colaboradores)
+  const syncSelPill = () => { const pill = $("colabsSelPill"); if (pill) pill.innerHTML = `<b>Seleccionados</b> ${S.selColabs.size}`; };
+
+  $("colabsSelectAll")?.addEventListener("change", (e) => {
+    const checked = e.target.checked;
+    const ids = applySectionFilter(S.colabs || [], S.fColabs).map(colabRowView).map((x) => x.id).filter(Boolean);
+    if (checked) ids.forEach((id) => S.selColabs.add(id));
+    else ids.forEach((id) => S.selColabs.delete(id));
+    syncSelPill();
+    renderColabs();
+  });
+
+  $("btnClearSelColabs")?.addEventListener("click", () => {
+    S.selColabs.clear();
+    syncSelPill();
+    renderColabs();
+  });
+
+  function getSelectedColabs_() {
+    const all = (S.colabs || []).map(colabRowView);
+    return all.filter((x) => x.id && S.selColabs.has(x.id));
   }
 
-  const tbl = $("#dashRolTableBody");
-  if (tbl) {
-    const rows = Object.entries(byRol)
-      .sort((a, b) => b[1] - a[1])
-      .map(([rol, cnt]) => {
-        return `<tr>
-          <td>${escapeHtml_(rol)}</td>
-          <td class="num">${cnt}</td>
-        </tr>`;
-      })
-      .join("");
-    tbl.innerHTML = rows || `<tr><td colspan="2" class="muted">Sin datos</td></tr>`;
-  }
+  $("btnCopySelIds")?.addEventListener("click", () => {
+    const rows = getSelectedColabs_();
+    if (!rows.length) return toast("Copiar", "No hay seleccionados");
+    copyToClipboard(rows.map((r) => r.id).join("\n"));
+  });
+  $("btnCopySelMailProd")?.addEventListener("click", () => {
+    const rows = getSelectedColabs_().map((r) => r.mailProd).filter(Boolean);
+    if (!rows.length) return toast("Copiar", "No hay mails seleccionados");
+    copyToClipboard(rows.join("\n"));
+  });
+  $("btnCopySelMailExt")?.addEventListener("click", () => {
+    const rows = getSelectedColabs_().map((r) => r.mailExt).filter(Boolean);
+    if (!rows.length) return toast("Copiar", "No hay mails seleccionados");
+    copyToClipboard(rows.join("\n"));
+  });
 
-  const kpiPresentes = $("#kpiPresentes");
-  const kpiAusentes = $("#kpiAusentes");
-  const kpiTotal = $("#kpiTotal");
-  if (kpiPresentes) kpiPresentes.textContent = String(stats.presentes ?? 0);
-  if (kpiAusentes) kpiAusentes.textContent = String(stats.ausentes ?? 0);
-  if (kpiTotal) kpiTotal.textContent = String(stats.total ?? 0);
+  $("btnClearHabil")?.addEventListener("click", () => {
+    S.fHabil = { roles: new Set(), equipos: new Set(), q: "" };
+    msRolesHab?.clear(); msEquipHab?.clear();
+    $("searchHabil").value = ""; $("searchHabilWrap").classList.remove("has");
+    renderHabil();
+  });
+  $("btnClearPres")?.addEventListener("click", () => {
+    S.fPres = { roles: new Set(), equipos: new Set(), q: "" };
+    msRolesPres?.clear(); msEquipPres?.clear();
+    $("searchPres").value = ""; $("searchPresWrap").classList.remove("has");
+    renderPresentismo();
+  });
 
-  const kpiPlan = $("#kpiPlan");
-  if (kpiPlan) kpiPlan.textContent = String(plan.length || 0);
-
-  const kpiOutboxPend = $("#kpiOutboxPend");
-  if (kpiOutboxPend) {
-    const pend = outbox.filter((x) => String(x.estado || "").toUpperCase().startsWith("PENDIENTE")).length;
-    kpiOutboxPend.textContent = String(pend);
-  }
+  await loadCore();
 }
 
-/**
- * ------------------------------------------------------------
- * OPERATIVA DIARIA
- * ------------------------------------------------------------
- */
-function renderOperativa_() {
-  renderPlanificacionTable_();
-  renderOutboxTable_();
-}
-
-function renderPlanificacionTable_() {
-  const data = state.data.planificacion || [];
-  const body = $("#planTableBody");
-  if (!body) return;
-
-  const rows = data
-    .map((r) => {
-      return `<tr>
-        <td>${escapeHtml_(formatDateDMY_(r.fecha))}</td>
-        <td>${escapeHtml_(r.flujo)}</td>
-        <td>${escapeHtml_(r.id_meli)}</td>
-        <td>${escapeHtml_(r.nombre || "")}</td>
-        <td>${escapeHtml_(r.rol || "")}</td>
-        <td>${escapeHtml_(r.es_fijo || "")}</td>
-      </tr>`;
-    })
-    .join("");
-
-  body.innerHTML = rows || `<tr><td colspan="6" class="muted">Sin planificación</td></tr>`;
-}
-
-function renderOutboxTable_() {
-  const data = state.data.slackOutbox || [];
-  const body = $("#outboxTableBody");
-  if (!body) return;
-
-  const rows = data
-    .map((r) => {
-      const prog = toDatetimeLocal_(r.programado_para || "");
-      return `<tr>
-        <td class="num">${r.row}</td>
-        <td>${escapeHtml_(formatDateDMY_(r.fecha))}</td>
-        <td>${escapeHtml_(r.canal || "")}</td>
-        <td class="mono">${escapeHtml_(r.channel_id || "")}</td>
-        <td class="msg">${escapeHtml_(r.mensaje || "")}</td>
-        <td>${escapeHtml_(r.estado || "")}</td>
-        <td>
-          <input type="datetime-local" data-field="programado_para" data-row="${r.row}" value="${escapeHtml_(prog)}">
-        </td>
-        <td class="actions">
-          <button class="btn small" data-action="outbox-programar" data-row="${r.row}">Programar</button>
-          <button class="btn small ghost" data-action="outbox-desprogramar" data-row="${r.row}">Desprogramar</button>
-        </td>
-      </tr>`;
-    })
-    .join("");
-
-  body.innerHTML = rows || `<tr><td colspan="8" class="muted">Sin mensajes</td></tr>`;
-}
-
-/**
- * ------------------------------------------------------------
- * COLABORADORES
- * ------------------------------------------------------------
- */
-function renderColaboradores_() {
-  const data = state.data.colaboradores || [];
-  const body = $("#colabsTableBody");
-  if (!body) return;
-
-  const rows = data
-    .map((c) => {
-      const id = c?.ID_MELI ?? c?.id_meli ?? "";
-      const nombre = c?.Nombre ?? c?.nombre ?? "";
-      const rol = c?.Rol ?? c?.rol ?? "";
-      const slack = c?.Slack_ID ?? c?.slack_id ?? "";
-      return `<tr>
-        <td class="mono">${escapeHtml_(id)}</td>
-        <td>${escapeHtml_(nombre)}</td>
-        <td>${escapeHtml_(rol)}</td>
-        <td class="mono">${escapeHtml_(slack)}</td>
-      </tr>`;
-    })
-    .join("");
-
-  body.innerHTML = rows || `<tr><td colspan="4" class="muted">Sin colaboradores</td></tr>`;
-}
-
-/**
- * ------------------------------------------------------------
- * HABILITACIONES
- * ------------------------------------------------------------
- */
-function renderHabilitaciones_() {
-  const hab = state.data.habilitaciones;
-  const flujos = hab?.flujos || [];
-  const rows = hab?.rows || [];
-
-  const head = $("#habTableHead");
-  const body = $("#habTableBody");
-  if (!head || !body) return;
-
-  const h = [
-    `<th>ID_MELI</th>`,
-    ...flujos.map((f) => `<th>${escapeHtml_(f)}</th><th>Fijo</th>`),
-  ].join("");
-  head.innerHTML = `<tr>${h}</tr>`;
-
-  const out = rows
-    .map((r) => {
-      const id = r.id_meli;
-      const tds = [`<td class="mono">${escapeHtml_(id)}</td>`];
-      flujos.forEach((f) => {
-        const hVal = !!r[`H_${f}`];
-        const fVal = !!r[`F_${f}`];
-        tds.push(
-          `<td>
-            <button class="pill ${hVal ? "on" : "off"}" data-action="hab-toggle" data-id="${escapeHtml_(
-              id
-            )}" data-flujo="${escapeHtml_(f)}" data-field="habilitado">${hVal ? "SI" : "NO"}</button>
-          </td>`
-        );
-        tds.push(
-          `<td>
-            <button class="pill ${fVal ? "on" : "off"} ${hVal ? "" : "disabled"}" data-action="hab-toggle" data-id="${escapeHtml_(
-              id
-            )}" data-flujo="${escapeHtml_(f)}" data-field="fijo">${fVal ? "SI" : "NO"}</button>
-          </td>`
-        );
-      });
-      return `<tr>${tds.join("")}</tr>`;
-    })
-    .join("");
-
-  body.innerHTML = out || `<tr><td colspan="${1 + flujos.length * 2}" class="muted">Sin datos</td></tr>`;
-}
-
-/**
- * ------------------------------------------------------------
- * PRESENTISMO
- * ------------------------------------------------------------
- */
-function renderPresentismo_() {
-  renderPresentismoWeek_();
-}
-
-async function renderPresentismoWeek_() {
-  const wrap = $("#presTableWrap");
-  if (!wrap) return;
-
-  const dateInput = $("#presDate");
-  const ymd = dateInput?.value || "";
-  setLoading(true);
-  setError(null);
-
-  try {
-    const data = await API.presentismoWeek(ymd);
-    state.data.presentismoWeek = data;
-
-    const days = data?.days || [];
-    const rows = data?.rows || [];
-
-    const ths = [
-      `<th>ID_MELI</th>`,
-      `<th>Nombre</th>`,
-      ...days.map((d) => `<th>${escapeHtml_(d.label || d.key)}</th>`),
-    ].join("");
-
-    const bodyRows = rows
-      .map((r) => {
-        const tds = [
-          `<td class="mono">${escapeHtml_(r.id_meli)}</td>`,
-          `<td>${escapeHtml_(r.nombre || "")}</td>`,
-        ];
-        days.forEach((d) => {
-          const v = r.vals?.[d.key] ?? "";
-          const cls = v === "P" ? "pres-p" : v ? "pres-a" : "";
-          const badge = v ? escapeHtml_(v) : "";
-          tds.push(`<td class="${cls}">${badge}</td>`);
-        });
-        return `<tr>${tds.join("")}</tr>`;
-      })
-      .join("");
-
-    wrap.innerHTML = `
-      <table class="table">
-        <thead><tr>${ths}</tr></thead>
-        <tbody>${bodyRows || `<tr><td colspan="${2 + days.length}" class="muted">Sin datos</td></tr>`}</tbody>
-      </table>
-    `;
-  } catch (e) {
-    console.error(e);
-    setError(e?.message || String(e));
-  } finally {
-    setLoading(false);
-  }
-}
-
-/**
- * ------------------------------------------------------------
- * Actions
- * ------------------------------------------------------------
- */
-
-async function onOutboxProgramar_(btn) {
-  const row = Number(btn.dataset.row);
-  if (!row) return;
-
-  const input = $(`input[data-field='programado_para'][data-row='${row}']`);
-  const v = input?.value || "";
-
-  if (!v) {
-    toast_("Seleccioná fecha y hora", "warn");
-    return;
-  }
-
-  setLoading(true);
-  setError(null);
-  try {
-    await API.slackOutboxProgramar(row, v);
-    await API.slackOutboxList().then((x) => (state.data.slackOutbox = x || []));
-    renderOutboxTable_();
-    toast_("Programado", "ok");
-  } catch (e) {
-    console.error(e);
-    setError(e?.message || String(e));
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function onOutboxDesprogramar_(btn) {
-  const row = Number(btn.dataset.row);
-  if (!row) return;
-
-  setLoading(true);
-  setError(null);
-  try {
-    await API.slackOutboxDesprogramar(row);
-    await API.slackOutboxList().then((x) => (state.data.slackOutbox = x || []));
-    renderOutboxTable_();
-    toast_("Desprogramado", "ok");
-  } catch (e) {
-    console.error(e);
-    setError(e?.message || String(e));
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function onOutboxEnviar_(btn) {
-  const row = Number(btn.dataset.row);
-  if (!row) return;
-
-  setLoading(true);
-  setError(null);
-  try {
-    if (typeof API.slackOutboxEnviar !== "function") {
-      toast_("Enviar no está habilitado en este front", "warn");
-      return;
-    }
-    await API.slackOutboxEnviar(row);
-    await API.slackOutboxList().then((x) => (state.data.slackOutbox = x || []));
-    renderOutboxTable_();
-    toast_("Enviado", "ok");
-  } catch (e) {
-    console.error(e);
-    setError(e?.message || String(e));
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function onHabToggle_(btn) {
-  const id = btn.dataset.id;
-  const flujo = btn.dataset.flujo;
-  const field = btn.dataset.field;
-  if (!id || !flujo || !field) return;
-
-  const hab = state.data.habilitaciones;
-  const row = hab?.rows?.find((r) => r.id_meli === id);
-  if (!row) return;
-
-  const curH = !!row[`H_${flujo}`];
-  const curF = !!row[`F_${flujo}`];
-
-  let nextH = curH;
-  let nextF = curF;
-
-  if (field === "habilitado") {
-    nextH = !curH;
-    if (!nextH) nextF = false;
-  } else if (field === "fijo") {
-    if (!curH) return;
-    nextF = !curF;
-  }
-
-  setLoading(true);
-  setError(null);
-
-  try {
-    await API.habilitacionesSet(id, flujo, nextH, nextF);
-    state.data.habilitaciones = await API.habilitacionesList();
-    renderHabilitaciones_();
-    toast_("Guardado", "ok");
-  } catch (e) {
-    console.error(e);
-    setError(e?.message || String(e));
-  } finally {
-    setLoading(false);
-  }
-}
+document.addEventListener("DOMContentLoaded", () => {
+  main().catch((e) => setErr(`Error: ${e.message || e}`));
+});
