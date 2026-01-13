@@ -66,6 +66,8 @@ export const API = {
   planificacionList: () => get("planificacion.list"),
 
   slackOutboxGenerar: () => post("slack.outbox.generar", {}),
+  // Solo GENERAL (sin POR_FLUJO)
+  slackOutboxGenerarGeneral: () => post("slack.outbox.generarGeneral", {}),
   slackOutboxList: () => get("slack.outbox.list"),
   slackOutboxUpdate: (row, canal, channel_id, mensaje) =>
     post("slack.outbox.update", { row: assertRow_(row), canal, channel_id, mensaje }),
@@ -89,8 +91,11 @@ export const API = {
   slackSendRow: (row) => post("slack.sendRow", { row: assertRow_(row) }),
   slackSendDue: () => post("slack.sendDue", {}),
 
+  presentismoSemanas: () => get("presentismo.semanas"),
   presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
   presentismoStats: (dateYMD) => get("presentismo.stats", { date: dateYMD }),
+  presentismoWeekBySemana: (semana) => get("presentismo.weekBySemana", { semana }),
+  presentismoStatsBySemana: (semana) => get("presentismo.statsBySemana", { semana }),
   presentismoSetLicencia: (idMeli, desdeYMD, hastaYMD, tipo) =>
     post("presentismo.licencias.set", { idMeli, desde: desdeYMD, hasta: hastaYMD, tipo }),
 };
