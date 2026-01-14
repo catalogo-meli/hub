@@ -538,18 +538,21 @@ function renderFlujos() {
     const requeridos = rows.reduce((acc, f) => acc + (Number(f.perfiles_requeridos ?? f.cantidad ?? 0) || 0), 0);
     const diff = disponibles - requeridos;
 
-    let cls = "";
-    let msg = "";
-    if (diff > 0) {
+let cls = "";
+let msg = "";
+
+if (diff > 0) {
   cls = "warn";
   msg = `Hay ${diff} perfil${diff > 1 ? "es" : ""} sin asignar · ${disponibles} presentes / ${requeridos} asignados`;
 } else if (diff < 0) {
+  const faltan = Math.abs(diff);
   cls = "bad";
-  msg = `Falta${diff > 1 ? "n" : ""} ${Math.abs(diff)} perfil${Math.abs(diff) > 1 ? "es" : ""} · ${disponibles} presentes / ${requeridos} asignados`;
+  msg = `${faltan > 1 ? "Faltan" : "Falta"} ${faltan} perfil${faltan > 1 ? "es" : ""} · ${disponibles} presentes / ${requeridos} asignados`;
 } else {
   cls = "ok";
   msg = `Equipo completo · ${disponibles} presentes / ${requeridos} asignados`;
 }
+    
     alertEl.className = `pill ${cls}`;
     alertEl.innerHTML = escapeHtml(msg);
   }
