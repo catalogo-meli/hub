@@ -551,7 +551,7 @@ function renderFlujos() {
   msg = `Equipo completo · ${disponibles} personas asignadas`;
 }
     alertEl.className = `pill ${cls}`;
-    alertEl.innerHTML = `<b>Equipo</b> ${escapeHtml(msg)}`;
+    alertEl.innerHTML = escapeHtml(msg);
   }
 
 }/* ========= Planificación: columnas + generar mensaje por flujo ========= */
