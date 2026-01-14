@@ -541,14 +541,14 @@ function renderFlujos() {
     let cls = "";
     let msg = "";
     if (diff > 0) {
-    cls = "warn";
-  msg = `Hay ${diff} perfil${diff > 1 ? "es" : ""} sin asignar · ${requeridos} asignados` / ${disponibles} presentes`;
+  cls = "warn";
+  msg = `Hay ${diff} perfil${diff > 1 ? "es" : ""} sin asignar · ${disponibles} presentes / ${requeridos} asignados`;
 } else if (diff < 0) {
   cls = "bad";
-  msg = `Falta${Math.abs(diff) > 1 ? "n" : ""} ${Math.abs(diff)} perfil${Math.abs(diff) > 1 ? "es" : ""} · ${requeridos} asignados` / ${disponibles} presentes`;
+  msg = `Faltan ${Math.abs(diff)} perfil${Math.abs(diff) > 1 ? "es" : ""} para cubrir · ${disponibles} presentes / ${requeridos} asignados`;
 } else {
   cls = "ok";
-  msg = `Equipo completo · ${disponibles} perfiles asignados`;
+  msg = `Equipo completo · ${disponibles} presentes / ${requeridos} asignados`;
 }
     alertEl.className = `pill ${cls}`;
     alertEl.innerHTML = escapeHtml(msg);
