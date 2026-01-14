@@ -449,7 +449,7 @@ function syncPresSemanaSelect_() {
   // Mantengo selección si existe; si no, vacío => "hoy"
   const current = S.presSemanaSel;
 
-  sel.innerHTML = [`<option value="">Hoy</option>`]
+  sel.innerHTML = [`<option value="">Actual</option>`]
     .concat(opts.map((w) => `<option value="${escapeAttr(w)}">${escapeHtml(w)}</option>`))
     .join("");
 
