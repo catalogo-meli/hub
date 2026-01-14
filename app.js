@@ -545,7 +545,7 @@ function renderFlujos() {
   msg = `Hay ${diff} perfil${diff > 1 ? "es" : ""} sin asignar · ${disponibles} presentes / ${requeridos} asignados`;
 } else if (diff < 0) {
   cls = "bad";
-  msg = `Faltan ${Math.abs(diff)} perfil${Math.abs(diff) > 1 ? "es" : ""} para cubrir · ${disponibles} presentes / ${requeridos} asignados`;
+  msg = `Faltan ${Math.abs(diff)} perfil${Math.abs(diff) > 1 ? "es" : ""} · ${disponibles} presentes / ${requeridos} asignados`;
 } else {
   cls = "ok";
   msg = `Equipo completo · ${disponibles} presentes / ${requeridos} asignados`;
