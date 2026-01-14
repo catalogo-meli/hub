@@ -542,13 +542,13 @@ function renderFlujos() {
     let msg = "";
     if (diff > 0) {
   cls = "warn";
-  msg = `Hay ${diff} persona${diff > 1 ? "s" : ""} sin asignar · ${disponibles} presentes / ${requeridos} necesarias`;
+  msg = `Hay ${diff} perfiles{diff > 1 ? "s" : ""} sin asignar · ${disponibles} presentes / ${requeridos} asignados`;
 } else if (diff < 0) {
   cls = "bad";
-  msg = `Falta${Math.abs(diff) > 1 ? "n" : ""} ${Math.abs(diff)} persona${Math.abs(diff) > 1 ? "s" : ""} para cubrir · ${disponibles} de ${requeridos} asignadas`;
+  msg = `Falta${Math.abs(diff) > 1 ? "n" : ""} ${Math.abs(diff)} perfil{Math.abs(diff) > 1 ? "s" : ""} para cubrir · ${disponibles} de ${requeridos} asignados`;
 } else {
   cls = "ok";
-  msg = `Equipo completo · ${disponibles} personas asignadas`;
+  msg = `Equipo completo · ${disponibles} perfiles asignados`;
 }
     alertEl.className = `pill ${cls}`;
     alertEl.innerHTML = escapeHtml(msg);
