@@ -541,15 +541,15 @@ function renderFlujos() {
     let cls = "";
     let msg = "";
     if (diff > 0) {
-      cls = "warn";
-      msg = `Faltan asignar: ${diff} (presentes hoy: ${disponibles} / requeridos: ${requeridos})`;
-    } else if (diff < 0) {
-      cls = "bad";
-      msg = `Faltan cubrir: ${Math.abs(diff)} (presentes hoy: ${disponibles} / requeridos: ${requeridos})`;
-    } else {
-      cls = "ok";
-      msg = `Asignación al día (presentes hoy: ${disponibles} / requeridos: ${requeridos})`;
-    }
+  cls = "warn";
+  msg = `Hay ${diff} persona${diff > 1 ? "s" : ""} sin asignar · ${disponibles} presentes / ${requeridos} necesarias`;
+} else if (diff < 0) {
+  cls = "bad";
+  msg = `Falta${Math.abs(diff) > 1 ? "n" : ""} ${Math.abs(diff)} persona${Math.abs(diff) > 1 ? "s" : ""} para cubrir · ${disponibles} de ${requeridos} asignadas`;
+} else {
+  cls = "ok";
+  msg = `Equipo completo · ${disponibles} personas asignadas`;
+}
     alertEl.className = `pill ${cls}`;
     alertEl.innerHTML = `<b>Equipo</b> ${escapeHtml(msg)}`;
   }
