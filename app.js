@@ -498,9 +498,13 @@ function renderFlujos() {
     .map((f) => {
       const name = f.flujo ?? "";
       const req = Number(f.perfiles_requeridos ?? f.cantidad ?? 0) || 0;
+      const incluir = !(f.incluir_en_mensaje === false || ["FALSE","NO","0"].includes(String(f.incluir_en_mensaje ?? "").toUpperCase()));
       return `
         <tr data-flujo="${escapeAttr(name)}">
           <td><b>${escapeHtml(name)}</b></td>
+          <td style="text-align:center;min-width:110px">
+            <input type="checkbox" data-inc-msg ${incluir ? "checked" : ""} />
+          </td>
           <td class="right nowrap" style="min-width:140px">
             <input class="input smallnum" type="number" min="0" step="1" value="${req}" data-req />
           </td>
@@ -515,6 +519,22 @@ function renderFlujos() {
   tb.querySelectorAll("tr").forEach((tr) => {
     const flujo = tr.getAttribute("data-flujo");
     const inp = tr.querySelector("[data-req]");
+    // Incluir / Excluir en mensaje GENERAL (persistido en Config_Flujos)
+    const chk = tr.querySelector("[data-inc-msg]");
+    chk?.addEventListener("change", async () => {
+      const value = !!chk.checked;
+      try {
+        await API.configFlujosSetIncluirMensaje(unescapeAttr(flujo), value);
+        // actualizar cache local si existe
+        const idx = (S.flujos || []).findIndex((x) => String(x.flujo) === String(unescapeAttr(flujo)));
+        if (idx >= 0) S.flujos[idx].incluir_en_mensaje = value;
+        toast("Flujos", value ? "Incluido en mensaje" : "Excluido del mensaje");
+      } catch (e) {
+        setErr(e?.message || String(e));
+        chk.checked = !value; // rollback visual
+      }
+    });
+
     // autosave on input (debounced) + blur (for mobile)
     inp.addEventListener("input", () => {
       const perfiles = Number(inp.value || 0) || 0;

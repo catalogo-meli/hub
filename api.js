@@ -91,6 +91,10 @@ export const API = {
   slackSendRow: (row) => post("slack.sendRow", { row: assertRow_(row) }),
   slackSendDue: () => post("slack.sendDue", {}),
 
+  // ✅ Config Flujos: incluir/excluir en mensaje GENERAL
+  configFlujosSetIncluirMensaje: (flujo, value) =>
+    post("config.flujos.setIncluirMensaje", { flujo, value: !!value }),
+
   presentismoSemanas: () => get("presentismo.semanas"),
   presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
   presentismoStats: (dateYMD) => get("presentismo.stats", { date: dateYMD }),
