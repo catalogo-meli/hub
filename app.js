@@ -34,6 +34,23 @@ function setErr(msg = "") {
   el.classList.add("show");
 }
 
+/* ========= Feedback visual (estado) ========= */
+function setBusy(t1, t2 = "") {
+  const el = $("busy");
+  if (!el) return;
+  const a = $("busyT1");
+  const b = $("busyT2");
+  if (a) a.textContent = t1;
+  if (b) b.textContent = t2;
+  el.classList.add("show");
+}
+
+function clearBusy() {
+  const el = $("busy");
+  if (!el) return;
+  el.classList.remove("show");
+}
+
 function fmtDateDMY(isoYMD) {
   if (!isoYMD) return "";
   const [y, m, d] = isoYMD.split("-").map(Number);
@@ -144,7 +161,6 @@ function mountMultiSelect(targetId, { title, items, onChange }) {
       <div data-ms-list></div>
       <div class="ms-actions">
         <button class="btn ghost" type="button" data-ms-clear>Limpiar</button>
-        <button class="btn ghost" type="button" data-ms-all>Seleccionar todos</button>
       </div>
     </div>
   `;
@@ -156,7 +172,6 @@ function mountMultiSelect(targetId, { title, items, onChange }) {
   const list = host.querySelector("[data-ms-list]");
   const value = host.querySelector("[data-ms-value]");
   const bClear = host.querySelector("[data-ms-clear]");
-  const bAll = host.querySelector("[data-ms-all]");
 
   function renderList() {
     list.innerHTML = items
@@ -194,13 +209,6 @@ function mountMultiSelect(targetId, { title, items, onChange }) {
   // Limpiar => vuelve a "Todos" (sin filtros)
   bClear.addEventListener("click", () => {
     state.selected.clear();
-    renderList(); renderValue();
-    onChange?.(new Set(state.selected));
-  });
-
-  // Seleccionar todos => filtra explícitamente por todos los items
-  bAll.addEventListener("click", () => {
-    state.selected = new Set(items);
     renderList(); renderValue();
     onChange?.(new Set(state.selected));
   });
@@ -246,6 +254,8 @@ const S = {
   outbox: [],
   presWeek: null,
   presStats: null,
+  presSemanas: [],
+  presSemanaSel: "",
 
   fColabs: { roles: new Set(), equipos: new Set(), q: "" },
   fHabil: { roles: new Set(), equipos: new Set(), q: "" },
@@ -346,6 +356,7 @@ function applySectionFilter(list, f) {
 async function loadCore() {
   setErr("");
   try {
+    setBusy("Cargando", "Sincronizando datos...");
     const [colabs, canales, flujos] = await Promise.all([
       API.colaboradoresList(),
       API.canalesList(),
@@ -371,6 +382,8 @@ async function loadCore() {
     toast("Listo", "Datos cargados");
   } catch (e) {
     setErr(`Error: ${e.message || e}`);
+  } finally {
+    clearBusy();
   }
 }
 
@@ -395,6 +408,28 @@ function todayYMD() {
 
 async function refreshPresentismo() {
   try {
+    // 1) Semanas disponibles (dinámico)
+    try {
+      const semanas = await API.presentismoSemanas();
+      S.presSemanas = Array.isArray(semanas) ? semanas : [];
+      syncPresSemanaSelect_();
+    } catch {
+      // no bloqueo la vista si el endpoint no está
+      S.presSemanas = S.presSemanas || [];
+    }
+
+    // 2) Semana seleccionada
+    if (S.presSemanaSel) {
+      const [week, stats] = await Promise.all([
+        API.presentismoWeekBySemana(S.presSemanaSel),
+        API.presentismoStatsBySemana(S.presSemanaSel),
+      ]);
+      S.presWeek = week;
+      S.presStats = stats;
+      return;
+    }
+
+    // default: semana de "hoy"
     const d = todayYMD();
     const [week, stats] = await Promise.all([API.presentismoWeek(d), API.presentismoStats(d)]);
     S.presWeek = week;
@@ -404,6 +439,23 @@ async function refreshPresentismo() {
     S.presWeek = null;
     S.presStats = null;
   }
+}
+
+function syncPresSemanaSelect_() {
+  const sel = $("presSemana");
+  if (!sel) return;
+
+  const opts = (S.presSemanas || []).filter(Boolean);
+  // Mantengo selección si existe; si no, vacío => "hoy"
+  const current = S.presSemanaSel;
+
+  sel.innerHTML = [`<option value="">Hoy</option>`]
+    .concat(opts.map((w) => `<option value="${escapeAttr(w)}">${escapeHtml(w)}</option>`))
+    .join("");
+
+  // restore selection
+  if (current && opts.includes(current)) sel.value = current;
+  else sel.value = "";
 }
 
 /* ========= Operativa diaria: Flujos autosave ========= */
@@ -749,12 +801,15 @@ function renderOutbox() {
 async function onOutboxSend(row) {
   setErr("");
   try {
+    setBusy("Slack", "Enviando mensaje...");
     await API.slackSendRow(row);
     S.outbox = await API.slackOutboxList();
     renderOutbox();
     toast("Slack", "Enviado");
   } catch (e) {
     setErr(`Slack: ${e.message || e}`);
+  } finally {
+    clearBusy();
   }
 }
 
@@ -1053,6 +1108,7 @@ function renderPresentismo() {
 async function onSetLicencia() {
   setErr("");
   try {
+    setBusy("Presentismo", "Guardando licencia...");
     const idMeli = $("presSelectColab").value;
     const tipo = $("presTipo").value;
     const desde = $("presDesde").value;
@@ -1068,6 +1124,8 @@ async function onSetLicencia() {
     toast("Presentismo", "Licencia guardada");
   } catch (e) {
     setErr(`Presentismo: ${e.message || e}`);
+  } finally {
+    clearBusy();
   }
 }
 
@@ -1163,9 +1221,11 @@ function renderDashboard() {
 async function onGenerarPlanificacionYOutbox_() {
   setErr("");
   try {
+    setBusy("Operativa diaria", "Generando planificación...");
     $("dailyStatus").textContent = "Generando...";
     await API.planificacionGenerar();
-    await API.slackOutboxGenerar();
+    // Solo mensaje GENERAL (los POR_FLUJO se generan desde cada flujo)
+    await API.slackOutboxGenerarGeneral();
     await refreshPlanAndOutbox();
     await refreshPresentismo();
     renderPlan();
@@ -1176,6 +1236,7 @@ async function onGenerarPlanificacionYOutbox_() {
     setErr(`Planificación/Outbox: ${e.message || e}`);
   } finally {
     $("dailyStatus").textContent = "Listo";
+    clearBusy();
   }
 }
 
@@ -1250,11 +1311,22 @@ async function main() {
     toast("Habilitaciones", "Actualizado");
   });
   $("btnReloadPres")?.addEventListener("click", async () => {
+    setBusy("Presentismo", "Actualizando...");
     await refreshPresentismo();
     mountPresentismoSelect();
     renderPresentismo();
     renderDashboard();
+    clearBusy();
     toast("Presentismo", "Actualizado");
+  });
+
+  $("presSemana")?.addEventListener("change", async (e) => {
+    S.presSemanaSel = String(e?.target?.value || "").trim();
+    setBusy("Presentismo", S.presSemanaSel ? `Cargando ${S.presSemanaSel}...` : "Cargando semana actual...");
+    await refreshPresentismo();
+    renderPresentismo();
+    renderDashboard();
+    clearBusy();
   });
 
   $("btnSetLicencia")?.addEventListener("click", onSetLicencia);
