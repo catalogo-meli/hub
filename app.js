@@ -542,10 +542,10 @@ function renderFlujos() {
     let msg = "";
     if (diff > 0) {
     cls = "warn";
-  msg = `Hay ${diff} perfil${diff > 1 ? "es" : ""} sin asignar · ${disponibles} presentes / ${requeridos} asignados`;
+  msg = `Hay ${diff} perfil${diff > 1 ? "es" : ""} sin asignar · ${requeridos} asignados` / ${disponibles} presentes`;
 } else if (diff < 0) {
   cls = "bad";
-  msg = `Falta${Math.abs(diff) > 1 ? "n" : ""} ${Math.abs(diff)} perfil${Math.abs(diff) > 1 ? "es" : ""} · ${disponibles} presentes / ${requeridos} asignados`;
+  msg = `Falta${Math.abs(diff) > 1 ? "n" : ""} ${Math.abs(diff)} perfil${Math.abs(diff) > 1 ? "es" : ""} · ${requeridos} asignados` / ${disponibles} presentes`;
 } else {
   cls = "ok";
   msg = `Equipo completo · ${disponibles} perfiles asignados`;
