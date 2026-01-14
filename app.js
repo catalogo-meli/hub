@@ -542,7 +542,7 @@ function renderFlujos() {
     let msg = "";
     if (diff > 0) {
   cls = "warn";
-  msg = `Hay ${diff} perfiles{diff > 1 ? "s" : ""} sin asignar · ${disponibles} presentes / ${requeridos} asignados`;
+  msg = `Hay ${diff} perfiles${diff > 1 ? "s" : ""} sin asignar · ${disponibles} presentes / ${requeridos} asignados`;
 } else if (diff < 0) {
   cls = "bad";
   msg = `Falta${Math.abs(diff) > 1 ? "n" : ""} ${Math.abs(diff)} perfil{Math.abs(diff) > 1 ? "s" : ""} para cubrir · ${disponibles} de ${requeridos} asignados`;
