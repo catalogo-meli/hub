@@ -472,17 +472,38 @@
           </div>
           <div style="margin-top:10px">
             <div class="muted" style="margin-bottom:6px">Menciones</div>
+            <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:8px">
+              <div class="search" style="min-width:260px">
+                <input class="input" id="slackCompColabSearch" placeholder="Buscar colaborador para mencionar..." />
+                <div class="x" id="slackCompColabClear">×</div>
+              </div>
+              <button class="btn" id="btnSlackAddMention">Agregar mención</button>
+              <div class="muted" id="slackCompColabHint"></div>
+            </div>
             <div id="slackMentions" class="chips"></div>
           </div>
           <div style="margin-top:10px">
             <div class="muted" style="margin-bottom:6px">Mensaje</div>
             <textarea id="slackCompMsg" class="input" style="width:100%;min-height:110px" placeholder="Escribi el mensaje..."></textarea>
           </div>
-          <div class="row" style="margin-top:10px;gap:10px">
-            <button class="btn" id="btnSlackPreview">Preview</button>
+          <div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap">
+            <button class="btn" id="btnSlackEmoji">Emoji</button>
+            <button class="btn ghost" id="btnSlackDiscard">Descartar</button>
             <button class="btn primary" id="btnSlackAddToOutbox">Agregar a Outbox</button>
             <div class="spacer"></div>
             <div class="muted" id="slackCompHint"></div>
+          </div>
+          <div id="slackEmojiPanel" class="card" style="display:none;padding:12px;margin-top:10px">
+            <div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
+              <div class="search" style="min-width:260px">
+                <input class="input" id="slackEmojiSearch" placeholder="Buscar emoji (ej: party, check, fire)..." />
+                <div class="x" id="slackEmojiClear">×</div>
+              </div>
+              <div class="muted">Click para insertar en el mensaje</div>
+              <div class="spacer"></div>
+              <button class="btn ghost" id="slackEmojiClose">Cerrar</button>
+            </div>
+            <div id="slackEmojiList" class="chips" style="margin-top:10px"></div>
           </div>
           <div class="hr"></div>
         </div>

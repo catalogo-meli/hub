@@ -770,13 +770,21 @@ function renderSlackComposer() {
     slackUpdateHint_();
   });
 
-  $("btnSlackPreview")?.addEventListener("click", () => {
-    const mentionText = slackBuildMentionText_();
-    const body = String($("slackCompMsg")?.value || "").trim();
-    const full = [mentionText, body].filter(Boolean).join("\n");
-    if (!full) { toast("Slack", "No hay contenido para previsualizar"); return; }
-    alert(full);
+  // Buscar colaborador para mencionar (dentro del Slack tab)
+  const qInp = $("slackCompColabSearch");
+  const qClear = $("slackCompColabClear");
+  if (qInp) {
+    qInp.oninput = () => slackRenderColabSuggs_();
+    qInp.onkeydown = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); slackAddFirstMatch_(); }
+    };
+  }
+  qClear?.addEventListener("click", () => {
+    if (qInp) qInp.value = "";
+    slackRenderColabSuggs_();
   });
+
+  $("btnSlackAddMention")?.addEventListener("click", () => slackAddFirstMatch_());
 
   $("btnSlackAddToOutbox")?.addEventListener("click", async () => {
     setErr("");
@@ -801,8 +809,144 @@ function renderSlackComposer() {
     }
   });
 
+  // Descartar (limpia el composer)
+  $("btnSlackDiscard")?.addEventListener("click", () => {
+    S.slackComposer = { channel_id: "", mentions: [], message: "" };
+    const sel = $("slackCompChannel");
+    if (sel) sel.value = "";
+    const txt = $("slackCompMsg");
+    if (txt) txt.value = "";
+    if (qInp) qInp.value = "";
+    slackRenderMentions_();
+    slackRenderColabSuggs_();
+    slackUpdateHint_();
+  });
+
+  // Emoji picker (simple, sin depender de Slack API)
+  initEmojiPicker_();
+
   slackRenderMentions_();
   slackUpdateHint_();
+  slackRenderColabSuggs_();
+}
+
+function slackFindColabs_(q) {
+  q = norm(String(q || "").trim());
+  if (!q) return [];
+  const all = (S.colabs || []).map((c) => colabRowView(c)).filter((v) => v.id);
+  const scored = [];
+  for (const v of all) {
+    const hay =
+      norm(v.id).includes(q) ||
+      norm(v.nombre).includes(q) ||
+      norm(v.mailProd).includes(q) ||
+      norm(v.mailExt).includes(q);
+    if (!hay) continue;
+    // score rudimentario (prioriza match por id/email)
+    let s = 0;
+    if (norm(v.id) === q) s += 100;
+    if (norm(v.mailProd) === q) s += 90;
+    if (norm(v.mailExt) === q) s += 80;
+    if (norm(v.nombre) === q) s += 70;
+    if (norm(v.id).startsWith(q)) s += 20;
+    if (norm(v.mailProd).startsWith(q)) s += 15;
+    if (norm(v.nombre).startsWith(q)) s += 10;
+    scored.push({ v, s });
+  }
+  scored.sort((a, b) => b.s - a.s);
+  return scored.slice(0, 8).map((x) => x.v);
+}
+
+function slackRenderColabSuggs_() {
+  const hint = $("slackCompColabHint");
+  const q = String($("slackCompColabSearch")?.value || "").trim();
+  if (!hint) return;
+  const res = slackFindColabs_(q);
+  if (!q) { hint.innerHTML = ""; return; }
+  if (!res.length) { hint.innerHTML = '<span class="muted">Sin coincidencias</span>'; return; }
+  hint.innerHTML = res.map((v) => {
+    const label = `${escapeHtml(v.nombre || v.id)} (${escapeHtml(v.id)})`;
+    return `<span class="chip" data-id="${escapeAttr(v.id)}" title="Agregar">${label}</span>`;
+  }).join(" ");
+  hint.querySelectorAll(".chip").forEach((ch) => {
+    ch.addEventListener("click", () => {
+      const id = ch.getAttribute("data-id");
+      if (id) slackAddMentionById_(id);
+    });
+  });
+}
+
+function slackAddMentionById_(id) {
+  id = String(id || "").trim();
+  if (!id) return;
+  const current = new Set(S.slackComposer.mentions || []);
+  current.add(id);
+  S.slackComposer.mentions = Array.from(current);
+  slackRenderMentions_();
+  slackUpdateHint_();
+}
+
+function slackAddFirstMatch_() {
+  const q = String($("slackCompColabSearch")?.value || "").trim();
+  const res = slackFindColabs_(q);
+  if (!res.length) { toast("Slack", "No hay coincidencias para mencionar"); return; }
+  slackAddMentionById_(res[0].id);
+}
+
+// Emoji picker basico (lista comun). Si queres emojis custom del workspace:
+// eso es fase 2 (Slack emoji.list con token server-side).
+const COMMON_EMOJIS_ = [
+  'white_check_mark','x','warning','rotating_light','fire','sparkles','rocket','memo','calendar','clock1',
+  'hourglass_flowing_sand','bell','mega','pushpin','eyes','thinking_face','point_right','point_left','point_up',
+  'arrow_right','arrow_down','arrow_up','arrow_left','heavy_plus_sign','heavy_minus_sign','repeat','recycle',
+  'chart_with_upwards_trend','bar_chart','clipboard','paperclip','link','speech_balloon','bulb','hammer_and_wrench',
+  'gear','lock','unlock','construction','white_circle','large_blue_circle','large_green_circle','large_orange_circle',
+  'large_red_circle','black_circle','blue_heart','green_heart','yellow_heart','heart','tada','raised_hands','muscle'
+];
+
+function initEmojiPicker_() {
+  const btn = $("btnSlackEmoji");
+  const panel = $("slackEmojiPanel");
+  if (!btn || !panel) return;
+
+  const search = $("slackEmojiSearch");
+  const clear = $("slackEmojiClear");
+  const close = $("slackEmojiClose");
+  const list = $("slackEmojiList");
+
+  const render = () => {
+    if (!list) return;
+    const q = norm(String(search?.value || "").trim());
+    const items = COMMON_EMOJIS_.filter((e) => !q || norm(e).includes(q)).slice(0, 60);
+    list.innerHTML = items.map((e) => `<span class="chip" data-emo=":${escapeAttr(e)}:" title=":${escapeAttr(e)}:">:${escapeHtml(e)}:</span>`).join(" ");
+    list.querySelectorAll(".chip").forEach((ch) => {
+      ch.addEventListener("click", () => {
+        const code = ch.getAttribute("data-emo") || "";
+        insertAtCursor_($("slackCompMsg"), code + " ");
+      });
+    });
+  };
+
+  const toggle = (on) => {
+    panel.style.display = on ? "block" : "none";
+    if (on) { render(); search?.focus(); }
+  };
+
+  btn.onclick = () => toggle(panel.style.display === "none");
+  close?.addEventListener("click", () => toggle(false));
+  clear?.addEventListener("click", () => { if (search) search.value = ""; render(); });
+  if (search) search.oninput = () => render();
+}
+
+function insertAtCursor_(el, text) {
+  if (!el) return;
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? el.value.length;
+  const v = el.value || "";
+  el.value = v.slice(0, start) + text + v.slice(end);
+  const pos = start + text.length;
+  el.selectionStart = el.selectionEnd = pos;
+  el.dispatchEvent(new Event("input"));
 }
 
 const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
@@ -883,6 +1027,7 @@ function renderOutbox() {
               <div style="display:flex;gap:8px;justify-content:flex-end">
                 <button class="btn ghost" data-prog>Programar</button>
                 <button class="btn primary" data-send>Enviar</button>
+                <button class="btn ghost" data-del title="Borrar borrador">Borrar</button>
               </div>
             </div>
           `;
@@ -952,6 +1097,20 @@ function renderOutbox() {
       await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
 
       await onOutboxSend(row);
+    });
+
+    tr.querySelector("[data-del]")?.addEventListener("click", async () => {
+      if (isProg) return; // no borrar programados desde aca
+      if (!confirm("Borrar este borrador de la Outbox?")) return;
+      setErr("");
+      try {
+        await API.slackOutboxDelete(row);
+        S.outbox = await API.slackOutboxList();
+        renderOutbox();
+        toast("Outbox", "Borrado");
+      } catch (e) {
+        setErr(`Borrar: ${e.message || e}`);
+      }
     });
   });
 }
