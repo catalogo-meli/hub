@@ -84,6 +84,22 @@ function fmtDateAny(val) {
   return s;
 }
 
+function parseEstadoStampToDate(estado) {
+  const s = String(estado || "");
+  // Busca dd/mm/yyyy hh:mm (formato usado por scheduler)
+  const m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const d = Number(m[1]);
+  const mo = Number(m[2]);
+  const y = Number(m[3]);
+  const hh = Number(m[4]);
+  const mm = Number(m[5]);
+  if (!y || !mo || !d) return null;
+  const dt = new Date(y, mo - 1, d, hh || 0, mm || 0, 0, 0);
+  if (isNaN(dt.getTime())) return null;
+  return dt;
+}
+
 function norm(s) {
   return String(s || "")
     .trim()
@@ -817,7 +833,9 @@ const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
 function renderOutbox() {
   const tbDrafts = $("tblDrafts")?.querySelector("tbody");
   const tbScheduled = $("tblScheduled")?.querySelector("tbody");
-  if (!tbDrafts || !tbScheduled) {
+  const tbSent = $("tblSent")?.querySelector("tbody");
+  const btnRefreshSent = $("btnRefreshSent");
+  if (!tbDrafts || !tbScheduled || !tbSent) {
     // fallback a versiones viejas
     const tbLegacy = $("tblOutbox")?.querySelector("tbody");
     if (!tbLegacy) return;
@@ -832,6 +850,17 @@ function renderOutbox() {
 
   const drafts = out.filter((r) => !isSent_(r.estado) && !isProg_(r.estado));
   const scheduled = out.filter((r) => !isSent_(r.estado) && isProg_(r.estado));
+
+  // Enviados: mostrar últimos 14 días (por estado timestamp; fallback a fecha)
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const sentAll = out.filter((r) => isSent_(r.estado));
+  const sent = sentAll.filter((r) => {
+    const dt = parseEstadoStampToDate(r.estado) || (r.fecha ? parseEstadoStampToDate(String(r.fecha)) : null);
+    // si no hay timestamp, lo mostramos igual pero al final; es mejor ver algo que nada
+    if (!dt) return true;
+    return dt >= cutoff;
+  });
 
   const formatEstado = (estado) => {
     const s = String(estado || "");
@@ -910,6 +939,45 @@ function renderOutbox() {
   tbScheduled.innerHTML = scheduled.length
     ? scheduled.map((r) => rowHtml(r, { mode: "scheduled" })).join("")
     : `<tr><td colspan="5" class="muted">Sin mensajes programados.</td></tr>`;
+
+  // Sent (read-only)
+  const sentRowHtml = (r) => {
+    const rawEstado = r.estado || "";
+    const estUp = String(rawEstado || "").toUpperCase();
+    const isErr = estUp.includes("ERROR");
+    const badge = isErr ? "badge bad" : "badge ok";
+    const date = r.fecha || "";
+    const canalTxt = r.canal || "";
+    const chId = r.channel_id || "";
+    const msg = r.mensaje || "";
+    const chLabel = canalTxt ? `${canalTxt}${chId ? ` · ${chId}` : ""}` : (chId || "");
+    return `
+      <tr>
+        <td class="nowrap">${escapeHtml(date)}</td>
+        <td>${escapeHtml(chLabel)}</td>
+        <td><div style="max-width:720px;white-space:pre-wrap">${escapeHtml(msg)}</div></td>
+        <td class="nowrap"><span class="${badge}">${escapeHtml(formatEstado(rawEstado))}</span></td>
+      </tr>
+    `;
+  };
+
+  tbSent.innerHTML = sent.length
+    ? sent.map(sentRowHtml).join("")
+    : `<tr><td colspan="4" class="muted">Sin mensajes enviados en las últimas 2 semanas.</td></tr>`;
+
+  if (btnRefreshSent && !btnRefreshSent._bound) {
+    btnRefreshSent._bound = true;
+    btnRefreshSent.addEventListener("click", async () => {
+      try {
+        setErr("");
+        S.outbox = await API.slackOutboxList();
+        renderOutbox();
+        toast("Outbox", "Actualizado");
+      } catch (e) {
+        setErr(`Outbox: ${e.message || e}`);
+      }
+    });
+  }
 
   // listeners: drafts (autosave, programar, enviar, eliminar)
   const bindTable = (root) => {
@@ -992,6 +1060,13 @@ function mountSlackCompose_() {
   const emojiPanel = $("emojiPanel");
   const emojiGrid = $("emojiGrid");
 
+  const mentionSearch = $("slackMentionSearch");
+  const mentionResults = $("slackMentionResults");
+  const mentionPills = $("slackMentionPills");
+
+  const chMentionSearch = $("slackChannelMentionSearch");
+  const btnInsertChMention = $("btnInsertChannelMention");
+
   if (!selCh || !ta || !when || !btnIns || !btnClear || !btnDraft || !btnSched) return;
 
   // canales
@@ -1000,27 +1075,100 @@ function mountSlackCompose_() {
   };
   refreshChannels();
 
-  // multiselect de menciones
-  const colItems = (S.colabs || []).map(colabRowView)
+  // menciones (buscador + píldoras)
+  const allColabs = (S.colabs || [])
+    .map(colabRowView)
     .filter((v) => v.nombre || v.mailProd)
-    .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || "")))
-    .map((v) => ({
-      id: v.id,
-      label: `${v.nombre || v.id}${v.mailProd ? ` · ${v.mailProd}` : ""}`,
-      slackId: v.slackId || "",
-    }));
+    .map((v) => {
+      const label = `${v.nombre || v.id}${v.mailProd ? ` · ${v.mailProd}` : ""}`;
+      const hay = norm(`${v.nombre || ""} ${v.mailProd || ""} ${v.id || ""}`);
+      return { id: v.id, nombre: v.nombre || v.id, mailProd: v.mailProd || "", label, hay, slackId: v.slackId || "" };
+    })
+    .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || "")));
 
-  const ms = mountMultiSelect("msSlackMentions", {
-    title: "Seleccionar",
-    items: colItems.map((x) => x.label),
-    onChange: () => {},
+  const selMentions = new Map(); // id -> item
+
+  const renderPills = () => {
+    if (!mentionPills) return;
+    const items = [...selMentions.values()];
+    mentionPills.innerHTML = items.length
+      ? items
+          .map(
+            (x) => `
+        <span class="pill" style="display:inline-flex;gap:6px;align-items:center">
+          <span>${escapeHtml(x.nombre)}</span>
+          <button class="xbtn" data-rm="${escapeAttr(x.id)}" title="Quitar">×</button>
+        </span>`
+          )
+          .join("")
+      : `<span class="muted" style="font-size:12px">Sin menciones.</span>`;
+
+    mentionPills.querySelectorAll("[data-rm]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const id = unescapeAttr(b.getAttribute("data-rm"));
+        selMentions.delete(id);
+        renderPills();
+      });
+    });
+  };
+
+  const closeMentionResults = () => {
+    if (!mentionResults) return;
+    mentionResults.style.display = "none";
+    mentionResults.innerHTML = "";
+  };
+
+  const renderMentionResults = (q) => {
+    if (!mentionResults) return;
+    const nq = norm(q);
+    if (!nq) return closeMentionResults();
+    const hits = allColabs.filter((x) => x.hay.includes(nq)).slice(0, 8);
+    if (!hits.length) {
+      mentionResults.style.display = "block";
+      mentionResults.innerHTML = `<div class="muted" style="font-size:12px;padding:6px">Sin resultados.</div>`;
+      return;
+    }
+    mentionResults.style.display = "block";
+    mentionResults.innerHTML = hits
+      .map((x) => {
+        const disabled = selMentions.has(x.id) ? "disabled" : "";
+        return `
+          <button class="btn ghost" data-pick="${escapeAttr(x.id)}" ${disabled} style="width:100%;justify-content:flex-start;gap:10px;padding:8px">
+            <span style="font-weight:600">${escapeHtml(x.nombre)}</span>
+            <span class="muted" style="font-size:12px">${escapeHtml(x.mailProd)}</span>
+          </button>
+        `;
+      })
+      .join("");
+
+    mentionResults.querySelectorAll("[data-pick]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const id = unescapeAttr(b.getAttribute("data-pick"));
+        const it = allColabs.find((x) => x.id === id);
+        if (!it) return;
+        selMentions.set(it.id, it);
+        renderPills();
+        if (mentionSearch) mentionSearch.value = "";
+        closeMentionResults();
+        ta.focus();
+      });
+    });
+  };
+
+  mentionSearch?.addEventListener("input", debounce(() => {
+    renderMentionResults(mentionSearch.value);
+  }, 120));
+
+  document.addEventListener("click", (e) => {
+    if (!mentionResults || !mentionSearch) return;
+    const t = e.target;
+    if (mentionResults.contains(t) || mentionSearch.contains(t)) return;
+    closeMentionResults();
   });
 
   const getSelectedMentions = () => {
-    const set = ms?.value?.() || new Set();
-    const labels = listFromSet(set);
-    const picked = colItems.filter((x) => labels.includes(x.label));
-    const tokens = picked.map((x) => (x.slackId ? `<@${x.slackId}>` : x.label.split(" · ")[0]));
+    const picked = [...selMentions.values()];
+    const tokens = picked.map((x) => (x.slackId ? `<@${x.slackId}>` : x.nombre));
     return { tokens, picked };
   };
 
@@ -1039,16 +1187,88 @@ function mountSlackCompose_() {
     if (!tokens.length) return toast("Menciones", "No hay colaboradores seleccionados");
     const text = tokens.join(" ") + " ";
     insertAtCursor(ta, text);
-    ms?.clear?.();
+    selMentions.clear();
+    renderPills();
   });
 
   const clearCompose = () => {
     selCh.value = "";
     ta.value = "";
     when.value = "";
-    ms?.clear?.();
+    selMentions.clear();
+    renderPills();
+    if (mentionSearch) mentionSearch.value = "";
+    closeMentionResults();
+    if (chMentionSearch) chMentionSearch.value = "";
     toast("Compose", "Listo");
   };
+
+  // insertar mención a canal (dentro del mensaje)
+  const closeChMentionResults = () => {
+    const box = $("slackChMentionResults");
+    if (!box) return;
+    box.style.display = "none";
+    box.innerHTML = "";
+  };
+
+  const ensureChMentionResultsBox = () => {
+    let box = $("slackChMentionResults");
+    if (box) return box;
+    // crea un popup inline cerca del input
+    if (!chMentionSearch) return null;
+    box = document.createElement("div");
+    box.id = "slackChMentionResults";
+    box.className = "card";
+    box.style.cssText = "display:none;margin-top:6px;padding:6px;max-height:180px;overflow:auto;position:relative;z-index:70";
+    chMentionSearch.parentElement?.appendChild(box);
+    return box;
+  };
+
+  const renderChMentionResults = (q) => {
+    const box = ensureChMentionResultsBox();
+    if (!box) return;
+    const nq = norm(q);
+    if (!nq) return closeChMentionResults();
+    const hits = (S.canales || [])
+      .filter((c) => norm(c.canal || "").includes(nq))
+      .slice(0, 8);
+    if (!hits.length) {
+      box.style.display = "block";
+      box.innerHTML = `<div class="muted" style="font-size:12px;padding:6px">Sin resultados.</div>`;
+      return;
+    }
+    box.style.display = "block";
+    box.innerHTML = hits
+      .map((c) => `<button class="btn ghost" data-pickch="${escapeAttr(c.channel_id)}" style="width:100%;justify-content:flex-start;padding:8px">#${escapeHtml(c.canal || "")}</button>`)
+      .join("");
+    box.querySelectorAll("[data-pickch]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const id = unescapeAttr(b.getAttribute("data-pickch"));
+        const ch = (S.canales || []).find((x) => x.channel_id === id);
+        if (!ch) return;
+        // mention real: <#C123|nombre>
+        const token = `<#${id}|${ch.canal}> `;
+        insertAtCursor(ta, token);
+        if (chMentionSearch) chMentionSearch.value = "";
+        closeChMentionResults();
+      });
+    });
+  };
+
+  chMentionSearch?.addEventListener("input", debounce(() => {
+    renderChMentionResults(chMentionSearch.value);
+  }, 120));
+
+  btnInsertChMention?.addEventListener("click", () => {
+    const v = String(chMentionSearch?.value || "").trim();
+    if (!v) return;
+    // intenta matchear canal exacto
+    const ch = (S.canales || []).find((c) => norm(c.canal) === norm(v));
+    if (ch?.channel_id) insertAtCursor(ta, `<#${ch.channel_id}|${ch.canal}> `);
+    else insertAtCursor(ta, `#${v} `);
+    if (chMentionSearch) chMentionSearch.value = "";
+    closeChMentionResults();
+  });
 
   btnClear.addEventListener("click", clearCompose);
 
@@ -1126,6 +1346,9 @@ function mountSlackCompose_() {
     if (emojiPanel.contains(t) || btnEmoji.contains(t)) return;
     closeEmoji();
   });
+
+  // estado inicial
+  renderPills();
 }
 
 async function onOutboxSend(row) {
