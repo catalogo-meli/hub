@@ -74,6 +74,8 @@ export const API = {
   slackOutboxAppend: (fechaISO, tipo, canal, channel_id, mensaje, estado) =>
     post("slack.outbox.append", { fechaISO, tipo, canal, channel_id, mensaje, estado }),
 
+  slackOutboxDelete: (row) => post("slack.outbox.delete", { row: assertRow_(row) }),
+
   // ✅ NUEVO: Programar / Desprogramar (requiere actions en Code.gs)
   slackOutboxProgramar: (row, programado_para) =>
     post("slack.outbox.programar", {

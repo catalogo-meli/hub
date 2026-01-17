@@ -815,141 +815,316 @@ const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
 }, 500);
 
 function renderOutbox() {
-  const tb = $("tblOutbox")?.querySelector("tbody");
-  if (!tb) return;
-
-  const out = (S.outbox || []).slice().sort((a, b) => (b.row || 0) - (a.row || 0));
-  if (!out.length) {
-    tb.innerHTML = `<tr><td colspan="5" class="muted">Sin mensajes pendientes.</td></tr>`;
+  const tbDrafts = $("tblDrafts")?.querySelector("tbody");
+  const tbScheduled = $("tblScheduled")?.querySelector("tbody");
+  if (!tbDrafts || !tbScheduled) {
+    // fallback a versiones viejas
+    const tbLegacy = $("tblOutbox")?.querySelector("tbody");
+    if (!tbLegacy) return;
+    tbLegacy.innerHTML = `<tr><td colspan="5" class="muted">Actualizá el hub para ver el nuevo compose.</td></tr>`;
     return;
   }
 
-  // Convierte ISO Z a dd/mm/yyyy HH:mm (hora local del navegador)
+  const out = (S.outbox || []).slice().sort((a, b) => (b.row || 0) - (a.row || 0));
+
+  const isSent_ = (estado) => String(estado || "").toUpperCase().includes("ENVIADO");
+  const isProg_ = (estado) => String(estado || "").toUpperCase().includes("PROGRAMADO");
+
+  const drafts = out.filter((r) => !isSent_(r.estado) && !isProg_(r.estado));
+  const scheduled = out.filter((r) => !isSent_(r.estado) && isProg_(r.estado));
+
   const formatEstado = (estado) => {
     const s = String(estado || "");
     const m = s.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/);
     if (!m) return s;
-
     const d = new Date(m[1]);
     if (isNaN(d.getTime())) return s;
-
     const dd = String(d.getDate()).padStart(2, "0");
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const yyyy = d.getFullYear();
     const HH = String(d.getHours()).padStart(2, "0");
     const MM = String(d.getMinutes()).padStart(2, "0");
-
     return s.replace(m[1], `${dd}/${mm}/${yyyy} ${HH}:${MM}`);
   };
 
-  tb.innerHTML = out
-    .map((r) => {
-      const rawEstado = r.estado || "";
-      const estado = formatEstado(rawEstado);
+  const rowHtml = (r, { mode }) => {
+    const rawEstado = r.estado || "";
+    const estUp = String(rawEstado || "").toUpperCase();
+    const isErr = estUp.includes("ERROR");
+    const isSent = estUp.includes("ENVIADO");
+    const isProg = estUp.includes("PROGRAMADO");
 
-      const estUp = String(rawEstado || "").toUpperCase();
-      const isErr = estUp.includes("ERROR");
-      const isSent = estUp.includes("ENVIADO");
-      const isProg = estUp.includes("PROGRAMADO");
+    const badge = isErr ? "badge bad" : isSent ? "badge ok" : "badge";
+    const date = r.fecha || "";
+    const chId = r.channel_id || "";
+    const msg = r.mensaje || "";
+    const row = r.row;
 
-      const badge = isErr ? "badge bad" : isSent ? "badge ok" : "badge";
-      const date = r.fecha || "";
-      const chId = r.channel_id || "";
-      const msg = r.mensaje || "";
-      const row = r.row;
-
-      // Acciones:
-      // - ENVIADO: no mostrar programar/enviar ni el datetime
-      // - PROGRAMADO: mostrar datetime solo lectura y sin botones
-      // - PENDIENTE/ERROR: mostrar todo
-      const accionesHtml = isSent
-        ? ""
-        : isProg
-          ? `
-            <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-              <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" disabled />
-              <div style="display:flex;gap:8px;justify-content:flex-end">
-                <button class="btn ghost" data-prog disabled title="Ya está programado">Programar</button>
-                <button class="btn primary" data-send disabled title="Ya está programado">Enviar</button>
-              </div>
+    const actions = (() => {
+      // Drafts: enviar / programar + eliminar
+      if (mode === "draft") {
+        return `
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+            <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" />
+            <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
+              <button class="xbtn" data-del title="Eliminar">×</button>
+              <button class="btn ghost" data-prog>Programar</button>
+              <button class="btn primary" data-send>Enviar</button>
             </div>
-          `
-          : `
-            <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-              <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" />
-              <div style="display:flex;gap:8px;justify-content:flex-end">
-                <button class="btn ghost" data-prog>Programar</button>
-                <button class="btn primary" data-send>Enviar</button>
-              </div>
-            </div>
-          `;
-
-      return `
-        <tr data-row="${row}" data-sent="${isSent ? "1" : "0"}" data-prog="${isProg ? "1" : "0"}">
-          <td class="nowrap">${escapeHtml(date)}</td>
-          <td>
-            <select data-ch ${isSent ? "disabled" : ""}>${channelOptionsHtml(chId)}</select>
-          </td>
-          <td>
-            <textarea data-msg ${isSent ? "disabled" : ""}>${escapeHtml(msg)}</textarea>
-          </td>
-          <td class="nowrap"><span class="${badge}">${escapeHtml(estado)}</span></td>
-          <td class="right nowrap">${accionesHtml}</td>
-        </tr>
-      `;
-    })
-    .join("");
-
-  tb.querySelectorAll("tr").forEach((tr) => {
-    const row = Number(tr.getAttribute("data-row"));
-    const isSent = tr.getAttribute("data-sent") === "1";
-    const isProg = tr.getAttribute("data-prog") === "1";
-
-    const sel = tr.querySelector("[data-ch]");
-    const txt = tr.querySelector("[data-msg]");
-    const when = tr.querySelector("[data-when]");
-
-    // Si ya fue enviado, no hay listeners (evita autosave y acciones)
-    if (isSent) return;
-
-    const triggerSave = () => outboxAutosave(row, sel.value, txt.value);
-
-    sel?.addEventListener("change", triggerSave);
-    txt?.addEventListener("input", triggerSave);
-    txt?.addEventListener("blur", triggerSave);
-
-    tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
-      setErr("");
-      try {
-        // Si ya está programado, no permitir reprogramar desde UI (evita duplicados)
-        if (isProg) return;
-
-        const v = (when?.value || "").trim();
-        if (!v) throw new Error("Elegí fecha y hora para programar.");
-
-        // guardo antes de programar
-        const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
-        await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
-
-        await API.slackOutboxProgramar(row, v);
-        S.outbox = await API.slackOutboxList();
-        renderOutbox();
-        toast("Outbox", "Programado");
-      } catch (e) {
-        setErr(`Programar: ${e.message || e}`);
+          </div>
+        `;
       }
+
+      // Scheduled: solo eliminar (no reprogramar acá; menos estados raros)
+      return `
+        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+          <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" disabled />
+          <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
+            <button class="xbtn" data-del title="Eliminar">×</button>
+          </div>
+        </div>
+      `;
+    })();
+
+    const disableEdits = mode !== "draft";
+
+    return `
+      <tr data-row="${row}" data-mode="${mode}">
+        <td class="nowrap">${escapeHtml(date)}</td>
+        <td>
+          <select data-ch ${disableEdits ? "disabled" : ""}>${channelOptionsHtml(chId)}</select>
+        </td>
+        <td>
+          <textarea data-msg ${disableEdits ? "disabled" : ""}>${escapeHtml(msg)}</textarea>
+        </td>
+        <td class="nowrap"><span class="${badge}">${escapeHtml(formatEstado(rawEstado))}</span></td>
+        <td class="right nowrap">${actions}</td>
+      </tr>
+    `;
+  };
+
+  tbDrafts.innerHTML = drafts.length
+    ? drafts.map((r) => rowHtml(r, { mode: "draft" })).join("")
+    : `<tr><td colspan="5" class="muted">Sin borradores.</td></tr>`;
+
+  tbScheduled.innerHTML = scheduled.length
+    ? scheduled.map((r) => rowHtml(r, { mode: "scheduled" })).join("")
+    : `<tr><td colspan="5" class="muted">Sin mensajes programados.</td></tr>`;
+
+  // listeners: drafts (autosave, programar, enviar, eliminar)
+  const bindTable = (root) => {
+    root.querySelectorAll("tr[data-row]").forEach((tr) => {
+      const row = Number(tr.getAttribute("data-row"));
+      const mode = tr.getAttribute("data-mode");
+      const sel = tr.querySelector("[data-ch]");
+      const txt = tr.querySelector("[data-msg]");
+      const when = tr.querySelector("[data-when]");
+
+      tr.querySelector("[data-del]")?.addEventListener("click", async () => {
+        setErr("");
+        try {
+          if (!confirm("Eliminar este mensaje?")) return;
+          await API.slackOutboxDelete(row);
+          S.outbox = await API.slackOutboxList();
+          renderOutbox();
+          toast("Outbox", "Eliminado");
+        } catch (e) {
+          setErr(`Eliminar: ${e.message || e}`);
+        }
+      });
+
+      if (mode !== "draft") return;
+
+      const triggerSave = () => outboxAutosave(row, sel.value, txt.value);
+      sel?.addEventListener("change", triggerSave);
+      txt?.addEventListener("input", triggerSave);
+      txt?.addEventListener("blur", triggerSave);
+
+      tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
+        setErr("");
+        try {
+          const v = (when?.value || "").trim();
+          if (!v) throw new Error("Elegí fecha y hora para programar.");
+          // guardo antes de programar
+          const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
+          await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
+          await API.slackOutboxProgramar(row, v);
+          S.outbox = await API.slackOutboxList();
+          renderOutbox();
+          toast("Outbox", "Programado");
+        } catch (e) {
+          setErr(`Programar: ${e.message || e}`);
+        }
+      });
+
+      tr.querySelector("[data-send]")?.addEventListener("click", async () => {
+        setErr("");
+        try {
+          // guardo antes de enviar
+          const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
+          await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
+          await onOutboxSend(row);
+        } catch (e) {
+          setErr(`Enviar: ${e.message || e}`);
+        }
+      });
     });
+  };
 
-    tr.querySelector("[data-send]")?.addEventListener("click", async () => {
-      // Si ya está programado, no permitir enviar manual (evita duplicados)
-      if (isProg) return;
+  bindTable(tbDrafts);
+  bindTable(tbScheduled);
+}
 
-      // guardo antes de enviar
-      const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
-      await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
+// ===== Compose (siempre disponible) =====
+let _slackComposeMounted = false;
+function mountSlackCompose_() {
+  if (_slackComposeMounted) return;
+  _slackComposeMounted = true;
 
-      await onOutboxSend(row);
+  const selCh = $("slackComposeChannel");
+  const ta = $("slackComposeMsg");
+  const when = $("slackComposeWhen");
+  const btnIns = $("btnInsertMentions");
+  const btnClear = $("btnComposeClear");
+  const btnDraft = $("btnSaveDraft");
+  const btnSched = $("btnSchedule");
+  const btnEmoji = $("btnEmoji");
+  const emojiPanel = $("emojiPanel");
+  const emojiGrid = $("emojiGrid");
+
+  if (!selCh || !ta || !when || !btnIns || !btnClear || !btnDraft || !btnSched) return;
+
+  // canales
+  const refreshChannels = () => {
+    selCh.innerHTML = channelOptionsHtml("");
+  };
+  refreshChannels();
+
+  // multiselect de menciones
+  const colItems = (S.colabs || []).map(colabRowView)
+    .filter((v) => v.nombre || v.mailProd)
+    .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || "")))
+    .map((v) => ({
+      id: v.id,
+      label: `${v.nombre || v.id}${v.mailProd ? ` · ${v.mailProd}` : ""}`,
+      slackId: v.slackId || "",
+    }));
+
+  const ms = mountMultiSelect("msSlackMentions", {
+    title: "Seleccionar",
+    items: colItems.map((x) => x.label),
+    onChange: () => {},
+  });
+
+  const getSelectedMentions = () => {
+    const set = ms?.value?.() || new Set();
+    const labels = listFromSet(set);
+    const picked = colItems.filter((x) => labels.includes(x.label));
+    const tokens = picked.map((x) => (x.slackId ? `<@${x.slackId}>` : x.label.split(" · ")[0]));
+    return { tokens, picked };
+  };
+
+  const insertAtCursor = (textarea, text) => {
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? textarea.value.length;
+    const v = textarea.value || "";
+    textarea.value = v.slice(0, start) + text + v.slice(end);
+    const pos = start + text.length;
+    textarea.setSelectionRange(pos, pos);
+    textarea.focus();
+  };
+
+  btnIns.addEventListener("click", () => {
+    const { tokens } = getSelectedMentions();
+    if (!tokens.length) return toast("Menciones", "No hay colaboradores seleccionados");
+    const text = tokens.join(" ") + " ";
+    insertAtCursor(ta, text);
+    ms?.clear?.();
+  });
+
+  const clearCompose = () => {
+    selCh.value = "";
+    ta.value = "";
+    when.value = "";
+    ms?.clear?.();
+    toast("Compose", "Listo");
+  };
+
+  btnClear.addEventListener("click", clearCompose);
+
+  btnDraft.addEventListener("click", async () => {
+    setErr("");
+    try {
+      const channel_id = String(selCh.value || "").trim();
+      const mensaje = String(ta.value || "").trim();
+      if (!mensaje) throw new Error("Escribí un mensaje.");
+
+      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
+      await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
+      S.outbox = await API.slackOutboxList();
+      renderOutbox();
+      clearCompose();
+      toast("Outbox", "Borrador guardado");
+    } catch (e) {
+      setErr(`Borrador: ${e.message || e}`);
+    }
+  });
+
+  btnSched.addEventListener("click", async () => {
+    setErr("");
+    try {
+      const channel_id = String(selCh.value || "").trim();
+      const mensaje = String(ta.value || "").trim();
+      const v = String(when.value || "").trim();
+      if (!mensaje) throw new Error("Escribí un mensaje.");
+      if (!v) throw new Error("Elegí fecha y hora para programar.");
+
+      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
+      // 1) crear fila como borrador
+      await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
+      S.outbox = await API.slackOutboxList();
+      const newest = (S.outbox || []).slice().sort((a,b)=>(b.row||0)-(a.row||0))[0];
+      if (!newest?.row) throw new Error("No se pudo obtener la fila creada.");
+
+      // 2) programar
+      await API.slackOutboxProgramar(newest.row, v);
+      S.outbox = await API.slackOutboxList();
+      renderOutbox();
+      clearCompose();
+      toast("Outbox", "Mensaje programado");
+    } catch (e) {
+      setErr(`Programar: ${e.message || e}`);
+    }
+  });
+
+  // emojis rápidos (visual)
+  const EMOJIS = ["✅","⚠️","❌","⏰","📌","📣","👀","🙏","🔥","🚀","📍","🧠","💡","📈","🧩","🤝","🎯","🟢","🟡","🔴","➡️","⬅️","⬆️","⬇️","✍️","🗂️","🧾","🧹","🧯","🧪","😄","🙂","😉","😅","🤔","😤","😵","😴","💤","💪","🫡","🙌","👏","🧨","✨","🎉","🏁"];
+
+  const renderEmojiGrid = () => {
+    if (!emojiGrid) return;
+    emojiGrid.innerHTML = EMOJIS.map((e) => `<button class="btn ghost" data-e="${escapeAttr(e)}" style="padding:6px 0">${escapeHtml(e)}</button>`).join("");
+    emojiGrid.querySelectorAll("[data-e]").forEach((b) => {
+      b.addEventListener("click", () => {
+        insertAtCursor(ta, b.getAttribute("data-e") + " ");
+        emojiPanel.style.display = "none";
+      });
     });
+  };
+  renderEmojiGrid();
+
+  const closeEmoji = () => { if (emojiPanel) emojiPanel.style.display = "none"; };
+
+  btnEmoji?.addEventListener("click", (e) => {
+    e.preventDefault();
+    if (!emojiPanel) return;
+    emojiPanel.style.display = emojiPanel.style.display === "none" ? "block" : "none";
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!emojiPanel || !btnEmoji) return;
+    const t = e.target;
+    if (emojiPanel.contains(t) || btnEmoji.contains(t)) return;
+    closeEmoji();
   });
 }
 
@@ -1563,6 +1738,7 @@ async function main() {
   });
 
   await loadCore();
+  mountSlackCompose_();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
