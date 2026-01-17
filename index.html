@@ -106,11 +106,6 @@
     }
     .pill b{color:var(--txt);font-weight:600}
 
-    .chips{display:flex;flex-wrap:wrap;gap:8px}
-    .chip{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:var(--chip);border:1px solid var(--line);font-size:12px}
-    .chip .x{cursor:pointer;opacity:.8}
-    .chip .x:hover{opacity:1}
-
     .pill.ok{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.28);color:var(--txt)}
     .pill.warn{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.28);color:var(--txt)}
     .pill.bad{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.28);color:var(--txt)}
@@ -294,9 +289,58 @@
       background:rgba(255,255,255,.03);
       padding:12px;
     }
-    .flow-col h3{margin:0 0 10px;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:10px}
-    .flow-col ul{margin:0;padding-left:16px;color:var(--muted)}
-    .flow-col li{margin:6px 0}
+    /* Planificación → Asignación por flujo (optimización operativa) */
+    .plan-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+    .plan-controls .input{height:38px}
+    .plan-controls .select{height:38px}
+
+    .flow-head{
+      position:sticky;
+      top:0;
+      z-index:2;
+      background:linear-gradient(to bottom, rgba(10,15,22,.98), rgba(10,15,22,.92));
+      border:1px solid rgba(255,255,255,.06);
+      border-radius:12px;
+      padding:10px 10px;
+      margin-bottom:10px;
+      backdrop-filter: blur(6px);
+    }
+    [data-theme="light"] .flow-head{
+      background:linear-gradient(to bottom, rgba(255,255,255,.98), rgba(255,255,255,.92));
+      border-color:rgba(15,23,42,.10);
+    }
+    .flow-head-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .flow-name{font-weight:800;font-size:14px;letter-spacing:-.2px}
+    .flow-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+    .chip{
+      display:inline-flex;align-items:center;gap:8px;
+      padding:4px 8px;border-radius:999px;
+      font-size:12px;border:1px solid var(--line);
+      background:rgba(255,255,255,.04);
+      color:var(--muted);
+      white-space:nowrap;
+    }
+    .dot{width:8px;height:8px;border-radius:99px;background:rgba(148,163,184,.65)}
+    .chip.ok{border-color:rgba(34,197,94,.25);background:rgba(34,197,94,.10);color:#c8ffe0}
+    .chip.ok .dot{background:rgba(34,197,94,.9)}
+    .chip.warn{border-color:rgba(245,158,11,.25);background:rgba(245,158,11,.10);color:#ffe6b8}
+    .chip.warn .dot{background:rgba(245,158,11,.95)}
+    .chip.bad{border-color:rgba(239,68,68,.25);background:rgba(239,68,68,.10);color:#ffd4d4}
+    .chip.bad .dot{background:rgba(239,68,68,.95)}
+    [data-theme="light"] .chip.ok{color:#0f5132}
+    [data-theme="light"] .chip.warn{color:#7a4b00}
+    [data-theme="light"] .chip.bad{color:#842029}
+
+    .flow-peek{color:var(--muted);font-size:13px;line-height:1.35}
+    .flow-peek b{color:var(--txt)}
+    .linkbtn{
+      border:none;background:transparent;color:var(--muted);
+      cursor:pointer;padding:0;text-decoration:underline;
+      text-underline-offset:3px;
+    }
+    .linkbtn:hover{opacity:.9}
+    .flow-list{margin:10px 0 0;padding-left:16px;color:var(--muted)}
+    .flow-list li{margin:6px 0}
     .feriado{
       outline:2px solid rgba(245,158,11,.22);
       background:rgba(245,158,11,.08) !important;
@@ -329,12 +373,6 @@
       background:rgba(239,68,68,.08) !important;
       color:#842029;
     }
-
-    .manual{outline:2px solid rgba(245,158,11,.18);background:rgba(245,158,11,.10) !important;font-weight:700}
-    .pf{outline:2px solid rgba(59,130,246,.18);background:rgba(59,130,246,.10) !important;font-weight:700}
-    .pf.approved{outline-color:rgba(34,197,94,.25);background:rgba(34,197,94,.12) !important}
-    .pf.pending{outline-color:rgba(245,158,11,.25);background:rgba(245,158,11,.12) !important}
-    .pf.rejected{outline-color:rgba(239,68,68,.28);background:rgba(239,68,68,.12) !important}
 
     th.sortable{cursor:pointer; user-select:none}
     th.sortable:hover{opacity:.9}
@@ -454,59 +492,22 @@
 
         <h2 style="margin-top:0">Planificación</h2>
         <div class="muted">Asignación por flujo</div>
+        <div class="plan-controls" id="planControls">
+          <div class="search" style="max-width:420px">
+            <input class="input" id="planSearch" placeholder="Buscar flujo..." />
+            <div class="x" id="planSearchClear" title="Limpiar">×</div>
+          </div>
+          <select class="input" id="planSort" style="max-width:240px">
+            <option value="alpha">Orden: A → Z</option>
+            <option value="load">Orden: Mayor carga</option>
+          </select>
+        </div>
         <div style="margin-top:12px" id="planGrid" class="flow-grid"></div>
 
         <div class="hr"></div>
 
         <h2 style="margin-top:0">Mensajes de Slack</h2>
         <div class="muted">Gestión de comunicación</div>
-        <div id="slackComposer" style="margin-top:12px">
-          <div class="row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
-            <div style="min-width:260px">
-              <div class="muted" style="margin-bottom:6px">Canal</div>
-              <select class="input" id="slackCompChannel"></select>
-            </div>
-            <div class="spacer"></div>
-            <button class="btn" id="btnSlackUseSelection" title="Usar seleccion actual de Colaboradores">Usar seleccion</button>
-            <button class="btn ghost" id="btnSlackClearMentions">Limpiar menciones</button>
-          </div>
-          <div style="margin-top:10px">
-            <div class="muted" style="margin-bottom:6px">Menciones</div>
-            <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:8px">
-              <div class="search" style="min-width:260px">
-                <input class="input" id="slackCompColabSearch" placeholder="Buscar colaborador para mencionar..." />
-                <div class="x" id="slackCompColabClear">×</div>
-              </div>
-              <button class="btn" id="btnSlackAddMention">Agregar mención</button>
-              <div class="muted" id="slackCompColabHint"></div>
-            </div>
-            <div id="slackMentions" class="chips"></div>
-          </div>
-          <div style="margin-top:10px">
-            <div class="muted" style="margin-bottom:6px">Mensaje</div>
-            <textarea id="slackCompMsg" class="input" style="width:100%;min-height:110px" placeholder="Escribi el mensaje..."></textarea>
-          </div>
-          <div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap">
-            <button class="btn" id="btnSlackEmoji">Emoji</button>
-            <button class="btn ghost" id="btnSlackDiscard">Descartar</button>
-            <button class="btn primary" id="btnSlackAddToOutbox">Agregar a Outbox</button>
-            <div class="spacer"></div>
-            <div class="muted" id="slackCompHint"></div>
-          </div>
-          <div id="slackEmojiPanel" class="card" style="display:none;padding:12px;margin-top:10px">
-            <div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
-              <div class="search" style="min-width:260px">
-                <input class="input" id="slackEmojiSearch" placeholder="Buscar emoji (ej: party, check, fire)..." />
-                <div class="x" id="slackEmojiClear">×</div>
-              </div>
-              <div class="muted">Click para insertar en el mensaje</div>
-              <div class="spacer"></div>
-              <button class="btn ghost" id="slackEmojiClose">Cerrar</button>
-            </div>
-            <div id="slackEmojiList" class="chips" style="margin-top:10px"></div>
-          </div>
-          <div class="hr"></div>
-        </div>
         <div style="margin-top:12px;overflow:auto">
           <table class="table" id="tblOutbox">
             <thead>

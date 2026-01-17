@@ -375,7 +375,6 @@ async function loadCore() {
     renderFlujos();
     renderPlan();
     renderOutbox();
-    renderSlackComposer();
     renderColabs();
     renderHabil();
     renderPresentismo();
@@ -583,38 +582,98 @@ function renderPlan() {
   const host = $("planGrid");
   if (!host) return;
 
+  // UI state (solo para esta sección)
+  S._planUI = S._planUI || { q: "", sort: "alpha", expanded: new Set() };
+  mountPlanControls_();
+
   const plan = (S.plan || []).filter((r) => r?.flujo);
   if (!plan.length) {
     host.innerHTML = `<div class="muted">Sin planificación cargada.</div>`;
     return;
   }
 
+  // Index
   const by = {};
   for (const r of plan) {
-    const f = r.flujo;
+    const f = String(r.flujo || "").trim();
+    if (!f) continue;
     by[f] = by[f] || [];
     by[f].push(r);
   }
-  const flujosOrden = Object.keys(by).sort((a, b) => a.localeCompare(b));
 
-  host.innerHTML = flujosOrden
+  // filters
+  const q = norm(S._planUI.q);
+  let flujos = Object.keys(by);
+  if (q) flujos = flujos.filter((f) => norm(f).includes(q));
+
+  // sort
+  const reqMap = new Map((S.flujos || []).map((x) => [String(x.flujo || "").trim(), Number(x.perfiles_requeridos ?? x.cantidad ?? 0) || 0]));
+  if (S._planUI.sort === "load") {
+    flujos.sort((a, b) => {
+      const ai = (by[a] || []).filter((x) => x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES").length;
+      const bi = (by[b] || []).filter((x) => x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES").length;
+      const ar = reqMap.get(a) || 0;
+      const br = reqMap.get(b) || 0;
+      const aRatio = ar ? ai / ar : ai ? 99 : 0;
+      const bRatio = br ? bi / br : bi ? 99 : 0;
+      return bRatio - aRatio || a.localeCompare(b);
+    });
+  } else {
+    flujos.sort((a, b) => a.localeCompare(b));
+  }
+
+  host.innerHTML = flujos
     .map((f) => {
-      const items = by[f] || [];
-      const lis = items
-        .map((x) => {
-          const fijo = x.es_fijo === "SI" ? " F" : "";
-          const name = x.nombre || x.id_meli || "";
-          return `<li>${escapeHtml(name)}${fijo}</li>`;
-        })
-        .join("");
+      const itemsRaw = (by[f] || []).filter((x) => x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES");
+      const items = itemsRaw.slice().sort((a, b) => String(a.nombre || a.id_meli || "").localeCompare(String(b.nombre || b.id_meli || "")));
+      const assigned = items.length;
+      const req = reqMap.get(f) || 0;
+      const ratio = req ? assigned / req : assigned ? 99 : 0;
+      const loadCls = ratio > 1 ? "bad" : ratio >= 0.8 ? "warn" : "ok";
+
+      const status = flowMsgStatus_(f);
+      const expanded = S._planUI.expanded.has(f);
+      const maxPeek = 5;
+      const peekNames = items.slice(0, maxPeek).map((x) => {
+        const fijo = x.es_fijo === "SI" ? " <b>F</b>" : "";
+        const name = escapeHtml(x.nombre || x.id_meli || "");
+        return `${name}${fijo}`;
+      }).join(" · ");
+      const remaining = Math.max(0, assigned - maxPeek);
+
+      const lis = expanded
+        ? items
+            .map((x) => {
+              const fijo = x.es_fijo === "SI" ? " <b>F</b>" : "";
+              const name = x.nombre || x.id_meli || "";
+              return `<li>${escapeHtml(name)}${fijo}</li>`;
+            })
+            .join("")
+        : "";
+
+      const toggleLabel = expanded ? "Colapsar" : (remaining > 0 ? `+${remaining} más` : "Ver");
+      const canToggle = assigned > maxPeek;
 
       return `
         <div class="flow-col" data-flow="${escapeAttr(f)}">
-          <h3>
-            <span>${escapeHtml(f)}</span>
-            <button class="btn ghost" style="padding:8px 10px;border-radius:12px" data-genmsg>Generar mensaje</button>
-          </h3>
-          <ul>${lis || `<li class="muted">—</li>`}</ul>
+          <div class="flow-head">
+            <div class="flow-head-top">
+              <div class="flow-name">${escapeHtml(f)}</div>
+              <button class="btn ghost" style="padding:8px 10px;border-radius:12px" data-genmsg>Generar mensaje</button>
+            </div>
+            <div class="flow-meta">
+              <span class="chip ${loadCls}" title="Asignados / Requeridos"><span class="dot"></span>${assigned} / ${req || "—"}</span>
+              <span class="chip ${status.cls}" title="Estado del mensaje"><span class="dot"></span>${escapeHtml(status.label)}</span>
+              ${canToggle ? `<button class="linkbtn" type="button" data-toggle>${escapeHtml(toggleLabel)}</button>` : ``}
+            </div>
+          </div>
+
+          <div class="flow-peek">
+            ${peekNames || `<span class="muted">—</span>`}
+            ${(!expanded && remaining > 0) ? ` · <button class="linkbtn" type="button" data-toggle>+${remaining} más</button>` : ``}
+          </div>
+
+          ${expanded ? `<ul class="flow-list">${lis}</ul>` : ``}
         </div>
       `;
     })
@@ -624,14 +683,80 @@ function renderPlan() {
     btn.addEventListener("click", async () => {
       const flow = btn.closest("[data-flow]")?.getAttribute("data-flow");
       if (!flow) return;
-      await generarMensajePorFlujo_(unescapeAttr(flow));
+      await generarMensajePorFlujo_(unescapeAttr(flow), btn);
+    });
+  });
+
+  host.querySelectorAll("[data-toggle]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const flow = btn.closest("[data-flow]")?.getAttribute("data-flow");
+      if (!flow) return;
+      const f = unescapeAttr(flow);
+      if (S._planUI.expanded.has(f)) S._planUI.expanded.delete(f);
+      else S._planUI.expanded.add(f);
+      renderPlan();
     });
   });
 }
 
-async function generarMensajePorFlujo_(flujo) {
+function mountPlanControls_() {
+  if (mountPlanControls_._mounted) return;
+  const inp = $("planSearch");
+  const clr = $("planSearchClear");
+  const sel = $("planSort");
+  if (!inp || !sel) return; // no está en la vista
+
+  mountPlanControls_._mounted = true;
+
+  inp.value = S._planUI?.q || "";
+  sel.value = S._planUI?.sort || "alpha";
+  const wrap = inp.closest(".search");
+  if (wrap) wrap.classList.toggle("has", !!inp.value);
+
+  inp.addEventListener("input", debounce(() => {
+    S._planUI.q = inp.value || "";
+    if (wrap) wrap.classList.toggle("has", !!inp.value);
+    renderPlan();
+  }, 180));
+
+  clr?.addEventListener("click", () => {
+    inp.value = "";
+    S._planUI.q = "";
+    if (wrap) wrap.classList.remove("has");
+    renderPlan();
+  });
+
+  sel.addEventListener("change", () => {
+    S._planUI.sort = sel.value || "alpha";
+    renderPlan();
+  });
+}
+
+function flowMsgStatus_(flow) {
+  const today = todayYMD();
+  const out = (S.outbox || []).slice();
+  // POR_FLUJO guarda el nombre del flujo en el campo "canal"
+  const rows = out.filter((r) => String(r?.tipo || "").toUpperCase() === "POR_FLUJO" && String(r?.canal || "") === String(flow) && String(r?.fecha || "") === String(today));
+  if (!rows.length) return { label: "Mensaje: —", cls: "" };
+  // tomamos la última por row (mayor)
+  rows.sort((a, b) => Number(b.row || 0) - Number(a.row || 0));
+  const estado = String(rows[0].estado || "").toUpperCase();
+  if (estado.includes("ENVIADO")) return { label: "Mensaje: enviado", cls: "ok" };
+  if (estado.includes("ERROR")) return { label: "Mensaje: error", cls: "bad" };
+  if (estado.includes("PROGRAMADO")) return { label: "Mensaje: programado", cls: "warn" };
+  return { label: "Mensaje: pendiente", cls: "warn" };
+}
+
+async function generarMensajePorFlujo_(flujo, btn = null) {
   setErr("");
   try {
+    // feedback inmediato y seguro (evita doble click)
+    const prevTxt = btn ? btn.textContent : "";
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Generando...";
+    }
+
     const items = (S.plan || []).filter((x) => x?.flujo === flujo && x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES");
     if (!items.length) return toast("Mensaje", "No hay perfiles asignados");
 
@@ -652,9 +777,15 @@ async function generarMensajePorFlujo_(flujo) {
     await API.slackOutboxAppend(fechaISO, "POR_FLUJO", flujo, "", msg, "PENDIENTE - SIN CANAL");
     S.outbox = await API.slackOutboxList();
     renderOutbox();
-    toast("Outbox", `Mensaje generado: ${flujo}`);
+    renderPlan();
+    toast("Outbox", `Mensaje generado: ${flujo} · ${items.length} perfiles`);
   } catch (e) {
     setErr(`Mensaje por flujo: ${e.message || e}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Generar mensaje";
+    }
   }
 }
 
@@ -669,284 +800,6 @@ function channelOptionsHtml(selectedId = "") {
     })
   );
   return opts.join("");
-}
-
-
-/* ========= Slack Composer ========= */
-S.slackComposer = S.slackComposer || { channel_id: "", mentions: [], message: "" };
-
-function slackColabMap_() {
-  const map = new Map();
-  (S.colabs || []).forEach((c) => {
-    const v = colabRowView(c);
-    const id = String(v.id || "").trim();
-    if (!id) return;
-    // slackId can live in different columns; try common ones
-    const slackId = String(c.slack_id || c.SLACK_ID || c.Slack_ID || c.slackId || v.slackId || "").trim();
-    const nombre = String(v.nombre || "").trim() || id;
-    map.set(id, { id, nombre, slackId });
-  });
-  return map;
-}
-
-function slackRenderMentions_() {
-  const wrap = $("slackMentions");
-  if (!wrap) return;
-
-  const colMap = slackColabMap_();
-  const items = (S.slackComposer.mentions || []).map((id) => colMap.get(id) || { id, nombre: id, slackId: "" });
-
-  if (!items.length) {
-    wrap.innerHTML = '<div class="muted">Sin menciones.</div>';
-    return;
-  }
-
-  wrap.innerHTML = items.map((it) => {
-    const label = it.nombre ? `${it.nombre} (${it.id})` : it.id;
-    return `<span class="chip" data-id="${escapeAttr(it.id)}">${escapeHtml(label)}<span class="x" title="Quitar">×</span></span>`;
-  }).join("");
-
-  wrap.querySelectorAll(".chip .x").forEach((x) => {
-    x.addEventListener("click", (e) => {
-      const id = e.target.closest(".chip")?.getAttribute("data-id");
-      if (!id) return;
-      S.slackComposer.mentions = (S.slackComposer.mentions || []).filter((v) => v !== id);
-      slackRenderMentions_();
-      slackUpdateHint_();
-    });
-  });
-}
-
-function slackBuildMentionText_() {
-  const colMap = slackColabMap_();
-  const parts = [];
-  for (const id of (S.slackComposer.mentions || [])) {
-    const it = colMap.get(id);
-    if (!it) { parts.push(id); continue; }
-    if (it.slackId) parts.push(`<@${it.slackId}>`);
-    else parts.push(it.nombre || id);
-  }
-  return parts.join(" ");
-}
-
-function slackUpdateHint_() {
-  const hint = $("slackCompHint");
-  if (!hint) return;
-  const colMap = slackColabMap_();
-  const missing = (S.slackComposer.mentions || []).filter((id) => !(colMap.get(id)?.slackId));
-  hint.textContent = missing.length ? `Atencion: ${missing.length} menciones sin Slack ID (se mostraran como texto).` : "";
-}
-
-function renderSlackComposer() {
-  const root = $("slackComposer");
-  if (!root) return;
-
-  const sel = $("slackCompChannel");
-  if (sel) {
-    sel.innerHTML = channelOptionsHtml(S.slackComposer.channel_id || "");
-    sel.value = S.slackComposer.channel_id || "";
-    sel.onchange = () => { S.slackComposer.channel_id = sel.value; };
-  }
-
-  const txt = $("slackCompMsg");
-  if (txt) {
-    txt.value = S.slackComposer.message || "";
-    txt.oninput = () => { S.slackComposer.message = txt.value; };
-  }
-
-  $("btnSlackUseSelection")?.addEventListener("click", () => {
-    const ids = Array.from(S.selColabs || []);
-    if (!ids.length) { toast("Slack", "No hay seleccionados en Colaboradores"); return; }
-    const current = new Set(S.slackComposer.mentions || []);
-    ids.forEach((id) => current.add(id));
-    S.slackComposer.mentions = Array.from(current);
-    slackRenderMentions_();
-    slackUpdateHint_();
-  });
-
-  $("btnSlackClearMentions")?.addEventListener("click", () => {
-    S.slackComposer.mentions = [];
-    slackRenderMentions_();
-    slackUpdateHint_();
-  });
-
-  // Buscar colaborador para mencionar (dentro del Slack tab)
-  const qInp = $("slackCompColabSearch");
-  const qClear = $("slackCompColabClear");
-  if (qInp) {
-    qInp.oninput = () => slackRenderColabSuggs_();
-    qInp.onkeydown = (e) => {
-      if (e.key === "Enter") { e.preventDefault(); slackAddFirstMatch_(); }
-    };
-  }
-  qClear?.addEventListener("click", () => {
-    if (qInp) qInp.value = "";
-    slackRenderColabSuggs_();
-  });
-
-  $("btnSlackAddMention")?.addEventListener("click", () => slackAddFirstMatch_());
-
-  $("btnSlackAddToOutbox")?.addEventListener("click", async () => {
-    setErr("");
-    try {
-      const channel_id = String($("slackCompChannel")?.value || "").trim();
-      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
-      const mentionText = slackBuildMentionText_();
-      const body = String($("slackCompMsg")?.value || "").trim();
-      const full = [mentionText, body].filter(Boolean).join("\n");
-
-      if (!full) throw new Error("El mensaje esta vacio.");
-      if (!channel_id) throw new Error("Selecciona un canal.");
-
-      const fechaISO = todayYMD();
-      // reuse existing outbox append: (fecha, tipo, flujo, canal, channel_id, mensaje, estado)
-      await API.slackOutboxAppend(fechaISO, "MANUAL", canal, channel_id, full, "PENDIENTE");
-      S.outbox = await API.slackOutboxList();
-      renderOutbox();
-      toast("Slack", "Agregado a Outbox");
-    } catch (e) {
-      setErr(`Slack: ${e.message || e}`);
-    }
-  });
-
-  // Descartar (limpia el composer)
-  $("btnSlackDiscard")?.addEventListener("click", () => {
-    S.slackComposer = { channel_id: "", mentions: [], message: "" };
-    const sel = $("slackCompChannel");
-    if (sel) sel.value = "";
-    const txt = $("slackCompMsg");
-    if (txt) txt.value = "";
-    if (qInp) qInp.value = "";
-    slackRenderMentions_();
-    slackRenderColabSuggs_();
-    slackUpdateHint_();
-  });
-
-  // Emoji picker (simple, sin depender de Slack API)
-  initEmojiPicker_();
-
-  slackRenderMentions_();
-  slackUpdateHint_();
-  slackRenderColabSuggs_();
-}
-
-function slackFindColabs_(q) {
-  q = norm(String(q || "").trim());
-  if (!q) return [];
-  const all = (S.colabs || []).map((c) => colabRowView(c)).filter((v) => v.id);
-  const scored = [];
-  for (const v of all) {
-    const hay =
-      norm(v.id).includes(q) ||
-      norm(v.nombre).includes(q) ||
-      norm(v.mailProd).includes(q) ||
-      norm(v.mailExt).includes(q);
-    if (!hay) continue;
-    // score rudimentario (prioriza match por id/email)
-    let s = 0;
-    if (norm(v.id) === q) s += 100;
-    if (norm(v.mailProd) === q) s += 90;
-    if (norm(v.mailExt) === q) s += 80;
-    if (norm(v.nombre) === q) s += 70;
-    if (norm(v.id).startsWith(q)) s += 20;
-    if (norm(v.mailProd).startsWith(q)) s += 15;
-    if (norm(v.nombre).startsWith(q)) s += 10;
-    scored.push({ v, s });
-  }
-  scored.sort((a, b) => b.s - a.s);
-  return scored.slice(0, 8).map((x) => x.v);
-}
-
-function slackRenderColabSuggs_() {
-  const hint = $("slackCompColabHint");
-  const q = String($("slackCompColabSearch")?.value || "").trim();
-  if (!hint) return;
-  const res = slackFindColabs_(q);
-  if (!q) { hint.innerHTML = ""; return; }
-  if (!res.length) { hint.innerHTML = '<span class="muted">Sin coincidencias</span>'; return; }
-  hint.innerHTML = res.map((v) => {
-    const label = `${escapeHtml(v.nombre || v.id)} (${escapeHtml(v.id)})`;
-    return `<span class="chip" data-id="${escapeAttr(v.id)}" title="Agregar">${label}</span>`;
-  }).join(" ");
-  hint.querySelectorAll(".chip").forEach((ch) => {
-    ch.addEventListener("click", () => {
-      const id = ch.getAttribute("data-id");
-      if (id) slackAddMentionById_(id);
-    });
-  });
-}
-
-function slackAddMentionById_(id) {
-  id = String(id || "").trim();
-  if (!id) return;
-  const current = new Set(S.slackComposer.mentions || []);
-  current.add(id);
-  S.slackComposer.mentions = Array.from(current);
-  slackRenderMentions_();
-  slackUpdateHint_();
-}
-
-function slackAddFirstMatch_() {
-  const q = String($("slackCompColabSearch")?.value || "").trim();
-  const res = slackFindColabs_(q);
-  if (!res.length) { toast("Slack", "No hay coincidencias para mencionar"); return; }
-  slackAddMentionById_(res[0].id);
-}
-
-// Emoji picker basico (lista comun). Si queres emojis custom del workspace:
-// eso es fase 2 (Slack emoji.list con token server-side).
-const COMMON_EMOJIS_ = [
-  'white_check_mark','x','warning','rotating_light','fire','sparkles','rocket','memo','calendar','clock1',
-  'hourglass_flowing_sand','bell','mega','pushpin','eyes','thinking_face','point_right','point_left','point_up',
-  'arrow_right','arrow_down','arrow_up','arrow_left','heavy_plus_sign','heavy_minus_sign','repeat','recycle',
-  'chart_with_upwards_trend','bar_chart','clipboard','paperclip','link','speech_balloon','bulb','hammer_and_wrench',
-  'gear','lock','unlock','construction','white_circle','large_blue_circle','large_green_circle','large_orange_circle',
-  'large_red_circle','black_circle','blue_heart','green_heart','yellow_heart','heart','tada','raised_hands','muscle'
-];
-
-function initEmojiPicker_() {
-  const btn = $("btnSlackEmoji");
-  const panel = $("slackEmojiPanel");
-  if (!btn || !panel) return;
-
-  const search = $("slackEmojiSearch");
-  const clear = $("slackEmojiClear");
-  const close = $("slackEmojiClose");
-  const list = $("slackEmojiList");
-
-  const render = () => {
-    if (!list) return;
-    const q = norm(String(search?.value || "").trim());
-    const items = COMMON_EMOJIS_.filter((e) => !q || norm(e).includes(q)).slice(0, 60);
-    list.innerHTML = items.map((e) => `<span class="chip" data-emo=":${escapeAttr(e)}:" title=":${escapeAttr(e)}:">:${escapeHtml(e)}:</span>`).join(" ");
-    list.querySelectorAll(".chip").forEach((ch) => {
-      ch.addEventListener("click", () => {
-        const code = ch.getAttribute("data-emo") || "";
-        insertAtCursor_($("slackCompMsg"), code + " ");
-      });
-    });
-  };
-
-  const toggle = (on) => {
-    panel.style.display = on ? "block" : "none";
-    if (on) { render(); search?.focus(); }
-  };
-
-  btn.onclick = () => toggle(panel.style.display === "none");
-  close?.addEventListener("click", () => toggle(false));
-  clear?.addEventListener("click", () => { if (search) search.value = ""; render(); });
-  if (search) search.oninput = () => render();
-}
-
-function insertAtCursor_(el, text) {
-  if (!el) return;
-  const start = el.selectionStart ?? el.value.length;
-  const end = el.selectionEnd ?? el.value.length;
-  const v = el.value || "";
-  el.value = v.slice(0, start) + text + v.slice(end);
-  const pos = start + text.length;
-  el.selectionStart = el.selectionEnd = pos;
-  el.dispatchEvent(new Event("input"));
 }
 
 const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
@@ -1027,7 +880,6 @@ function renderOutbox() {
               <div style="display:flex;gap:8px;justify-content:flex-end">
                 <button class="btn ghost" data-prog>Programar</button>
                 <button class="btn primary" data-send>Enviar</button>
-                <button class="btn ghost" data-del title="Borrar borrador">Borrar</button>
               </div>
             </div>
           `;
@@ -1097,20 +949,6 @@ function renderOutbox() {
       await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
 
       await onOutboxSend(row);
-    });
-
-    tr.querySelector("[data-del]")?.addEventListener("click", async () => {
-      if (isProg) return; // no borrar programados desde aca
-      if (!confirm("Borrar este borrador de la Outbox?")) return;
-      setErr("");
-      try {
-        await API.slackOutboxDelete(row);
-        S.outbox = await API.slackOutboxList();
-        renderOutbox();
-        toast("Outbox", "Borrado");
-      } catch (e) {
-        setErr(`Borrar: ${e.message || e}`);
-      }
     });
   });
 }
@@ -1410,27 +1248,10 @@ function renderPresentismo() {
       const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
       const tds = days
         .map((d) => {
-          const raw = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
+          const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
           const cls = d.isFeriado ? "feriado" : "";
-
-          // Value encoding (server):
-          // - Manual: plain "P" or licencia code (e.g. "VAC", "SICK")
-          // - PeopleForce: "PF|<code>|<status>" (status: approved|pending|rejected|withdrawn|other)
-          let v = raw;
-          let extraCls = "";
-
-          if (raw.startsWith("PF|")) {
-            const parts = raw.split("|");
-            v = parts[1] || "";
-            const st = (parts[2] || "").toLowerCase();
-            extraCls = "pf" + (st ? ` ${st}` : "");
-          } else if (raw && raw.trim() !== "P") {
-            // licencia manual
-            extraCls = "manual";
-          }
-
           const isLic = v && String(v).trim() !== "P";
-          const c2 = [cls, isLic ? "lic" : "", extraCls].filter(Boolean).join(" ");
+          const c2 = [cls, isLic ? "lic" : ""].filter(Boolean).join(" ");
           return `<td class="${c2}">${escapeHtml(v)}</td>`;
         })
         .join("");

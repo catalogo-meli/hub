@@ -74,9 +74,6 @@ export const API = {
   slackOutboxAppend: (fechaISO, tipo, canal, channel_id, mensaje, estado) =>
     post("slack.outbox.append", { fechaISO, tipo, canal, channel_id, mensaje, estado }),
 
-  slackOutboxDelete: (row) =>
-    post("slack.outbox.delete", { row: assertRow_(row) }),
-
   // ✅ NUEVO: Programar / Desprogramar (requiere actions en Code.gs)
   slackOutboxProgramar: (row, programado_para) =>
     post("slack.outbox.programar", {
@@ -97,10 +94,6 @@ export const API = {
   // ✅ Config Flujos: incluir/excluir en mensaje GENERAL
   configFlujosSetIncluirMensaje: (flujo, value) =>
     post("config.flujos.setIncluirMensaje", { flujo, value: !!value }),
-
-  // PeopleForce (Presentismo)
-  peopleforceHealth: () => get("peopleforce.health"),
-  peopleforceSync: () => post("peopleforce.sync", {}),
 
   presentismoSemanas: () => get("presentismo.semanas"),
   presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
