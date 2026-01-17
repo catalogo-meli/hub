@@ -375,6 +375,7 @@ async function loadCore() {
     renderFlujos();
     renderPlan();
     renderOutbox();
+    renderSlackComposer();
     renderColabs();
     renderHabil();
     renderPresentismo();
@@ -668,6 +669,140 @@ function channelOptionsHtml(selectedId = "") {
     })
   );
   return opts.join("");
+}
+
+
+/* ========= Slack Composer ========= */
+S.slackComposer = S.slackComposer || { channel_id: "", mentions: [], message: "" };
+
+function slackColabMap_() {
+  const map = new Map();
+  (S.colabs || []).forEach((c) => {
+    const v = colabRowView(c);
+    const id = String(v.id || "").trim();
+    if (!id) return;
+    // slackId can live in different columns; try common ones
+    const slackId = String(c.slack_id || c.SLACK_ID || c.Slack_ID || c.slackId || v.slackId || "").trim();
+    const nombre = String(v.nombre || "").trim() || id;
+    map.set(id, { id, nombre, slackId });
+  });
+  return map;
+}
+
+function slackRenderMentions_() {
+  const wrap = $("slackMentions");
+  if (!wrap) return;
+
+  const colMap = slackColabMap_();
+  const items = (S.slackComposer.mentions || []).map((id) => colMap.get(id) || { id, nombre: id, slackId: "" });
+
+  if (!items.length) {
+    wrap.innerHTML = '<div class="muted">Sin menciones.</div>';
+    return;
+  }
+
+  wrap.innerHTML = items.map((it) => {
+    const label = it.nombre ? `${it.nombre} (${it.id})` : it.id;
+    return `<span class="chip" data-id="${escapeAttr(it.id)}">${escapeHtml(label)}<span class="x" title="Quitar">×</span></span>`;
+  }).join("");
+
+  wrap.querySelectorAll(".chip .x").forEach((x) => {
+    x.addEventListener("click", (e) => {
+      const id = e.target.closest(".chip")?.getAttribute("data-id");
+      if (!id) return;
+      S.slackComposer.mentions = (S.slackComposer.mentions || []).filter((v) => v !== id);
+      slackRenderMentions_();
+      slackUpdateHint_();
+    });
+  });
+}
+
+function slackBuildMentionText_() {
+  const colMap = slackColabMap_();
+  const parts = [];
+  for (const id of (S.slackComposer.mentions || [])) {
+    const it = colMap.get(id);
+    if (!it) { parts.push(id); continue; }
+    if (it.slackId) parts.push(`<@${it.slackId}>`);
+    else parts.push(it.nombre || id);
+  }
+  return parts.join(" ");
+}
+
+function slackUpdateHint_() {
+  const hint = $("slackCompHint");
+  if (!hint) return;
+  const colMap = slackColabMap_();
+  const missing = (S.slackComposer.mentions || []).filter((id) => !(colMap.get(id)?.slackId));
+  hint.textContent = missing.length ? `Atencion: ${missing.length} menciones sin Slack ID (se mostraran como texto).` : "";
+}
+
+function renderSlackComposer() {
+  const root = $("slackComposer");
+  if (!root) return;
+
+  const sel = $("slackCompChannel");
+  if (sel) {
+    sel.innerHTML = channelOptionsHtml(S.slackComposer.channel_id || "");
+    sel.value = S.slackComposer.channel_id || "";
+    sel.onchange = () => { S.slackComposer.channel_id = sel.value; };
+  }
+
+  const txt = $("slackCompMsg");
+  if (txt) {
+    txt.value = S.slackComposer.message || "";
+    txt.oninput = () => { S.slackComposer.message = txt.value; };
+  }
+
+  $("btnSlackUseSelection")?.addEventListener("click", () => {
+    const ids = Array.from(S.selColabs || []);
+    if (!ids.length) { toast("Slack", "No hay seleccionados en Colaboradores"); return; }
+    const current = new Set(S.slackComposer.mentions || []);
+    ids.forEach((id) => current.add(id));
+    S.slackComposer.mentions = Array.from(current);
+    slackRenderMentions_();
+    slackUpdateHint_();
+  });
+
+  $("btnSlackClearMentions")?.addEventListener("click", () => {
+    S.slackComposer.mentions = [];
+    slackRenderMentions_();
+    slackUpdateHint_();
+  });
+
+  $("btnSlackPreview")?.addEventListener("click", () => {
+    const mentionText = slackBuildMentionText_();
+    const body = String($("slackCompMsg")?.value || "").trim();
+    const full = [mentionText, body].filter(Boolean).join("\n");
+    if (!full) { toast("Slack", "No hay contenido para previsualizar"); return; }
+    alert(full);
+  });
+
+  $("btnSlackAddToOutbox")?.addEventListener("click", async () => {
+    setErr("");
+    try {
+      const channel_id = String($("slackCompChannel")?.value || "").trim();
+      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
+      const mentionText = slackBuildMentionText_();
+      const body = String($("slackCompMsg")?.value || "").trim();
+      const full = [mentionText, body].filter(Boolean).join("\n");
+
+      if (!full) throw new Error("El mensaje esta vacio.");
+      if (!channel_id) throw new Error("Selecciona un canal.");
+
+      const fechaISO = todayYMD();
+      // reuse existing outbox append: (fecha, tipo, flujo, canal, channel_id, mensaje, estado)
+      await API.slackOutboxAppend(fechaISO, "MANUAL", canal, channel_id, full, "PENDIENTE");
+      S.outbox = await API.slackOutboxList();
+      renderOutbox();
+      toast("Slack", "Agregado a Outbox");
+    } catch (e) {
+      setErr(`Slack: ${e.message || e}`);
+    }
+  });
+
+  slackRenderMentions_();
+  slackUpdateHint_();
 }
 
 const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
@@ -1116,10 +1251,27 @@ function renderPresentismo() {
       const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
       const tds = days
         .map((d) => {
-          const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
+          const raw = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
           const cls = d.isFeriado ? "feriado" : "";
+
+          // Value encoding (server):
+          // - Manual: plain "P" or licencia code (e.g. "VAC", "SICK")
+          // - PeopleForce: "PF|<code>|<status>" (status: approved|pending|rejected|withdrawn|other)
+          let v = raw;
+          let extraCls = "";
+
+          if (raw.startsWith("PF|")) {
+            const parts = raw.split("|");
+            v = parts[1] || "";
+            const st = (parts[2] || "").toLowerCase();
+            extraCls = "pf" + (st ? ` ${st}` : "");
+          } else if (raw && raw.trim() !== "P") {
+            // licencia manual
+            extraCls = "manual";
+          }
+
           const isLic = v && String(v).trim() !== "P";
-          const c2 = [cls, isLic ? "lic" : ""].filter(Boolean).join(" ");
+          const c2 = [cls, isLic ? "lic" : "", extraCls].filter(Boolean).join(" ");
           return `<td class="${c2}">${escapeHtml(v)}</td>`;
         })
         .join("");

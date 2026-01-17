@@ -106,6 +106,11 @@
     }
     .pill b{color:var(--txt);font-weight:600}
 
+    .chips{display:flex;flex-wrap:wrap;gap:8px}
+    .chip{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:var(--chip);border:1px solid var(--line);font-size:12px}
+    .chip .x{cursor:pointer;opacity:.8}
+    .chip .x:hover{opacity:1}
+
     .pill.ok{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.28);color:var(--txt)}
     .pill.warn{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.28);color:var(--txt)}
     .pill.bad{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.28);color:var(--txt)}
@@ -325,6 +330,12 @@
       color:#842029;
     }
 
+    .manual{outline:2px solid rgba(245,158,11,.18);background:rgba(245,158,11,.10) !important;font-weight:700}
+    .pf{outline:2px solid rgba(59,130,246,.18);background:rgba(59,130,246,.10) !important;font-weight:700}
+    .pf.approved{outline-color:rgba(34,197,94,.25);background:rgba(34,197,94,.12) !important}
+    .pf.pending{outline-color:rgba(245,158,11,.25);background:rgba(245,158,11,.12) !important}
+    .pf.rejected{outline-color:rgba(239,68,68,.28);background:rgba(239,68,68,.12) !important}
+
     th.sortable{cursor:pointer; user-select:none}
     th.sortable:hover{opacity:.9}
     th.sortable .srt{margin-left:6px;opacity:.7;font-size:12px}
@@ -449,6 +460,32 @@
 
         <h2 style="margin-top:0">Mensajes de Slack</h2>
         <div class="muted">Gestión de comunicación</div>
+        <div id="slackComposer" style="margin-top:12px">
+          <div class="row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+            <div style="min-width:260px">
+              <div class="muted" style="margin-bottom:6px">Canal</div>
+              <select class="input" id="slackCompChannel"></select>
+            </div>
+            <div class="spacer"></div>
+            <button class="btn" id="btnSlackUseSelection" title="Usar seleccion actual de Colaboradores">Usar seleccion</button>
+            <button class="btn ghost" id="btnSlackClearMentions">Limpiar menciones</button>
+          </div>
+          <div style="margin-top:10px">
+            <div class="muted" style="margin-bottom:6px">Menciones</div>
+            <div id="slackMentions" class="chips"></div>
+          </div>
+          <div style="margin-top:10px">
+            <div class="muted" style="margin-bottom:6px">Mensaje</div>
+            <textarea id="slackCompMsg" class="input" style="width:100%;min-height:110px" placeholder="Escribi el mensaje..."></textarea>
+          </div>
+          <div class="row" style="margin-top:10px;gap:10px">
+            <button class="btn" id="btnSlackPreview">Preview</button>
+            <button class="btn primary" id="btnSlackAddToOutbox">Agregar a Outbox</button>
+            <div class="spacer"></div>
+            <div class="muted" id="slackCompHint"></div>
+          </div>
+          <div class="hr"></div>
+        </div>
         <div style="margin-top:12px;overflow:auto">
           <table class="table" id="tblOutbox">
             <thead>

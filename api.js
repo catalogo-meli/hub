@@ -95,6 +95,10 @@ export const API = {
   configFlujosSetIncluirMensaje: (flujo, value) =>
     post("config.flujos.setIncluirMensaje", { flujo, value: !!value }),
 
+  // PeopleForce (Presentismo)
+  peopleforceHealth: () => get("peopleforce.health"),
+  peopleforceSync: () => post("peopleforce.sync", {}),
+
   presentismoSemanas: () => get("presentismo.semanas"),
   presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
   presentismoStats: (dateYMD) => get("presentismo.stats", { date: dateYMD }),
