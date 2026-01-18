@@ -138,7 +138,6 @@
 
     /* Slack - Emoji panel: superficie sólida + estable */
     #emojiModal{
-      overflow-x:hidden;
       background:rgba(8,12,20,.98);
       border:1px solid rgba(255,255,255,.10);
       box-shadow:0 16px 48px rgba(0,0,0,.45);
@@ -153,8 +152,18 @@
     }
 
     /* Emojis: todos juntos, un poco más grandes, sin recuadro */
-    #emojiGroups .emoji-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:6px;align-items:center}
-    #emojiGroups .emoji-btn{border:0;background:transparent;font-size:20px;line-height:1;padding:2px;cursor:pointer;color:var(--txt)}
+    #emojiGroups .emoji-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:8px}
+    @media (max-width: 900px){#emojiGroups .emoji-grid{grid-template-columns:repeat(10,1fr)}}
+    @media (max-width: 600px){#emojiGroups .emoji-grid{grid-template-columns:repeat(8,1fr)}}
+    #emojiGroups .emoji-btn{
+      border:0;
+      background:transparent;
+      font-size:22px;
+      line-height:1;
+      padding:4px;
+      cursor:pointer;
+      color:var(--txt);
+    }
     #emojiGroups .emoji-btn:hover{filter:brightness(1.1)}
     #emojiTabs .etab{
       padding:4px 8px;
@@ -175,7 +184,7 @@
       background:rgba(255,255,255,.98);
       border-color:rgba(0,0,0,.12);
       box-shadow:0 16px 48px rgba(0,0,0,.15);
-    ;overflow-x:hidden}
+    }
     [data-theme="light"] #emojiTabs .etab{
       border-color:rgba(0,0,0,.12);
       background:rgba(0,0,0,.03);
@@ -658,40 +667,10 @@
               <div>
                 <div class="muted" style="font-size:12px;margin-bottom:6px">Mensaje</div>
                 <div style="position:relative">
-                  <textarea class="input" id="slackComposeMsg" placeholder="Escribí el mensaje..." style="padding-right:98px"></textarea>
-                  <button class="btn icon-btn" id="btnTpl" type="button" title="Plantillas" style="position:absolute;right:56px;top:10px">🧾</button>
+                  <textarea class="input" id="slackComposeMsg" placeholder="Escribí el mensaje..." style="padding-right:56px"></textarea>
                   <button class="btn icon-btn" id="btnEmoji" type="button" title="Emojis" style="position:absolute;right:10px;top:10px">😀</button>
 
-                  <!-- Plantillas (CRUD simple sobre Comunicaciones_Templates) -->
-                  <div id="tplModal" class="card" style="display:none;position:absolute;right:56px;top:50px;min-width:420px;max-width:560px;padding:10px;z-index:125">
-                    <div class="row" style="gap:8px;align-items:center;justify-content:space-between">
-                      <div class="muted" style="font-size:12px">Plantillas</div>
-                      <button class="btn ghost" id="btnTplClose" type="button">Cerrar</button>
-                    </div>
-                    <div class="row" style="gap:8px;align-items:center;margin-top:10px">
-                      <div class="search" style="min-width:0;flex:1">
-                        <input class="input" id="tplSearch" placeholder="Buscar plantilla..." />
-                        <div class="x" id="tplSearchClear" title="Limpiar">×</div>
-                      </div>
-                      <button class="btn" id="btnTplNew" type="button">Nueva</button>
-                    </div>
-                    <div id="tplList" style="margin-top:10px;max-height:260px;overflow:auto"></div>
-
-                    <div id="tplEditor" style="display:none;margin-top:10px">
-                      <div class="row" style="gap:8px;align-items:center">
-                        <input class="input" id="tplKey" placeholder="Key" style="max-width:220px" />
-                        <div style="flex:1"></div>
-                        <button class="btn" id="btnTplCancel" type="button">Cancelar</button>
-                        <button class="btn" id="btnTplDelete" type="button">Eliminar</button>
-                        <button class="btn primary" id="btnTplSave" type="button">Guardar</button>
-                      </div>
-                      <textarea class="input" id="tplText" placeholder="Template..." style="margin-top:8px;min-height:120px"></textarea>
-                      <div class="muted" style="font-size:11px;margin-top:8px">Tip: {{lineas}}, {{flujo}}, {{mentions}} (según templates existentes).</div>
-                    </div>
-                  </div>
-
-                  <!-- Emojis -->
-                  <div id="emojiModal" class="card" style="display:none;position:absolute;right:0;top:50px;min-width:360px;max-width:460px;padding:10px;z-index:120">
+                  <div id="emojiModal" class="card" style="display:none;position:absolute;right:0;top:50px;min-width:380px;max-width:460px;padding:10px;z-index:120">
                     <div class="row" style="gap:8px;align-items:center">
                       <div class="search" style="min-width:0;flex:1">
                         <input class="input" id="emojiSearch" placeholder="Buscar emoji..." />
@@ -699,10 +678,11 @@
                       </div>
                       <button class="btn ghost" id="btnEmojiClose" type="button">Cerrar</button>
                     </div>
-                    <div id="emojiGroups" style="margin-top:10px;max-height:260px;overflow-y:auto;overflow-x:hidden"></div>
+                    <div id="emojiGroups" style="margin-top:10px;max-height:280px;overflow:auto"></div>
                   </div>
                 </div>
-              </div>            </div>
+              </div>
+            </div>
 
             <!-- Columna derecha: Menciones + Programar (mismo ancho) -->
             <div class="slack-compose-col">
@@ -720,34 +700,12 @@
                 </div>
               </div>
 
-              <div style="position:relative">
+              <div>
                 <div class="muted" style="font-size:12px;margin-bottom:6px">Programar</div>
                 <div class="row" style="gap:8px;align-items:center">
-                  <div style="position:relative;flex:1;min-width:0">
-                    <input class="input" id="slackComposeWhen" placeholder="dd/mm/aaaa --:--" readonly style="padding-right:44px;width:100%" />
-                    <button class="btn icon-btn" id="btnWhenOpen" type="button" title="Elegir fecha y hora" style="position:absolute;right:8px;top:8px">📅</button>
-                  </div>
-                </div>
-
-                <div id="whenModal" class="card" style="display:none;position:absolute;right:0;top:78px;min-width:360px;max-width:420px;padding:10px;z-index:130">
-                  <div class="row" style="gap:8px;align-items:center;justify-content:space-between">
-                    <div class="muted" style="font-size:12px">Programar mensaje</div>
-                    <button class="btn ghost" id="btnWhenClose" type="button">Cerrar</button>
-                  </div>
-                  <div class="row" style="gap:10px;align-items:end;margin-top:10px">
-                    <div style="flex:1;min-width:0">
-                      <div class="muted" style="font-size:11px;margin-bottom:6px">Fecha</div>
-                      <input class="input" type="date" id="whenDate" />
-                    </div>
-                    <div style="width:140px">
-                      <div class="muted" style="font-size:11px;margin-bottom:6px">Hora</div>
-                      <input class="input" type="time" id="whenTime" step="60" />
-                    </div>
-                  </div>
-                  <div class="row" style="gap:8px;justify-content:flex-end;margin-top:12px">
-                    <button class="btn" id="btnWhenClear" type="button">Borrar</button>
-                    <button class="btn primary" id="btnWhenApply" type="button">Confirmar</button>
-                  </div>
+                  <input class="input" type="datetime-local" id="slackComposeWhen" style="flex:1;min-width:0" />
+                  <button class="btn" id="btnWhenConfirm" type="button" style="white-space:nowrap">Confirmar</button>
+                  <span id="whenConfirmedBadge" class="badge" style="display:none">Confirmado</span>
                 </div>
                 <div class="row" style="margin-top:10px;justify-content:flex-end">
                   <button class="btn" id="btnComposeClear" type="button">Descartar</button>
