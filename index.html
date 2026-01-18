@@ -411,6 +411,32 @@
     }
     .search.has .x{display:flex}
 
+    /* Operativa diaria → Configuración de flujos: Canal Slack (combo con búsqueda) */
+    .flow-channel{position:relative}
+    .flow-channel .dd{
+      position:absolute;left:0;right:0;top:40px;
+      max-height:180px;overflow:auto;
+      background:rgba(15,23,42,.98);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:12px;
+      box-shadow:0 10px 30px rgba(0,0,0,.35);
+      z-index:60;
+      display:none;
+    }
+    [data-theme="light"] .flow-channel .dd{
+      background:rgba(255,255,255,.98);
+      border-color:rgba(15,23,42,.12);
+      box-shadow:0 10px 30px rgba(15,23,42,.12);
+    }
+    .flow-channel.open .dd{display:block}
+    .flow-channel .dd .it{padding:10px 12px;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
+    .flow-channel .dd .it:hover{background:rgba(255,255,255,.06)}
+    [data-theme="light"] .flow-channel .dd .it:hover{background:rgba(15,23,42,.05)}
+    .flow-channel .dd .muted{font-size:12px;color:var(--muted)}
+    .flow-channel .err{margin-top:6px;font-size:12px;color:#ffb4b4;display:none}
+    [data-theme="light"] .flow-channel .err{color:#b42318}
+    .flow-channel.invalid .err{display:block}
+
     .copyable{cursor:pointer}
     .copyable:hover{opacity:.85;text-decoration:underline}
 
@@ -611,7 +637,8 @@
             <thead>
               <tr>
                 <th>Flujo</th>
-                <th class="nowrap" style="text-align:center;min-width:110px">Enviar Slack </th>
+                <th class="nowrap" style="text-align:center;min-width:140px">Notificar por Slack</th>
+                <th class="nowrap" style="min-width:240px">Canal Slack</th>
                 <th class="right nowrap">Perfiles requeridos</th>
                 <th class="right nowrap">Acciones</th>
               </tr>
@@ -622,7 +649,8 @@
                 <td style="min-width:240px">
                   <input class="input" id="newFlujoName" placeholder="+ Nuevo flujo..." />
                 </td>
-                <td style="min-width:110px"></td>
+                <td style="min-width:140px"></td>
+                <td style="min-width:240px"></td>
                 <td class="right nowrap" style="min-width:140px">
                   <input class="input smallnum" id="newFlujoReq" type="number" min="0" step="1" placeholder="Req." />
                 </td>
@@ -632,6 +660,15 @@
               </tr>
             </tfoot>
           </table>
+        </div>
+
+        <div class="card" id="dailyDraftsWrap" style="margin-top:14px;display:none">
+          <div class="row" style="margin-bottom:8px">
+            <div class="pill"><b>Mensajes generados (borradores)</b></div>
+            <div class="spacer"></div>
+            <div class="pill" id="dailyDraftsMeta"></div>
+          </div>
+          <div class="flow-grid" id="dailyDrafts" style="grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:10px"></div>
         </div>
 
         <div class="hr"></div>

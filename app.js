@@ -475,11 +475,11 @@ function syncPresSemanaSelect_() {
 }
 
 /* ========= Operativa diaria: Flujos autosave ========= */
-const saveFlujoDebounced = debounce(async (flujo, perfiles) => {
+const saveFlujoDebounced = debounce(async (flujo, perfiles, channel_id) => {
   setErr("");
   try {
     $("dailyStatus").textContent = "Guardando...";
-    await API.flujosUpsert(flujo, perfiles, "");
+    await API.flujosUpsert(flujo, perfiles, channel_id || "");
     S.flujos = await API.flujosList();
     renderFlujos();
     toast("Guardado", flujo);
@@ -489,6 +489,35 @@ const saveFlujoDebounced = debounce(async (flujo, perfiles) => {
     $("dailyStatus").textContent = "Listo";
   }
 }, 420);
+
+function resolveChannelByIdOrName_(val) {
+  const raw = String(val || "").trim();
+  if (!raw) return { channel_id: "", canal: "" };
+  const canales = S.canales || [];
+  // match by id
+  let c = canales.find((x) => String(x.channel_id || "").trim() === raw);
+  if (c) return { channel_id: String(c.channel_id || "").trim(), canal: String(c.canal || "").trim() };
+  // match by name (#canal)
+  c = canales.find((x) => String(x.canal || "").trim() === raw);
+  if (c) return { channel_id: String(c.channel_id || "").trim(), canal: String(c.canal || "").trim() };
+  // unknown: keep raw as display
+  return { channel_id: raw, canal: raw };
+}
+
+function validateFlujosSlackConfig_(rows) {
+  const list = rows || (S.flujos || []);
+  const missing = list
+    .filter((f) => {
+      const incluir = !(f.incluir_en_mensaje === false || ["FALSE", "NO", "0"].includes(String(f.incluir_en_mensaje ?? "").toUpperCase()));
+      if (!incluir) return false;
+      const ch = String(f.channel_id || "").trim();
+      return !ch;
+    })
+    .map((f) => String(f.flujo || "").trim())
+    .filter(Boolean);
+  const hasSlack = list.some((f) => !(f.incluir_en_mensaje === false || ["FALSE", "NO", "0"].includes(String(f.incluir_en_mensaje ?? "").toUpperCase())));
+  return { hasSlack, missing };
+}
 
 async function onFlujoDelete(flujo) {
   setErr("");
@@ -509,17 +538,47 @@ function renderFlujos() {
   const tb = $("tblFlujos")?.querySelector("tbody");
   if (!tb) return;
 
+  const canales = S.canales || [];
+  const canalById = new Map(canales.map((c) => [String(c.channel_id || "").trim(), c]));
+  const idByCanal = new Map(canales.map((c) => [String(c.canal || "").trim(), String(c.channel_id || "").trim()]));
+
+  const resolveChannel_ = (raw) => {
+    const v = String(raw || "").trim();
+    if (!v) return { channel_id: "", canal: "" };
+    if (canalById.has(v)) {
+      const c = canalById.get(v);
+      return { channel_id: String(c.channel_id || "").trim(), canal: String(c.canal || "").trim() };
+    }
+    // si vino como nombre (#canal)
+    if (idByCanal.has(v)) {
+      const id = idByCanal.get(v);
+      const c = canalById.get(id);
+      return { channel_id: id, canal: String(c?.canal || v) };
+    }
+    // fallback: muestro lo que haya, pero no lo tomo como id válido
+    return { channel_id: "", canal: v };
+  };
+
   const rows = (S.flujos || []).slice().sort((a, b) => String(a.flujo).localeCompare(String(b.flujo)));
   tb.innerHTML = rows
     .map((f) => {
       const name = f.flujo ?? "";
       const req = Number(f.perfiles_requeridos ?? f.cantidad ?? 0) || 0;
       const incluir = !(f.incluir_en_mensaje === false || ["FALSE","NO","0"].includes(String(f.incluir_en_mensaje ?? "").toUpperCase()));
+      const ch = resolveChannel_(f.channel_id);
+      const invalid = incluir && !ch.channel_id;
       return `
-        <tr data-flujo="${escapeAttr(name)}">
+        <tr data-flujo="${escapeAttr(name)}" data-channel-id="${escapeAttr(ch.channel_id || "")}">
           <td><b>${escapeHtml(name)}</b></td>
-          <td style="text-align:center;min-width:110px">
+          <td style="text-align:center;min-width:140px">
             <input type="checkbox" data-inc-msg ${incluir ? "checked" : ""} />
+          </td>
+          <td style="min-width:240px">
+            <div class="flow-channel ${invalid ? "invalid" : ""}" data-ch-wrap>
+              <input class="input" data-ch-inp placeholder="Seleccionar canal..." value="${escapeAttr(ch.canal || "")}" ${incluir ? "" : "disabled"} />
+              <div class="dd" data-ch-dd></div>
+              <div class="err">Seleccioná un canal.</div>
+            </div>
           </td>
           <td class="right nowrap" style="min-width:140px">
             <input class="input smallnum" type="number" min="0" step="1" value="${req}" data-req />
@@ -535,12 +594,30 @@ function renderFlujos() {
   tb.querySelectorAll("tr").forEach((tr) => {
     const flujo = tr.getAttribute("data-flujo");
     const inp = tr.querySelector("[data-req]");
+    const chWrap = tr.querySelector("[data-ch-wrap]");
+    const chInp = tr.querySelector("[data-ch-inp]");
+    const chDd = tr.querySelector("[data-ch-dd]");
+    const getChannelId = () => String(tr.getAttribute("data-channel-id") || "").trim();
+    const setChannelId = (id) => tr.setAttribute("data-channel-id", String(id || ""));
     // Incluir / Excluir en mensaje GENERAL (persistido en Config_Flujos)
     const chk = tr.querySelector("[data-inc-msg]");
     chk?.addEventListener("change", async () => {
       const value = !!chk.checked;
       try {
         await API.configFlujosSetIncluirMensaje(unescapeAttr(flujo), value);
+        // Si se desactiva Slack, se limpia el canal (no se exige)
+        if (!value) {
+          setChannelId("");
+          if (chInp) { chInp.value = ""; chInp.disabled = true; }
+          chWrap?.classList.remove("invalid");
+          // persisto canal vacío, manteniendo perfiles requeridos
+          const perfiles = Number(inp?.value || 0) || 0;
+          saveFlujoDebounced(unescapeAttr(flujo), perfiles, "");
+        } else {
+          if (chInp) { chInp.disabled = false; chInp.focus(); }
+          // si no hay canal, marcar error
+          if (!getChannelId()) chWrap?.classList.add("invalid");
+        }
         // actualizar cache local si existe
         const idx = (S.flujos || []).findIndex((x) => String(x.flujo) === String(unescapeAttr(flujo)));
         if (idx >= 0) S.flujos[idx].incluir_en_mensaje = value;
@@ -549,23 +626,89 @@ function renderFlujos() {
         setErr(e?.message || String(e));
         chk.checked = !value; // rollback visual
       }
+      updateDailyGenerateDisabled_();
     });
 
     // autosave on input (debounced) + blur (for mobile)
     inp.addEventListener("input", () => {
       const perfiles = Number(inp.value || 0) || 0;
-      saveFlujoDebounced(unescapeAttr(flujo), perfiles);
+      saveFlujoDebounced(unescapeAttr(flujo), perfiles, getChannelId());
     });
     inp.addEventListener("blur", () => {
       const perfiles = Number(inp.value || 0) || 0;
-      saveFlujoDebounced(unescapeAttr(flujo), perfiles);
+      saveFlujoDebounced(unescapeAttr(flujo), perfiles, getChannelId());
     });
+
+    // Canal Slack combo (búsqueda, dropdown absoluto)
+    if (chInp && chDd && chWrap) {
+      const close = () => chWrap.classList.remove("open");
+      const open = () => chWrap.classList.add("open");
+
+      const renderDd = (q) => {
+        const qq = norm(q || "");
+        const list = (S.canales || [])
+          .filter((c) => {
+            const name = String(c.canal || "");
+            return !qq || norm(name).includes(qq);
+          })
+          .slice(0, 10);
+
+        if (!list.length) {
+          chDd.innerHTML = `<div class="it"><span class="muted">Sin resultados</span></div>`;
+          return;
+        }
+
+        chDd.innerHTML = list
+          .map((c) => {
+            const name = String(c.canal || "");
+            const id = String(c.channel_id || "");
+            return `<div class="it" data-pick="${escapeAttr(id)}"><span>${escapeHtml(name)}</span><span class="muted">${escapeHtml(id)}</span></div>`;
+          })
+          .join("");
+
+        chDd.querySelectorAll("[data-pick]").forEach((it) => {
+          it.addEventListener("mousedown", (ev) => {
+            ev.preventDefault(); // evita blur antes de seleccionar
+            const id = it.getAttribute("data-pick");
+            const c = (S.canales || []).find((x) => String(x.channel_id || "") === String(id));
+            const canal = String(c?.canal || "").trim();
+            setChannelId(id);
+            chInp.value = canal;
+            chWrap.classList.remove("invalid");
+            close();
+            const perfiles = Number(inp?.value || 0) || 0;
+            saveFlujoDebounced(unescapeAttr(flujo), perfiles, id);
+            updateDailyGenerateDisabled_();
+          });
+        });
+      };
+
+      chInp.addEventListener("focus", () => {
+        if (chInp.disabled) return;
+        renderDd(chInp.value);
+        open();
+      });
+      chInp.addEventListener("input", () => {
+        if (chInp.disabled) return;
+        renderDd(chInp.value);
+        open();
+        // si escribe, invalido hasta que seleccione un canal válido
+        if (!getChannelId()) chWrap.classList.add("invalid");
+        updateDailyGenerateDisabled_();
+      });
+
+      document.addEventListener("mousedown", (ev) => {
+        if (!chWrap.contains(ev.target)) close();
+      });
+    }
 
     tr.querySelector("[data-del]")?.addEventListener("click", async () => {
       if (!confirm(`Eliminar flujo "${unescapeAttr(flujo)}"?`)) return;
       await onFlujoDelete(unescapeAttr(flujo));
     });
   });
+
+  updateDailyGenerateDisabled_();
 
   // Alerta: perfiles disponibles vs requeridos (basado en presentes hoy)
   const alertEl = $("dailyAssignAlert");
@@ -593,7 +736,28 @@ if (diff > 0) {
     alertEl.innerHTML = escapeHtml(msg);
   }
 
-}/* ========= Planificación: columnas + generar mensaje por flujo ========= */
+}
+
+function updateDailyGenerateDisabled_() {
+  const btn = $("btnGenerarPlan");
+  if (!btn) return;
+
+  const trs = Array.from(document.querySelectorAll("#tblFlujos tbody tr"));
+  let anySlack = false;
+  let missing = false;
+  for (const tr of trs) {
+    const chk = tr.querySelector("[data-inc-msg]");
+    const on = !!chk?.checked;
+    if (on) {
+      anySlack = true;
+      const ch = String(tr.getAttribute("data-channel-id") || "").trim();
+      if (!ch) missing = true;
+    }
+  }
+  btn.disabled = anySlack && missing;
+}
+
+/* ========= Planificación: columnas + generar mensaje por flujo ========= */
 function renderPlan() {
   const host = $("planGrid");
   if (!host) return;
@@ -1041,6 +1205,98 @@ function renderOutbox() {
 
   bindTable(tbDrafts);
   bindTable(tbScheduled);
+
+  // Vista rápida de borradores generados desde Operativa diaria (por canal)
+  renderDailyDrafts_();
+}
+
+function renderDailyDrafts_() {
+  const wrap = $("dailyDraftsWrap");
+  const host = $("dailyDrafts");
+  const meta = $("dailyDraftsMeta");
+  if (!wrap || !host) return;
+
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const now = new Date();
+  const today = `${pad2(now.getDate())}/${pad2(now.getMonth() + 1)}/${now.getFullYear()}`;
+
+  const items = (S.outbox || [])
+    .filter((r) => String(r.estado || "").toUpperCase().includes("PLANNING"))
+    .filter((r) => String(r.fecha || "") === today)
+    .slice()
+    .sort((a, b) => (b.row || 0) - (a.row || 0));
+
+  if (!items.length) {
+    wrap.style.display = "none";
+    host.innerHTML = "";
+    if (meta) meta.textContent = "";
+    return;
+  }
+
+  // Agrupar por canal
+  const byCh = new Map();
+  for (const r of items) {
+    const key = String(r.channel_id || r.canal || "").trim() || "SIN_CANAL";
+    if (!byCh.has(key)) byCh.set(key, []);
+    byCh.get(key).push(r);
+  }
+
+  const groups = Array.from(byCh.entries()).map(([k, list]) => {
+    // mostramos el más reciente por canal
+    const r = list[0];
+    const label = r.canal ? `${r.canal}${r.channel_id ? ` · ${r.channel_id}` : ""}` : (r.channel_id || "");
+    return { key: k, row: r.row, label, msg: r.mensaje || "" };
+  });
+
+  wrap.style.display = "block";
+  if (meta) meta.textContent = `${groups.length} canal${groups.length !== 1 ? "es" : ""}`;
+
+  host.innerHTML = groups
+    .map((g) => {
+      return `
+        <div class="card" style="padding:12px">
+          <div class="row" style="margin-bottom:8px">
+            <div class="pill">${escapeHtml(g.label || "(sin canal)")}</div>
+            <div class="spacer"></div>
+            <button class="btn ghost" data-copy="${g.row}">Copiar</button>
+            <button class="btn ghost" data-del="${g.row}">Eliminar borrador</button>
+          </div>
+          <div style="white-space:pre-wrap">${escapeHtml(g.msg)}</div>
+        </div>
+      `;
+    })
+    .join("");
+
+  host.querySelectorAll("[data-copy]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const row = Number(b.getAttribute("data-copy"));
+      const r = (S.outbox || []).find((x) => Number(x.row) === row);
+      if (!r) return;
+      try {
+        await navigator.clipboard.writeText(String(r.mensaje || ""));
+        toast("Copiado", "Mensaje en portapapeles");
+      } catch {
+        // fallback: selecciono texto
+        toast("Copiar", "No se pudo copiar automáticamente");
+      }
+    });
+  });
+
+  host.querySelectorAll("[data-del]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const row = Number(b.getAttribute("data-del"));
+      if (!row) return;
+      if (!confirm("Eliminar este borrador?")) return;
+      try {
+        await API.slackOutboxDelete(row);
+        S.outbox = await API.slackOutboxList();
+        renderOutbox();
+        toast("Outbox", "Eliminado");
+      } catch (e) {
+        setErr(`Eliminar borrador: ${e.message || e}`);
+      }
+    });
+  });
 }
 
 // ===== Compose (siempre disponible) =====
