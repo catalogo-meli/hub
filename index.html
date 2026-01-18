@@ -124,7 +124,62 @@
       max-height:190px;
       overflow:auto;
       z-index:140;
+      /* Fondo sólido: evita transparencias raras y mejora legibilidad */
+      background:rgba(8,12,20,.98);
+      border:1px solid rgba(255,255,255,.10);
+      box-shadow:0 16px 48px rgba(0,0,0,.45);
     }
+
+    [data-theme="light"] .mention-dd{
+      background:rgba(255,255,255,.98);
+      border-color:rgba(0,0,0,.12);
+      box-shadow:0 16px 48px rgba(0,0,0,.15);
+    }
+
+    /* Slack - Emoji panel: superficie sólida + estable */
+    #emojiModal{
+      background:rgba(8,12,20,.98);
+      border:1px solid rgba(255,255,255,.10);
+      box-shadow:0 16px 48px rgba(0,0,0,.45);
+    }
+    #emojiTabs .etab{
+      padding:4px 8px;
+      font-size:11px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.03);
+      color:var(--muted);
+      cursor:pointer;
+      user-select:none;
+    }
+    #emojiTabs .etab.active{
+      color:var(--txt);
+      background:rgba(255,255,255,.07);
+      border-color:rgba(255,255,255,.18);
+    }
+    [data-theme="light"] #emojiModal{
+      background:rgba(255,255,255,.98);
+      border-color:rgba(0,0,0,.12);
+      box-shadow:0 16px 48px rgba(0,0,0,.15);
+    }
+    [data-theme="light"] #emojiTabs .etab{
+      border-color:rgba(0,0,0,.12);
+      background:rgba(0,0,0,.03);
+      color:rgba(0,0,0,.65);
+    }
+    [data-theme="light"] #emojiTabs .etab.active{
+      background:rgba(0,0,0,.06);
+      color:rgba(0,0,0,.9);
+      border-color:rgba(0,0,0,.18);
+    }
+
+    .emoji-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+    .emoji-tab{
+      padding:5px 8px;border-radius:999px;border:1px solid var(--line);
+      background:rgba(255,255,255,.04);color:var(--muted);
+      cursor:pointer;font-size:12px;user-select:none
+    }
+    .emoji-tab.active{color:var(--txt);background:rgba(59,130,246,.18);border-color:rgba(59,130,246,.35)}
     #slackMentionPills .pill{
       padding:4px 8px;
       gap:6px;
@@ -608,7 +663,8 @@
                       <input class="input" id="emojiSearch" placeholder="Buscar emoji..." style="flex:1" />
                       <button class="btn ghost" id="btnEmojiClose" type="button">Cerrar</button>
                     </div>
-                    <div id="emojiGroups" style="margin-top:10px;max-height:300px;overflow:auto"></div>
+                    <div id="emojiTabs" class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px"></div>
+                    <div id="emojiGroups" style="margin-top:10px;max-height:260px;overflow:auto"></div>
                   </div>
                 </div>
               </div>

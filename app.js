@@ -1058,6 +1058,7 @@ function mountSlackCompose_() {
   const btnSched = $("btnSchedule");
   const btnEmoji = $("btnEmoji");
   const emojiModal = $("emojiModal");
+  const emojiTabs = $("emojiTabs");
   const emojiGroups = $("emojiGroups");
   const emojiSearch = $("emojiSearch");
   const btnEmojiClose = $("btnEmojiClose");
@@ -1373,6 +1374,26 @@ function mountSlackCompose_() {
     return out;
   })();
 
+  let activeEmojiGroup = EMOJI_GROUPS[0]?.title || "";
+
+  const renderEmojiTabs = () => {
+    if (!emojiTabs) return;
+    const mk = (t) => {
+      const short = t.split("/")[0].trim();
+      return `<button type="button" class="etab${t===activeEmojiGroup?" active":""}" data-g="${escapeAttr(t)}">${escapeHtml(short)}</button>`;
+    };
+    emojiTabs.innerHTML = EMOJI_GROUPS.map(g => mk(g.title)).join("");
+    emojiTabs.querySelectorAll("[data-g]").forEach((b) => {
+      b.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        activeEmojiGroup = b.getAttribute("data-g") || activeEmojiGroup;
+        // Si hay búsqueda activa, no forzamos grupo; si no, render por grupo
+        renderEmojiPanel();
+      });
+    });
+  };
+
   const renderEmojiPanel = () => {
     if (!emojiGroups) return;
     const q = norm(String(emojiSearch?.value || ""));
@@ -1381,6 +1402,13 @@ function mountSlackCompose_() {
       <button class="btn ghost" type="button" data-e="${escapeAttr(e)}" style="padding:6px 8px;min-width:38px">${escapeHtml(e)}</button>
     `;
 
+    // mantener estado visual de tabs
+    if (emojiTabs) {
+      emojiTabs.querySelectorAll(".etab").forEach((el) => {
+        el.classList.toggle("active", (el.getAttribute("data-g")||"") === activeEmojiGroup);
+      });
+    }
+
     if (q) {
       const hits = EMOJI_INDEX.filter((x) => x.hay.includes(q)).slice(0, 80);
       emojiGroups.innerHTML = `
@@ -1388,12 +1416,10 @@ function mountSlackCompose_() {
         <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:6px">${hits.map((x) => button(x.e)).join("") || `<div class="muted" style="font-size:12px">Sin resultados.</div>`}</div>
       `;
     } else {
-      emojiGroups.innerHTML = EMOJI_GROUPS.map((g) => {
-        return `
-          <div class="muted" style="font-size:12px;margin:10px 0 6px">${escapeHtml(g.title)}</div>
-          <div class="row" style="gap:6px;flex-wrap:wrap">${g.items.map(button).join("")}</div>
-        `;
-      }).join("");
+      const g = EMOJI_GROUPS.find((x) => x.title === activeEmojiGroup) || EMOJI_GROUPS[0];
+      emojiGroups.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:6px">${g.items.map(button).join("")}</div>
+      `;
     }
 
     emojiGroups.querySelectorAll("[data-e]").forEach((b) => {
@@ -1434,6 +1460,7 @@ function mountSlackCompose_() {
   });
 
   // init emojis
+  renderEmojiTabs();
   renderEmojiPanel();
 
   // estado inicial
