@@ -1011,7 +1011,7 @@ function renderOutbox() {
       tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
         setErr("");
         try {
-          const v = (when?.value || "").trim();
+          const v = (whenISO || "").trim();
           if (!v) throw new Error("Elegí fecha y hora para programar.");
           // guardo antes de programar
           const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
@@ -1052,14 +1052,29 @@ function mountSlackCompose_() {
   const selCh = $("slackComposeChannel");
   const ta = $("slackComposeMsg");
   const when = $("slackComposeWhen");
-  const btnWhenConfirm = $("btnWhenConfirm");
-  const whenBadge = $("whenConfirmedBadge");
+  const btnWhenOpen = $("btnWhenOpen");
+  const whenModal = $("whenModal");
+  const whenDate = $("whenDate");
+  const whenTime = $("whenTime");
+  const btnWhenClose = $("btnWhenClose");
+  const btnWhenClear = $("btnWhenClear");
+  const btnWhenApply = $("btnWhenApply");
   const btnClear = $("btnComposeClear");
   const btnDraft = $("btnSaveDraft");
   const btnSendNow = $("btnSendNow");
   const btnSched = $("btnSchedule");
   const btnEmoji = $("btnEmoji");
   const emojiModal = $("emojiModal");
+  const btnTpl = $("btnTpl");
+  const tplModal = $("tplModal");
+  const tplList = $("tplList");
+  const tplKey = $("tplKey");
+  const tplText = $("tplText");
+  const btnTplNew = $("btnTplNew");
+  const btnTplInsert = $("btnTplInsert");
+  const btnTplSave = $("btnTplSave");
+  const btnTplDelete = $("btnTplDelete");
+  const btnTplClose = $("btnTplClose");
   const emojiGroups = $("emojiGroups");
   const emojiSearch = $("emojiSearch");
   const emojiSearchClear = $("emojiSearchClear");
@@ -1070,41 +1085,62 @@ function mountSlackCompose_() {
   const mentionResults = $("slackMentionResults");
   const mentionPills = $("slackMentionPills");
 
-  if (!selCh || !ta || !when || !btnClear || !btnDraft || !btnSched || !btnSendNow || !btnWhenConfirm) return;
+  if (!selCh || !ta || !when || !btnClear || !btnDraft || !btnSched || !btnSendNow || !btnWhenOpen || !whenModal || !whenDate || !whenTime || !btnWhenApply || !btnWhenClose || !btnWhenClear || !btnEmoji || !emojiModal || !btnTpl || !tplModal || !tplList || !tplKey || !tplText || !btnTplNew || !btnTplInsert || !btnTplSave || !btnTplDelete || !btnTplClose) return;
 
-  // estado de confirmación de programación (evita errores por pick accidental del datetime)
-  let whenConfirmed = false;
-  const setWhenConfirmed = (v) => {
-    whenConfirmed = !!v;
-    if (whenBadge) {
-      whenBadge.style.display = whenConfirmed ? "inline-flex" : "none";
-    }
-    if (btnWhenConfirm) {
-      btnWhenConfirm.classList.toggle("primary", !whenConfirmed && String(when?.value||"").trim());
-    }
-  };
-
-  // canales
-  const refreshChannels = () => {
-    selCh.innerHTML = channelOptionsHtml("");
-  };
-  refreshChannels();
-
-  // Programar: requiere confirmación explícita del datetime (botón Confirmar)
-  when?.addEventListener("change", () => {
-    // cualquier cambio invalida confirmación previa
-    setWhenConfirmed(false);
-  });
-  btnWhenConfirm?.addEventListener("click", () => {
+  // programación: modal propio (date + time) para confirmación explícita
+  const pad2 = (n) => String(n).padStart(2, '0');
+  let whenISO = '';
+  const setWhenISO = (iso) => {
+    whenISO = String(iso || '').trim();
     if (!when) return;
-    const v = String(when.value || "").trim();
-    if (!v) {
-      setWhenConfirmed(false);
-      toast("Programar", "Elegí fecha y hora");
+    if (!whenISO) {
+      when.value = '';
+      when.placeholder = 'dd/mm/aaaa --:--';
       return;
     }
-    setWhenConfirmed(true);
-    toast("Programar", "Fecha/hora confirmada");
+    // iso: YYYY-MM-DDTHH:mm
+    const [d, t] = whenISO.split('T');
+    const [yy, mm, dd] = (d||'').split('-');
+    const hhmm = (t||'').slice(0,5);
+    when.value = `${dd}/${mm}/${yy} ${hhmm}`;
+  };
+
+  const openWhenModal = () => {
+    // precarga desde whenISO o ahora
+    const now = new Date();
+    const base = whenISO ? new Date(whenISO) : now;
+    const y = base.getFullYear();
+    const m = pad2(base.getMonth()+1);
+    const d = pad2(base.getDate());
+    const hh = pad2(base.getHours());
+    const mi = pad2(base.getMinutes());
+    whenDate.value = `${y}-${m}-${d}`;
+    whenTime.value = `${hh}:${mi}`;
+    whenModal.style.display = 'block';
+  };
+  const closeWhenModal = () => { whenModal.style.display = 'none'; };
+
+  btnWhenOpen.addEventListener('click', (e)=>{ e.preventDefault(); openWhenModal(); });
+  when.addEventListener('click', (e)=>{ e.preventDefault(); openWhenModal(); });
+  btnWhenClose.addEventListener('click', (e)=>{ e.preventDefault(); closeWhenModal(); });
+
+  btnWhenClear.addEventListener('click', (e)=>{ e.preventDefault(); setWhenISO(''); closeWhenModal(); });
+  btnWhenApply.addEventListener('click', (e)=>{
+    e.preventDefault();
+    const d = String(whenDate.value||'').trim();
+    const t = String(whenTime.value||'').trim();
+    if (!d || !t) { toast('Programar','Completá fecha y hora'); return; }
+    const iso = `${d}T${t}`;
+    setWhenISO(iso);
+    closeWhenModal();
+    toast('Programar','Fecha/hora seleccionada');
+  });
+
+  // cerrar si click afuera
+  document.addEventListener('click', (ev)=>{
+    if (whenModal.style.display !== 'block') return;
+    const inside = whenModal.contains(ev.target) || btnWhenOpen.contains(ev.target) || when.contains(ev.target);
+    if (!inside) closeWhenModal();
   });
 
   // menciones (buscador + píldoras)
@@ -1304,7 +1340,7 @@ function mountSlackCompose_() {
     selCh.value = "";
     ta.value = "";
     when.value = "";
-    setWhenConfirmed(false);
+    whenISO = "";
     selMentions.clear();
     renderPills();
     if (mentionSearch) mentionSearch.value = "";
@@ -1362,10 +1398,9 @@ function mountSlackCompose_() {
     try {
       const channel_id = String(selCh.value || "").trim();
       const mensaje = buildMessageWithMentions(ta.value);
-      const v = String(when.value || "").trim();
+      const v = String(whenISO || "").trim();
       if (!mensaje) throw new Error("Escribí un mensaje.");
       if (!v) throw new Error("Elegí fecha y hora para programar.");
-      if (!whenConfirmed) throw new Error("Confirmá fecha y hora.");
 
       const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
       // 1) crear fila como borrador
@@ -1383,6 +1418,116 @@ function mountSlackCompose_() {
     } catch (e) {
       setErr(`Programar: ${e.message || e}`);
     }
+  });
+
+
+  // Plantillas (Comunicaciones_Templates)
+  let _templatesCache = [];
+  let _tplSelectedKey = '';
+
+  const openTplModal = async () => {
+    tplModal.style.display = 'block';
+    await loadTemplates_();
+  };
+  const closeTplModal = () => { tplModal.style.display = 'none'; };
+
+  const loadTemplates_ = async () => {
+    try {
+      const data = await API.comunicacionesTemplatesList();
+      _templatesCache = Array.isArray(data) ? data : [];
+      renderTplList_();
+    } catch (e) {
+      _templatesCache = [];
+      renderTplList_();
+      toast('Plantillas', `Error: ${e.message || e}`);
+    }
+  };
+
+  const renderTplList_ = () => {
+    tplList.innerHTML = '';
+    if (!_templatesCache.length) {
+      tplList.innerHTML = '<div class="muted" style="padding:8px">Sin plantillas.</div>';
+      return;
+    }
+    _templatesCache.forEach((t) => {
+      const key = String(t.key || '').trim();
+      const tpl = String(t.template || '');
+      const item = document.createElement('div');
+      item.className = 'tpl-item' + (key === _tplSelectedKey ? ' active' : '');
+      item.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+        <div style="min-width:0">
+          <div style="font-weight:700">${escapeHtml_(key)}</div>
+          <div class="muted" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml_(tpl.replace(/\s+/g,' ').slice(0,120))}</div>
+        </div>
+      </div>`;
+      item.addEventListener('click', () => {
+        _tplSelectedKey = key;
+        tplKey.value = key;
+        tplText.value = tpl;
+        renderTplList_();
+      });
+      tplList.appendChild(item);
+    });
+  };
+
+  btnTpl.addEventListener('click', async (e)=>{ e.preventDefault(); await openTplModal(); });
+  btnTplClose.addEventListener('click', (e)=>{ e.preventDefault(); closeTplModal(); });
+
+  btnTplNew.addEventListener('click', (e)=>{
+    e.preventDefault();
+    _tplSelectedKey = '';
+    tplKey.value = '';
+    tplText.value = '';
+    tplKey.focus();
+    renderTplList_();
+  });
+
+  btnTplInsert.addEventListener('click', (e)=>{
+    e.preventDefault();
+    const tpl = String(tplText.value || '').trim();
+    if (!tpl) { toast('Plantillas','No hay contenido para insertar'); return; }
+    ta.value = tpl;
+    ta.focus();
+    closeTplModal();
+    toast('Plantillas','Plantilla insertada');
+  });
+
+  btnTplSave.addEventListener('click', async (e)=>{
+    e.preventDefault();
+    try {
+      const key = String(tplKey.value||'').trim();
+      const tpl = String(tplText.value||'');
+      if (!key) throw new Error('Definí un Key');
+      await API.comunicacionesTemplatesUpsert(key, tpl);
+      _tplSelectedKey = key;
+      await loadTemplates_();
+      toast('Plantillas','Guardado');
+    } catch (err) {
+      toast('Plantillas', err.message || String(err));
+    }
+  });
+
+  btnTplDelete.addEventListener('click', async (e)=>{
+    e.preventDefault();
+    try {
+      const key = String(tplKey.value||'').trim();
+      if (!key) throw new Error('Seleccioná una plantilla');
+      if (!confirm(`Eliminar plantilla "${key}"?`)) return;
+      await API.comunicacionesTemplatesDelete(key);
+      _tplSelectedKey = '';
+      tplKey.value = '';
+      tplText.value = '';
+      await loadTemplates_();
+      toast('Plantillas','Eliminada');
+    } catch (err) {
+      toast('Plantillas', err.message || String(err));
+    }
+  });
+
+  document.addEventListener('click', (ev)=>{
+    if (tplModal.style.display !== 'block') return;
+    const inside = tplModal.contains(ev.target) || btnTpl.contains(ev.target);
+    if (!inside) closeTplModal();
   });
   // Emojis: paleta operativa (vista unificada).
   // - Sin tabs ni categorías visibles.

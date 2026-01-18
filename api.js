@@ -69,6 +69,11 @@ export const API = {
   // Solo GENERAL (sin POR_FLUJO)
   slackOutboxGenerarGeneral: () => post("slack.outbox.generarGeneral", {}),
   slackOutboxList: () => get("slack.outbox.list"),
+
+  comunicacionesTemplatesList: () => get("comunicaciones.templates.list"),
+  comunicacionesTemplatesUpsert: (key, template) => post("comunicaciones.templates.upsert", { key: String(key||"").trim(), template: String(template||"") }),
+  comunicacionesTemplatesDelete: (key) => post("comunicaciones.templates.delete", { key: String(key||"").trim() }),
+
   slackOutboxUpdate: (row, canal, channel_id, mensaje, mentions_json) => post("slack.outbox.update", { row: assertRow_(row), canal, channel_id, mensaje, mentions_json }),
   slackOutboxAppend: (fechaISO, tipo, canal, channel_id, mensaje, estado, mentions_json) => post("slack.outbox.append", { fechaISO, tipo, canal, channel_id, mensaje, estado, mentions_json }),
 
