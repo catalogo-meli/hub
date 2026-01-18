@@ -516,14 +516,14 @@
               <select class="input" id="slackComposeChannel"></select>
             </div>
             <div style="min-width:260px;flex:1">
-              <div class="muted" style="font-size:12px;margin-bottom:6px">Mencionar colaboradores</div>
+              <div class="muted" style="font-size:12px;margin-bottom:6px">Menciones (personas, @here/@channel/@everyone o #canal)</div>
               <div class="card" style="padding:10px">
                 <input class="input" id="slackMentionSearch" placeholder="Buscar por nombre o mail productora..." />
                 <div id="slackMentionResults" class="card" style="display:none;margin-top:6px;padding:6px;max-height:180px;overflow:auto"></div>
                 <div id="slackMentionPills" class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px"></div>
               </div>
             </div>
-            <div style="min-width:220px">
+            <div style="min-width:220px;display:none">
               <div class="muted" style="font-size:12px;margin-bottom:6px">Mencionar canal</div>
               <div class="row" style="gap:8px;align-items:stretch">
                 <input class="input" id="slackChannelMentionSearch" placeholder="Buscar canal..." />
@@ -544,13 +544,13 @@
             <div style="flex:1;min-width:320px">
               <div class="muted" style="font-size:12px;margin-bottom:6px">Mensaje</div>
               <textarea class="input" id="slackComposeMsg" placeholder="Escribí el mensaje..."></textarea>
-              <div class="muted" style="font-size:12px;margin-top:6px">Tip: buscá, agregá y listo. “Insertar menciones” mete todas las píldoras en el mensaje.</div>
+              <div class="muted" style="font-size:12px;margin-top:6px">Tip: @channel/@here/@everyone notifican. #canal solo agrega un enlace. Usá las notificaciones masivas solo si es necesario.</div>
             </div>
             <div style="min-width:260px">
               <div class="muted" style="font-size:12px;margin-bottom:6px">Programar</div>
               <input class="input" type="datetime-local" id="slackComposeWhen" />
               <div class="row" style="margin-top:10px;justify-content:flex-end">
-                <button class="btn" id="btnInsertMentions" type="button">Insertar menciones</button>
+                <button class="btn" id="btnInsertMentions" type="button">Añadir menciones al mensaje</button>
                 <button class="btn" id="btnComposeClear" type="button">Descartar</button>
                 <button class="btn" id="btnSaveDraft" type="button">Guardar borrador</button>
                 <button class="btn primary" id="btnSchedule" type="button">Programar</button>

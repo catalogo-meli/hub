@@ -1168,7 +1168,8 @@ function mountSlackCompose_() {
 
   const getSelectedMentions = () => {
     const picked = [...selMentions.values()];
-    const tokens = picked.map((x) => (x.slackId ? `<@${x.slackId}>` : x.nombre));
+    const tokens = picked.map((x) => (x.slackId ? `<@${x.slackId}>` : x.nombre ? `@${x.nombre}` : ''))
+      .filter(Boolean);
     return { tokens, picked };
   };
 
