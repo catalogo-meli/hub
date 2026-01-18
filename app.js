@@ -1052,22 +1052,22 @@ function mountSlackCompose_() {
   const selCh = $("slackComposeChannel");
   const ta = $("slackComposeMsg");
   const when = $("slackComposeWhen");
-  const btnIns = $("btnInsertMentions");
   const btnClear = $("btnComposeClear");
   const btnDraft = $("btnSaveDraft");
+  const btnSendNow = $("btnSendNow");
   const btnSched = $("btnSchedule");
   const btnEmoji = $("btnEmoji");
   const emojiPanel = $("emojiPanel");
+  const btnEmojiClose = $("btnEmojiClose");
+  const emojiSearch = $("emojiSearch");
+  const emojiCats = $("emojiCats");
   const emojiGrid = $("emojiGrid");
 
   const mentionSearch = $("slackMentionSearch");
   const mentionResults = $("slackMentionResults");
   const mentionPills = $("slackMentionPills");
 
-  const chMentionSearch = $("slackChannelMentionSearch");
-  const btnInsertChMention = $("btnInsertChannelMention");
-
-  if (!selCh || !ta || !when || !btnIns || !btnClear || !btnDraft || !btnSched) return;
+  if (!selCh || !ta || !when || !btnClear || !btnDraft || !btnSched || !btnSendNow) return;
 
   // canales
   const refreshChannels = () => {
@@ -1075,18 +1075,64 @@ function mountSlackCompose_() {
   };
   refreshChannels();
 
-  // menciones (buscador + píldoras)
-  const allColabs = (S.colabs || [])
+  // menciones (1 solo lugar mental):
+  // - Colaboradores (por nombre / mail productora)
+  // - Notificaciones masivas (@channel/@here/@everyone)
+  // - Canales (#canal) como link real (<#ID|nombre>)
+  // UX: se seleccionan en píldoras y se agregan automáticamente al inicio al enviar/guardar/programar.
+  const notifyOptions = [
+    { key: "@channel", label: "@channel", sub: "Notifica a todo el canal", token: "@channel" },
+    { key: "@here", label: "@here", sub: "Notifica a activos", token: "@here" },
+    { key: "@everyone", label: "@everyone", sub: "Notifica a todos", token: "@everyone" },
+  ].map((x) => ({ ...x, type: "notify", hay: norm(`${x.label} ${x.sub}`), display: x.label }));
+
+  const channelOptions = (S.canales || [])
+    .filter((c) => c && c.canal)
+    .map((c) => {
+      const name = String(c.canal || "").trim();
+      const id = String(c.channel_id || "").trim();
+      const label = `#${name}`;
+      const token = id ? `<#${id}|${name}>` : `#${name}`;
+      return {
+        key: `ch_${id || name}`,
+        type: "channel",
+        label,
+        sub: id ? id : "",
+        token,
+        display: label,
+        hay: norm(`${name} ${label} ${id}`),
+      };
+    })
+    .sort((a, b) => String(a.label || "").localeCompare(String(b.label || "")));
+
+  const colabOptions = (S.colabs || [])
     .map(colabRowView)
     .filter((v) => v.nombre || v.mailProd)
     .map((v) => {
-      const label = `${v.nombre || v.id}${v.mailProd ? ` · ${v.mailProd}` : ""}`;
-      const hay = norm(`${v.nombre || ""} ${v.mailProd || ""} ${v.id || ""}`);
-      return { id: v.id, nombre: v.nombre || v.id, mailProd: v.mailProd || "", label, hay, slackId: v.slackId || "" };
+      const nombre = v.nombre || v.id;
+      const mailProd = v.mailProd || "";
+      const slackId = v.slackId || "";
+      const label = `${nombre}${mailProd ? ` · ${mailProd}` : ""}`;
+      const token = slackId ? `<@${slackId}>` : nombre ? `@${nombre}` : "";
+      return {
+        key: `u_${v.id}`,
+        type: "user",
+        id: v.id,
+        nombre,
+        mailProd,
+        slackId,
+        label,
+        sub: mailProd,
+        token,
+        display: nombre,
+        hay: norm(`${nombre} ${mailProd} ${v.id}`),
+      };
     })
     .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || "")));
 
-  const selMentions = new Map(); // id -> item
+  const mentionOptions = [...notifyOptions, ...channelOptions, ...colabOptions];
+
+  const selMentions = new Map(); // key -> item
 
   const renderPills = () => {
     if (!mentionPills) return;
@@ -1096,8 +1142,9 @@ function mountSlackCompose_() {
           .map(
             (x) => `
         <span class="pill" style="display:inline-flex;gap:6px;align-items:center">
-          <span>${escapeHtml(x.nombre)}</span>
-          <button class="xbtn" data-rm="${escapeAttr(x.id)}" title="Quitar">×</button>
+          <span style="font-weight:700">${escapeHtml(x.display || x.label || x.nombre || "")}</span>
+          ${x.type === "notify" ? `<span class="pill" style="padding:2px 8px;font-size:11px">NOTIF</span>` : x.type === "channel" ? `<span class="pill" style="padding:2px 8px;font-size:11px">CANAL</span>` : ""}
+          <button class="xbtn" data-rm="${escapeAttr(x.key)}" title="Quitar">×</button>
         </span>`
           )
           .join("")
@@ -1105,8 +1152,8 @@ function mountSlackCompose_() {
 
     mentionPills.querySelectorAll("[data-rm]").forEach((b) => {
       b.addEventListener("click", () => {
-        const id = unescapeAttr(b.getAttribute("data-rm"));
-        selMentions.delete(id);
+        const key = unescapeAttr(b.getAttribute("data-rm"));
+        selMentions.delete(key);
         renderPills();
       });
     });
@@ -1122,7 +1169,7 @@ function mountSlackCompose_() {
     if (!mentionResults) return;
     const nq = norm(q);
     if (!nq) return closeMentionResults();
-    const hits = allColabs.filter((x) => x.hay.includes(nq)).slice(0, 8);
+    const hits = mentionOptions.filter((x) => x.hay.includes(nq)).slice(0, 10);
     if (!hits.length) {
       mentionResults.style.display = "block";
       mentionResults.innerHTML = `<div class="muted" style="font-size:12px;padding:6px">Sin resultados.</div>`;
@@ -1131,11 +1178,13 @@ function mountSlackCompose_() {
     mentionResults.style.display = "block";
     mentionResults.innerHTML = hits
       .map((x) => {
-        const disabled = selMentions.has(x.id) ? "disabled" : "";
+        const disabled = selMentions.has(x.key) ? "disabled" : "";
+        const badge = x.type === "notify" ? "NOTIF" : x.type === "channel" ? "CANAL" : "";
         return `
-          <button class="btn ghost" data-pick="${escapeAttr(x.id)}" ${disabled} style="width:100%;justify-content:flex-start;gap:10px;padding:8px">
-            <span style="font-weight:600">${escapeHtml(x.nombre)}</span>
-            <span class="muted" style="font-size:12px">${escapeHtml(x.mailProd)}</span>
+          <button class="btn ghost" data-pick="${escapeAttr(x.key)}" ${disabled} style="width:100%;justify-content:flex-start;gap:10px;padding:8px">
+            <span style="font-weight:700">${escapeHtml(x.type === "user" ? x.nombre : x.label)}</span>
+            ${badge ? `<span class="pill" style="padding:2px 8px;font-size:11px">${badge}</span>` : ""}
+            <span class="muted" style="font-size:12px">${escapeHtml(x.sub || "")}</span>
           </button>
         `;
       })
@@ -1143,10 +1192,10 @@ function mountSlackCompose_() {
 
     mentionResults.querySelectorAll("[data-pick]").forEach((b) => {
       b.addEventListener("click", () => {
-        const id = unescapeAttr(b.getAttribute("data-pick"));
-        const it = allColabs.find((x) => x.id === id);
+        const key = unescapeAttr(b.getAttribute("data-pick"));
+        const it = mentionOptions.find((x) => x.key === key);
         if (!it) return;
-        selMentions.set(it.id, it);
+        selMentions.set(it.key, it);
         renderPills();
         if (mentionSearch) mentionSearch.value = "";
         closeMentionResults();
@@ -1168,8 +1217,7 @@ function mountSlackCompose_() {
 
   const getSelectedMentions = () => {
     const picked = [...selMentions.values()];
-    const tokens = picked.map((x) => (x.slackId ? `<@${x.slackId}>` : x.nombre ? `@${x.nombre}` : ''))
-      .filter(Boolean);
+    const tokens = picked.map((x) => String(x.token || "").trim()).filter(Boolean);
     return { tokens, picked };
   };
 
@@ -1183,14 +1231,19 @@ function mountSlackCompose_() {
     textarea.focus();
   };
 
-  btnIns.addEventListener("click", () => {
+  // UX clave: 1 solo paso.
+  // Las menciones seleccionadas (píldoras) se agregan AUTOMÁTICAMENTE al inicio al guardar/enviar/programar.
+  // Evita el botón intermedio y reduce errores.
+  const mergeMentionsIntoMessage = (mensaje) => {
+    const base = String(mensaje || "").trim();
     const { tokens } = getSelectedMentions();
-    if (!tokens.length) return toast("Menciones", "No hay colaboradores seleccionados");
-    const text = tokens.join(" ") + " ";
-    insertAtCursor(ta, text);
-    selMentions.clear();
-    renderPills();
-  });
+    if (!tokens.length) return base;
+
+    // No duplicar si el usuario ya puso la mención manualmente.
+    const add = tokens.filter((t) => !base.includes(t));
+    if (!add.length) return base;
+    return `${add.join(" ")} ${base}`.trim();
+  };
 
   const clearCompose = () => {
     selCh.value = "";
@@ -1200,76 +1253,8 @@ function mountSlackCompose_() {
     renderPills();
     if (mentionSearch) mentionSearch.value = "";
     closeMentionResults();
-    if (chMentionSearch) chMentionSearch.value = "";
     toast("Compose", "Listo");
   };
-
-  // insertar mención a canal (dentro del mensaje)
-  const closeChMentionResults = () => {
-    const box = $("slackChMentionResults");
-    if (!box) return;
-    box.style.display = "none";
-    box.innerHTML = "";
-  };
-
-  const ensureChMentionResultsBox = () => {
-    let box = $("slackChMentionResults");
-    if (box) return box;
-    // crea un popup inline cerca del input
-    if (!chMentionSearch) return null;
-    box = document.createElement("div");
-    box.id = "slackChMentionResults";
-    box.className = "card";
-    box.style.cssText = "display:none;margin-top:6px;padding:6px;max-height:180px;overflow:auto;position:relative;z-index:70";
-    chMentionSearch.parentElement?.appendChild(box);
-    return box;
-  };
-
-  const renderChMentionResults = (q) => {
-    const box = ensureChMentionResultsBox();
-    if (!box) return;
-    const nq = norm(q);
-    if (!nq) return closeChMentionResults();
-    const hits = (S.canales || [])
-      .filter((c) => norm(c.canal || "").includes(nq))
-      .slice(0, 8);
-    if (!hits.length) {
-      box.style.display = "block";
-      box.innerHTML = `<div class="muted" style="font-size:12px;padding:6px">Sin resultados.</div>`;
-      return;
-    }
-    box.style.display = "block";
-    box.innerHTML = hits
-      .map((c) => `<button class="btn ghost" data-pickch="${escapeAttr(c.channel_id)}" style="width:100%;justify-content:flex-start;padding:8px">#${escapeHtml(c.canal || "")}</button>`)
-      .join("");
-    box.querySelectorAll("[data-pickch]").forEach((b) => {
-      b.addEventListener("click", () => {
-        const id = unescapeAttr(b.getAttribute("data-pickch"));
-        const ch = (S.canales || []).find((x) => x.channel_id === id);
-        if (!ch) return;
-        // mention real: <#C123|nombre>
-        const token = `<#${id}|${ch.canal}> `;
-        insertAtCursor(ta, token);
-        if (chMentionSearch) chMentionSearch.value = "";
-        closeChMentionResults();
-      });
-    });
-  };
-
-  chMentionSearch?.addEventListener("input", debounce(() => {
-    renderChMentionResults(chMentionSearch.value);
-  }, 120));
-
-  btnInsertChMention?.addEventListener("click", () => {
-    const v = String(chMentionSearch?.value || "").trim();
-    if (!v) return;
-    // intenta matchear canal exacto
-    const ch = (S.canales || []).find((c) => norm(c.canal) === norm(v));
-    if (ch?.channel_id) insertAtCursor(ta, `<#${ch.channel_id}|${ch.canal}> `);
-    else insertAtCursor(ta, `#${v} `);
-    if (chMentionSearch) chMentionSearch.value = "";
-    closeChMentionResults();
-  });
 
   btnClear.addEventListener("click", clearCompose);
 
@@ -1277,8 +1262,10 @@ function mountSlackCompose_() {
     setErr("");
     try {
       const channel_id = String(selCh.value || "").trim();
-      const mensaje = String(ta.value || "").trim();
+      let mensaje = String(ta.value || "").trim();
       if (!mensaje) throw new Error("Escribí un mensaje.");
+
+      mensaje = mergeMentionsIntoMessage(mensaje);
 
       const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
       await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
@@ -1295,10 +1282,13 @@ function mountSlackCompose_() {
     setErr("");
     try {
       const channel_id = String(selCh.value || "").trim();
-      const mensaje = String(ta.value || "").trim();
+      let mensaje = String(ta.value || "").trim();
       const v = String(when.value || "").trim();
       if (!mensaje) throw new Error("Escribí un mensaje.");
       if (!v) throw new Error("Elegí fecha y hora para programar.");
+      if (!channel_id) throw new Error("Elegí un canal para programar.");
+
+      mensaje = mergeMentionsIntoMessage(mensaje);
 
       const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
       // 1) crear fila como borrador
@@ -1318,28 +1308,198 @@ function mountSlackCompose_() {
     }
   });
 
-  // emojis rápidos (visual)
-  const EMOJIS = ["✅","⚠️","❌","⏰","📌","📣","👀","🙏","🔥","🚀","📍","🧠","💡","📈","🧩","🤝","🎯","🟢","🟡","🔴","➡️","⬅️","⬆️","⬇️","✍️","🗂️","🧾","🧹","🧯","🧪","😄","🙂","😉","😅","🤔","😤","😵","😴","💤","💪","🫡","🙌","👏","🧨","✨","🎉","🏁"];
+  // Enviar ahora (crea fila y la dispara vía Netlify -> Slack)
+  btnSendNow.addEventListener("click", async () => {
+    setErr("");
+    try {
+      const channel_id = String(selCh.value || "").trim();
+      let mensaje = String(ta.value || "").trim();
+      if (!mensaje) throw new Error("Escribí un mensaje.");
+      if (!channel_id) throw new Error("Elegí un canal para enviar.");
 
-  const renderEmojiGrid = () => {
-    if (!emojiGrid) return;
-    emojiGrid.innerHTML = EMOJIS.map((e) => `<button class="btn ghost" data-e="${escapeAttr(e)}" style="padding:6px 0">${escapeHtml(e)}</button>`).join("");
-    emojiGrid.querySelectorAll("[data-e]").forEach((b) => {
+      mensaje = mergeMentionsIntoMessage(mensaje);
+
+      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
+      await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "PENDIENTE");
+      S.outbox = await API.slackOutboxList();
+      const newest = (S.outbox || []).slice().sort((a, b) => (b.row || 0) - (a.row || 0))[0];
+      if (!newest?.row) throw new Error("No se pudo obtener la fila creada.");
+
+      setBusy("Slack", "Enviando...");
+      await API.slackSendRow(newest.row);
+      S.outbox = await API.slackOutboxList();
+      renderOutbox();
+      clearCompose();
+      toast("Slack", "Enviado");
+    } catch (e) {
+      setErr(`Enviar: ${e.message || e}`);
+    } finally {
+      clearBusy();
+    }
+  });
+
+  // Emojis (visual + categorías + buscador) — sin dependencias externas
+  const EMOJI_DATA = [
+    {
+      key: "smileys",
+      label: "😀",
+      title: "Caras",
+      items: [
+        ["😀", "cara feliz sonrisa"], ["😃", "feliz"], ["😄", "feliz risa"], ["😁", "sonrisa"], ["😆", "risa"], ["😅", "nerviosa"], ["🤣", "lol"],
+        ["🙂", "sonrisa"], ["🙃", "al revés"], ["😉", "guiño"], ["😊", "contento"], ["😇", "angel"], ["😍", "amor"], ["🥰", "enamorado"], ["😘", "beso"], ["😋", "rico"], ["😜", "broma"], ["🤪", "loco"], ["😎", "cool"],
+        ["🤓", "nerd"], ["🧐", "monoculo"], ["🤔", "pensando"], ["🤨", "duda"], ["😐", "neutral"], ["😑", "sin emoción"], ["🙄", "ojos"],
+        ["😏", "picaro"], ["😣", "frustrado"], ["😥", "triste"], ["😢", "triste"], ["😭", "llanto"], ["😤", "enojo"], ["😡", "furia"], ["🤬", "insulto"],
+        ["😱", "miedo"], ["😨", "asustado"], ["😰", "sudor"], ["😴", "sueño"], ["🥱", "bostezo"], ["🤯", "cabeza explota"], ["🤗", "abrazo"], ["🫡", "saludo"],
+        ["😷", "mascara"], ["🤒", "enfermo"], ["🤕", "golpe"], ["🤢", "nauseas"], ["🤮", "vomito"], ["🥵", "calor"], ["🥶", "frio"],
+      ],
+    },
+    {
+      key: "people",
+      label: "👋",
+      title: "Personas",
+      items: [
+        ["👋", "hola chau"], ["🤚", "mano"], ["🖐️", "mano"], ["✋", "alto"], ["👌", "ok"], ["🤌", "italiano"],
+        ["👍", "pulgar arriba"], ["👎", "pulgar abajo"], ["🙏", "por favor gracias"], ["👏", "aplausos"], ["🙌", "celebrar"], ["🫶", "corazón manos"],
+        ["💪", "fuerza"], ["🤝", "acuerdo"], ["🫂", "abrazo"], ["✍️", "escribir"], ["👀", "mirar"], ["🧠", "cerebro"],
+        ["🗣️", "hablar"], ["👤", "persona"], ["👥", "equipo"], ["🧑‍💻", "trabajo"], ["🧑‍🏫", "docente"], ["🧑‍🔧", "tecnico"],
+      ],
+    },
+    {
+      key: "animals",
+      label: "🐶",
+      title: "Animales",
+      items: [
+        ["🐶", "perro"], ["🐱", "gato"], ["🐭", "ratón"], ["🐹", "hamster"], ["🐰", "conejo"], ["🦊", "zorro"],
+        ["🐻", "oso"], ["🐼", "panda"], ["🐨", "koala"], ["🐯", "tigre"], ["🦁", "león"], ["🐮", "vaca"], ["🐷", "cerdo"],
+        ["🐸", "rana"], ["🐵", "mono"], ["🦄", "unicornio"], ["🐔", "gallo"], ["🐧", "pinguino"], ["🐦", "pajaro"],
+        ["🐺", "lobo"], ["🦉", "buho"], ["🦋", "mariposa"], ["🐝", "abeja"], ["🐢", "tortuga"], ["🐙", "pulpo"], ["🦈", "tiburon"],
+      ],
+    },
+    {
+      key: "food",
+      label: "🍔",
+      title: "Comida",
+      items: [
+        ["🍔", "hamburguesa"], ["🍟", "papas"], ["🍕", "pizza"], ["🌭", "pancho"], ["🌮", "taco"], ["🌯", "burrito"], ["🥪", "sándwich"],
+        ["🥗", "ensalada"], ["🍣", "sushi"], ["🍝", "pasta"], ["🍜", "ramen"], ["🍱", "bento"], ["🍛", "curry"],
+        ["🍎", "manzana"], ["🍌", "banana"], ["🍇", "uvas"], ["🍓", "frutilla"], ["🍑", "durazno"], ["🍍", "anana"],
+        ["🍰", "torta"], ["🧁", "cupcake"], ["🍪", "galleta"], ["🍫", "chocolate"], ["🍩", "dona"], ["🍿", "pochoclo"],
+        ["☕", "café"], ["🧉", "mate"], ["🥤", "bebida"], ["🍺", "cerveza"], ["🍷", "vino"], ["🥛", "leche"],
+      ],
+    },
+    {
+      key: "activity",
+      label: "⚽",
+      title: "Actividad",
+      items: [
+        ["⚽", "futbol"], ["🏀", "basket"], ["🏈", "futbol americano"], ["⚾", "beisbol"], ["🎾", "tenis"], ["🏐", "voley"], ["🏓", "ping pong"],
+        ["🏃", "correr"], ["🏋️", "gym"], ["🚴", "bici"], ["🧘", "yoga"],
+        ["🎯", "objetivo"], ["🎮", "juego"], ["🎲", "dados"], ["🎵", "música"], ["🎤", "cantar"], ["🎬", "cine"], ["🎨", "arte"],
+      ],
+    },
+    {
+      key: "travel",
+      label: "🚗",
+      title: "Viajes",
+      items: [
+        ["🚗", "auto"], ["🚌", "bus"], ["🚕", "taxi"], ["🚲", "bici"], ["🚆", "tren"], ["🚇", "subte"], ["🚀", "cohete"],
+        ["✈️", "avión"], ["🛫", "despegue"], ["🛬", "aterrizaje"], ["🛳️", "barco"], ["⛵", "vela"], ["🚤", "lancha"],
+        ["🗺️", "mapa"], ["📍", "ubicación"], ["🧳", "valija"], ["🏝️", "playa"], ["🏔️", "montaña"], ["🏁", "meta"], ["⏰", "reloj"],
+      ],
+    },
+    {
+      key: "objects",
+      label: "💡",
+      title: "Objetos",
+      items: [
+        ["💡", "idea"], ["📌", "pin"], ["📣", "megáfono"], ["📎", "clip"], ["🧩", "puzzle"], ["🧪", "prueba"],
+        ["🧯", "extintor"], ["🧹", "limpieza"], ["🗂️", "carpeta"], ["🧾", "recibo"], ["📈", "crecimiento"],
+      ],
+    },
+    {
+      key: "symbols",
+      label: "❤️",
+      title: "Símbolos",
+      items: [
+        ["✅", "ok listo"], ["❌", "error"], ["⚠️", "alerta"], ["🟢", "verde"], ["🟡", "amarillo"], ["🔴", "rojo"],
+        ["➡️", "derecha"], ["⬅️", "izquierda"], ["⬆️", "arriba"], ["⬇️", "abajo"], ["✨", "brillo"], ["🎉", "fiesta"],
+      ],
+    },
+    {
+      key: "flags",
+      label: "🏳️",
+      title: "Banderas",
+      items: [
+        ["🏳️", "bandera"], ["🏴", "bandera negra"], ["🏁", "meta"], ["🇦🇷", "argentina"], ["🇲🇽", "mexico"], ["🇨🇴", "colombia"],
+        ["🇺🇸", "usa"], ["🇪🇸", "españa"],
+      ],
+    },
+  ];
+
+  let emojiCat = "smileys";
+
+  const flattenEmoji = () => EMOJI_DATA.flatMap((c) => c.items.map(([ch, tags]) => ({ ch, tags: `${tags} ${c.title}`.toLowerCase(), cat: c.key })));
+  const EMOJI_FLAT = flattenEmoji();
+
+  const renderEmojiCats = () => {
+    if (!emojiCats) return;
+    emojiCats.innerHTML = EMOJI_DATA.map((c) => {
+      const active = c.key === emojiCat ? "primary" : "ghost";
+      return `<button class="btn ${active}" data-ecat="${escapeAttr(c.key)}" type="button" title="${escapeAttr(c.title)}" style="padding:6px 10px">${escapeHtml(c.label)}</button>`;
+    }).join("");
+    emojiCats.querySelectorAll("[data-ecat]").forEach((b) => {
       b.addEventListener("click", () => {
-        insertAtCursor(ta, b.getAttribute("data-e") + " ");
-        emojiPanel.style.display = "none";
+        emojiCat = unescapeAttr(b.getAttribute("data-ecat"));
+        if (emojiSearch) emojiSearch.value = "";
+        renderEmojiGrid();
+        renderEmojiCats();
       });
     });
   };
-  renderEmojiGrid();
 
-  const closeEmoji = () => { if (emojiPanel) emojiPanel.style.display = "none"; };
+  const renderEmojiGrid = () => {
+    if (!emojiGrid) return;
+    const q = String(emojiSearch?.value || "").trim().toLowerCase();
+    let list;
+    if (q) {
+      list = EMOJI_FLAT.filter((x) => x.tags.includes(q)).slice(0, 240);
+    } else {
+      const cat = EMOJI_DATA.find((c) => c.key === emojiCat) || EMOJI_DATA[0];
+      list = cat.items.map(([ch, tags]) => ({ ch, tags }));
+    }
+    emojiGrid.innerHTML = list.map((x) => `<button class="btn ghost" data-e="${escapeAttr(x.ch)}" type="button" style="padding:6px 0">${escapeHtml(x.ch)}</button>`).join("");
+    emojiGrid.querySelectorAll("[data-e]").forEach((b) => {
+      b.addEventListener("click", () => {
+        insertAtCursor(ta, b.getAttribute("data-e") + " ");
+        if (emojiPanel) emojiPanel.style.display = "none";
+      });
+    });
+  };
+
+  const closeEmoji = () => {
+    if (emojiPanel) emojiPanel.style.display = "none";
+  };
 
   btnEmoji?.addEventListener("click", (e) => {
     e.preventDefault();
     if (!emojiPanel) return;
-    emojiPanel.style.display = emojiPanel.style.display === "none" ? "block" : "none";
+    const next = emojiPanel.style.display === "none" || !emojiPanel.style.display ? "block" : "none";
+    emojiPanel.style.display = next;
+    if (next === "block") {
+      renderEmojiCats();
+      renderEmojiGrid();
+      setTimeout(() => emojiSearch?.focus(), 0);
+    }
   });
+
+  btnEmojiClose?.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeEmoji();
+  });
+
+  emojiSearch?.addEventListener("input", debounce(() => {
+    renderEmojiGrid();
+  }, 80));
 
   document.addEventListener("click", (e) => {
     if (!emojiPanel || !btnEmoji) return;
