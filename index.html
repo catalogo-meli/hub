@@ -515,38 +515,39 @@
               <div class="muted" style="font-size:12px;margin-bottom:6px">Canal</div>
               <select class="input" id="slackComposeChannel"></select>
             </div>
-
             <div style="min-width:260px;flex:1">
-              <div class="muted" style="font-size:12px;margin-bottom:6px">Menciones (se agregan al inicio del mensaje)</div>
+              <div class="muted" style="font-size:12px;margin-bottom:6px">Menciones (personas, @here/@channel/@everyone o #canal)</div>
               <div class="card" style="padding:10px">
                 <input class="input" id="slackMentionSearch" placeholder="Buscar por nombre o mail productora..." />
                 <div id="slackMentionResults" class="card" style="display:none;margin-top:6px;padding:6px;max-height:180px;overflow:auto"></div>
                 <div id="slackMentionPills" class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px"></div>
-                <div class="muted" style="font-size:12px;margin-top:8px">Tip: @channel/@here/@everyone notifican. #canal solo agrega un enlace.</div>
               </div>
             </div>
+            <div style="min-width:220px"></div>
           </div>
 
           <div class="row" style="margin-top:10px;align-items:flex-start">
             <div style="flex:1;min-width:320px">
               <div class="muted" style="font-size:12px;margin-bottom:6px">Mensaje</div>
-              <textarea class="input" id="slackComposeMsg" placeholder="Escribí el mensaje..."></textarea>
+              <div class="row" style="gap:8px;align-items:flex-start">
+                <textarea class="input" id="slackComposeMsg" placeholder="Escribí el mensaje..." style="flex:1"></textarea>
+                <div style="position:relative">
+                  <button class="btn" id="btnEmoji" type="button" title="Emojis" style="width:44px">😀</button>
+                  <div id="emojiModal" class="card" style="display:none;position:absolute;right:0;margin-top:8px;min-width:360px;max-width:420px;padding:10px;z-index:120">
+                    <div class="row" style="gap:8px;align-items:center">
+                      <input class="input" id="emojiSearch" placeholder="Buscar emoji..." style="flex:1" />
+                      <button class="btn ghost" id="btnEmojiClose" type="button">Cerrar</button>
+                    </div>
+                    <div class="row" id="emojiCats" style="gap:6px;flex-wrap:wrap;margin-top:10px"></div>
+                    <div id="emojiGrid" style="display:grid;grid-template-columns:repeat(10,1fr);gap:6px;margin-top:10px;max-height:260px;overflow:auto"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="muted" style="font-size:12px;margin-top:6px">Tip: @channel/@here/@everyone notifican. #canal solo agrega un enlace. Usá las notificaciones masivas solo si es necesario.</div>
             </div>
             <div style="min-width:260px">
               <div class="muted" style="font-size:12px;margin-bottom:6px">Programar</div>
               <input class="input" type="datetime-local" id="slackComposeWhen" />
-              <div class="muted" style="font-size:12px;margin-top:10px">Emojis</div>
-              <div class="row" style="gap:8px;align-items:center;position:relative">
-                <button class="btn" id="btnEmoji" type="button" title="Insertar emoji">😀</button>
-                <div id="emojiPanel" class="card" style="display:none;position:absolute;right:0;top:46px;width:420px;max-width:82vw;padding:10px;z-index:80">
-                  <div class="row" style="gap:8px;align-items:center">
-                    <input class="input" id="emojiSearch" placeholder="Buscar emoji..." />
-                    <button class="btn ghost" id="btnEmojiClose" type="button" title="Cerrar">✕</button>
-                  </div>
-                  <div id="emojiCats" class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px"></div>
-                  <div id="emojiGrid" style="display:grid;grid-template-columns:repeat(12,1fr);gap:6px;margin-top:10px;max-height:260px;overflow:auto"></div>
-                </div>
-              </div>
               <div class="row" style="margin-top:10px;justify-content:flex-end">
                 <button class="btn" id="btnComposeClear" type="button">Descartar</button>
                 <button class="btn" id="btnSaveDraft" type="button">Guardar borrador</button>

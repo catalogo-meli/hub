@@ -1057,10 +1057,10 @@ function mountSlackCompose_() {
   const btnSendNow = $("btnSendNow");
   const btnSched = $("btnSchedule");
   const btnEmoji = $("btnEmoji");
-  const emojiPanel = $("emojiPanel");
-  const btnEmojiClose = $("btnEmojiClose");
-  const emojiSearch = $("emojiSearch");
+  const emojiModal = $("emojiModal");
   const emojiCats = $("emojiCats");
+  const emojiSearch = $("emojiSearch");
+  const btnEmojiClose = $("btnEmojiClose");
   const emojiGrid = $("emojiGrid");
 
   const mentionSearch = $("slackMentionSearch");
@@ -1075,64 +1075,54 @@ function mountSlackCompose_() {
   };
   refreshChannels();
 
-  // menciones (1 solo lugar mental):
-  // - Colaboradores (por nombre / mail productora)
-  // - Notificaciones masivas (@channel/@here/@everyone)
-  // - Canales (#canal) como link real (<#ID|nombre>)
-  // UX: se seleccionan en píldoras y se agregan automáticamente al inicio al enviar/guardar/programar.
-  const notifyOptions = [
-    { key: "@channel", label: "@channel", sub: "Notifica a todo el canal", token: "@channel" },
-    { key: "@here", label: "@here", sub: "Notifica a activos", token: "@here" },
-    { key: "@everyone", label: "@everyone", sub: "Notifica a todos", token: "@everyone" },
-  ].map((x) => ({ ...x, type: "notify", hay: norm(`${x.label} ${x.sub}`), display: x.label }));
+  // menciones (buscador + píldoras)
+  // Fuente de menciones = colaboradores + notificaciones masivas + canales (link)
+  const massMentions = [
+    { id: "__mass_channel", nombre: "@channel", mailProd: "Notifica al canal", slackId: "", token: "<!channel>" },
+    { id: "__mass_canal", nombre: "@canal", mailProd: "Notifica al canal", slackId: "", token: "<!channel>" },
+    { id: "__mass_here", nombre: "@here", mailProd: "Notifica a activos", slackId: "", token: "<!here>" },
+    { id: "__mass_everyone", nombre: "@everyone", mailProd: "Notifica a todos", slackId: "", token: "<!everyone>" },
+  ];
 
-  const channelOptions = (S.canales || [])
-    .filter((c) => c && c.canal)
-    .map((c) => {
-      const name = String(c.canal || "").trim();
-      const id = String(c.channel_id || "").trim();
-      const label = `#${name}`;
-      const token = id ? `<#${id}|${name}>` : `#${name}`;
-      return {
-        key: `ch_${id || name}`,
-        type: "channel",
-        label,
-        sub: id ? id : "",
-        token,
-        display: label,
-        hay: norm(`${name} ${label} ${id}`),
-      };
-    })
-    .sort((a, b) => String(a.label || "").localeCompare(String(b.label || "")));
-
-  const colabOptions = (S.colabs || [])
+  const colabMentions = (S.colabs || [])
     .map(colabRowView)
     .filter((v) => v.nombre || v.mailProd)
     .map((v) => {
-      const nombre = v.nombre || v.id;
-      const mailProd = v.mailProd || "";
-      const slackId = v.slackId || "";
-      const label = `${nombre}${mailProd ? ` · ${mailProd}` : ""}`;
-      const token = slackId ? `<@${slackId}>` : nombre ? `@${nombre}` : "";
+      const label = `${v.nombre || v.id}${v.mailProd ? ` · ${v.mailProd}` : ""}`;
+      const hay = norm(`${v.nombre || ""} ${v.mailProd || ""} ${v.id || ""}`);
       return {
-        key: `u_${v.id}`,
-        type: "user",
         id: v.id,
-        nombre,
-        mailProd,
-        slackId,
+        nombre: v.nombre || v.id,
+        mailProd: v.mailProd || "",
         label,
-        sub: mailProd,
-        token,
-        display: nombre,
-        hay: norm(`${nombre} ${mailProd} ${v.id}`),
+        hay,
+        slackId: v.slackId || "",
+        token: v.slackId ? `<@${v.slackId}>` : "",
       };
     })
     .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || "")));
 
-  const mentionOptions = [...notifyOptions, ...channelOptions, ...colabOptions];
+  const channelMentions = (S.canales || [])
+    .filter((c) => c?.channel_id && c?.canal)
+    .map((c) => {
+      const nombre = `#${c.canal}`;
+      return {
+        id: `__ch_${c.channel_id}`,
+        nombre,
+        mailProd: "Link a canal",
+        label: nombre,
+        hay: norm(`${c.canal} ${nombre}`),
+        slackId: "",
+        token: `<#${c.channel_id}|${c.canal}>`,
+      };
+    });
 
-  const selMentions = new Map(); // key -> item
+  const allMentions = [...massMentions, ...colabMentions, ...channelMentions].map((x) => {
+    const hay = x.hay || norm(`${x.nombre || ""} ${x.mailProd || ""}`);
+    return { ...x, hay };
+  });
+
+  const selMentions = new Map(); // id -> item
 
   const renderPills = () => {
     if (!mentionPills) return;
@@ -1142,9 +1132,8 @@ function mountSlackCompose_() {
           .map(
             (x) => `
         <span class="pill" style="display:inline-flex;gap:6px;align-items:center">
-          <span style="font-weight:700">${escapeHtml(x.display || x.label || x.nombre || "")}</span>
-          ${x.type === "notify" ? `<span class="pill" style="padding:2px 8px;font-size:11px">NOTIF</span>` : x.type === "channel" ? `<span class="pill" style="padding:2px 8px;font-size:11px">CANAL</span>` : ""}
-          <button class="xbtn" data-rm="${escapeAttr(x.key)}" title="Quitar">×</button>
+          <span>${escapeHtml(x.nombre)}</span>
+          <button class="xbtn" data-rm="${escapeAttr(x.id)}" title="Quitar">×</button>
         </span>`
           )
           .join("")
@@ -1152,8 +1141,8 @@ function mountSlackCompose_() {
 
     mentionPills.querySelectorAll("[data-rm]").forEach((b) => {
       b.addEventListener("click", () => {
-        const key = unescapeAttr(b.getAttribute("data-rm"));
-        selMentions.delete(key);
+        const id = unescapeAttr(b.getAttribute("data-rm"));
+        selMentions.delete(id);
         renderPills();
       });
     });
@@ -1169,7 +1158,7 @@ function mountSlackCompose_() {
     if (!mentionResults) return;
     const nq = norm(q);
     if (!nq) return closeMentionResults();
-    const hits = mentionOptions.filter((x) => x.hay.includes(nq)).slice(0, 10);
+    const hits = allMentions.filter((x) => x.hay.includes(nq)).slice(0, 10);
     if (!hits.length) {
       mentionResults.style.display = "block";
       mentionResults.innerHTML = `<div class="muted" style="font-size:12px;padding:6px">Sin resultados.</div>`;
@@ -1178,13 +1167,11 @@ function mountSlackCompose_() {
     mentionResults.style.display = "block";
     mentionResults.innerHTML = hits
       .map((x) => {
-        const disabled = selMentions.has(x.key) ? "disabled" : "";
-        const badge = x.type === "notify" ? "NOTIF" : x.type === "channel" ? "CANAL" : "";
+        const disabled = selMentions.has(x.id) ? "disabled" : "";
         return `
-          <button class="btn ghost" data-pick="${escapeAttr(x.key)}" ${disabled} style="width:100%;justify-content:flex-start;gap:10px;padding:8px">
-            <span style="font-weight:700">${escapeHtml(x.type === "user" ? x.nombre : x.label)}</span>
-            ${badge ? `<span class="pill" style="padding:2px 8px;font-size:11px">${badge}</span>` : ""}
-            <span class="muted" style="font-size:12px">${escapeHtml(x.sub || "")}</span>
+          <button class="btn ghost" data-pick="${escapeAttr(x.id)}" ${disabled} style="width:100%;justify-content:flex-start;gap:10px;padding:8px">
+            <span style="font-weight:600">${escapeHtml(x.nombre)}</span>
+            <span class="muted" style="font-size:12px">${escapeHtml(x.mailProd)}</span>
           </button>
         `;
       })
@@ -1192,10 +1179,10 @@ function mountSlackCompose_() {
 
     mentionResults.querySelectorAll("[data-pick]").forEach((b) => {
       b.addEventListener("click", () => {
-        const key = unescapeAttr(b.getAttribute("data-pick"));
-        const it = mentionOptions.find((x) => x.key === key);
+        const id = unescapeAttr(b.getAttribute("data-pick"));
+        const it = allMentions.find((x) => x.id === id);
         if (!it) return;
-        selMentions.set(it.key, it);
+        selMentions.set(it.id, it);
         renderPills();
         if (mentionSearch) mentionSearch.value = "";
         closeMentionResults();
@@ -1217,8 +1204,58 @@ function mountSlackCompose_() {
 
   const getSelectedMentions = () => {
     const picked = [...selMentions.values()];
-    const tokens = picked.map((x) => String(x.token || "").trim()).filter(Boolean);
+    const tokens = picked.map((x) => x.token || "").filter(Boolean);
     return { tokens, picked };
+  };
+
+  // Inserta menciones al FINAL del mensaje (no al inicio).
+  // - No duplica si el token ya está en el texto.
+  // - Para notificaciones masivas, chequea también @alias (por si el user lo escribió).
+  const buildMessageWithMentions = (raw) => {
+    // Normaliza menciones masivas a tokens Slack para que realmente notifiquen
+    // (Slack API no siempre linkea @channel/@here/@everyone si no se setea link_names).
+    const normalized = String(raw || "")
+      .replace(/\B@canal\b/gi, "<!channel>")
+      .replace(/\B@channel\b/gi, "<!channel>")
+      .replace(/\B@here\b/gi, "<!here>")
+      .replace(/\B@everyone\b/gi, "<!everyone>")
+      .trim();
+
+    const base = normalized;
+    const { tokens, picked } = getSelectedMentions();
+    if (!tokens.length) return base;
+
+    const existing = base;
+
+    const toAdd = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      const p = picked[i];
+      if (!tok) continue;
+
+      // Mass mentions: si el usuario ya escribió @channel/@canal/etc, no lo repetimos.
+      if (tok === "<!channel>") {
+        const has = /<\!channel>|\B@channel\b|\B@canal\b/i.test(existing);
+        if (!has) toAdd.push(tok);
+        continue;
+      }
+      if (tok === "<!here>") {
+        const has = /<\!here>|\B@here\b/i.test(existing);
+        if (!has) toAdd.push(tok);
+        continue;
+      }
+      if (tok === "<!everyone>") {
+        const has = /<\!everyone>|\B@everyone\b/i.test(existing);
+        if (!has) toAdd.push(tok);
+        continue;
+      }
+
+      if (existing.includes(tok)) continue;
+      toAdd.push(tok);
+    }
+
+    if (!toAdd.length) return base;
+    return base ? `${base}\n\n${toAdd.join(" ")}` : toAdd.join(" ");
   };
 
   const insertAtCursor = (textarea, text) => {
@@ -1229,20 +1266,6 @@ function mountSlackCompose_() {
     const pos = start + text.length;
     textarea.setSelectionRange(pos, pos);
     textarea.focus();
-  };
-
-  // UX clave: 1 solo paso.
-  // Las menciones seleccionadas (píldoras) se agregan AUTOMÁTICAMENTE al inicio al guardar/enviar/programar.
-  // Evita el botón intermedio y reduce errores.
-  const mergeMentionsIntoMessage = (mensaje) => {
-    const base = String(mensaje || "").trim();
-    const { tokens } = getSelectedMentions();
-    if (!tokens.length) return base;
-
-    // No duplicar si el usuario ya puso la mención manualmente.
-    const add = tokens.filter((t) => !base.includes(t));
-    if (!add.length) return base;
-    return `${add.join(" ")} ${base}`.trim();
   };
 
   const clearCompose = () => {
@@ -1262,10 +1285,8 @@ function mountSlackCompose_() {
     setErr("");
     try {
       const channel_id = String(selCh.value || "").trim();
-      let mensaje = String(ta.value || "").trim();
+      const mensaje = buildMessageWithMentions(ta.value);
       if (!mensaje) throw new Error("Escribí un mensaje.");
-
-      mensaje = mergeMentionsIntoMessage(mensaje);
 
       const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
       await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
@@ -1278,17 +1299,39 @@ function mountSlackCompose_() {
     }
   });
 
+  btnSendNow.addEventListener("click", async () => {
+    setErr("");
+    try {
+      const channel_id = String(selCh.value || "").trim();
+      const mensaje = buildMessageWithMentions(ta.value);
+      if (!mensaje) throw new Error("Escribí un mensaje.");
+
+      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
+      // 1) append
+      await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
+      S.outbox = await API.slackOutboxList();
+      const newest = (S.outbox || []).slice().sort((a, b) => (b.row || 0) - (a.row || 0))[0];
+      if (!newest?.row) throw new Error("No se pudo obtener la fila creada.");
+
+      // 2) send
+      await API.slackSendRow(newest.row);
+      S.outbox = await API.slackOutboxList();
+      renderOutbox();
+      clearCompose();
+      toast("Slack", "Enviado");
+    } catch (e) {
+      setErr(`Enviar: ${e.message || e}`);
+    }
+  });
+
   btnSched.addEventListener("click", async () => {
     setErr("");
     try {
       const channel_id = String(selCh.value || "").trim();
-      let mensaje = String(ta.value || "").trim();
+      const mensaje = buildMessageWithMentions(ta.value);
       const v = String(when.value || "").trim();
       if (!mensaje) throw new Error("Escribí un mensaje.");
       if (!v) throw new Error("Elegí fecha y hora para programar.");
-      if (!channel_id) throw new Error("Elegí un canal para programar.");
-
-      mensaje = mergeMentionsIntoMessage(mensaje);
 
       const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
       // 1) crear fila como borrador
@@ -1308,192 +1351,113 @@ function mountSlackCompose_() {
     }
   });
 
-  // Enviar ahora (crea fila y la dispara vía Netlify -> Slack)
-  btnSendNow.addEventListener("click", async () => {
-    setErr("");
-    try {
-      const channel_id = String(selCh.value || "").trim();
-      let mensaje = String(ta.value || "").trim();
-      if (!mensaje) throw new Error("Escribí un mensaje.");
-      if (!channel_id) throw new Error("Elegí un canal para enviar.");
-
-      mensaje = mergeMentionsIntoMessage(mensaje);
-
-      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
-      await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "PENDIENTE");
-      S.outbox = await API.slackOutboxList();
-      const newest = (S.outbox || []).slice().sort((a, b) => (b.row || 0) - (a.row || 0))[0];
-      if (!newest?.row) throw new Error("No se pudo obtener la fila creada.");
-
-      setBusy("Slack", "Enviando...");
-      await API.slackSendRow(newest.row);
-      S.outbox = await API.slackOutboxList();
-      renderOutbox();
-      clearCompose();
-      toast("Slack", "Enviado");
-    } catch (e) {
-      setErr(`Enviar: ${e.message || e}`);
-    } finally {
-      clearBusy();
-    }
-  });
-
-  // Emojis (visual + categorías + buscador) — sin dependencias externas
-  const EMOJI_DATA = [
-    {
-      key: "smileys",
-      label: "😀",
-      title: "Caras",
-      items: [
-        ["😀", "cara feliz sonrisa"], ["😃", "feliz"], ["😄", "feliz risa"], ["😁", "sonrisa"], ["😆", "risa"], ["😅", "nerviosa"], ["🤣", "lol"],
-        ["🙂", "sonrisa"], ["🙃", "al revés"], ["😉", "guiño"], ["😊", "contento"], ["😇", "angel"], ["😍", "amor"], ["🥰", "enamorado"], ["😘", "beso"], ["😋", "rico"], ["😜", "broma"], ["🤪", "loco"], ["😎", "cool"],
-        ["🤓", "nerd"], ["🧐", "monoculo"], ["🤔", "pensando"], ["🤨", "duda"], ["😐", "neutral"], ["😑", "sin emoción"], ["🙄", "ojos"],
-        ["😏", "picaro"], ["😣", "frustrado"], ["😥", "triste"], ["😢", "triste"], ["😭", "llanto"], ["😤", "enojo"], ["😡", "furia"], ["🤬", "insulto"],
-        ["😱", "miedo"], ["😨", "asustado"], ["😰", "sudor"], ["😴", "sueño"], ["🥱", "bostezo"], ["🤯", "cabeza explota"], ["🤗", "abrazo"], ["🫡", "saludo"],
-        ["😷", "mascara"], ["🤒", "enfermo"], ["🤕", "golpe"], ["🤢", "nauseas"], ["🤮", "vomito"], ["🥵", "calor"], ["🥶", "frio"],
-      ],
-    },
-    {
-      key: "people",
-      label: "👋",
-      title: "Personas",
-      items: [
-        ["👋", "hola chau"], ["🤚", "mano"], ["🖐️", "mano"], ["✋", "alto"], ["👌", "ok"], ["🤌", "italiano"],
-        ["👍", "pulgar arriba"], ["👎", "pulgar abajo"], ["🙏", "por favor gracias"], ["👏", "aplausos"], ["🙌", "celebrar"], ["🫶", "corazón manos"],
-        ["💪", "fuerza"], ["🤝", "acuerdo"], ["🫂", "abrazo"], ["✍️", "escribir"], ["👀", "mirar"], ["🧠", "cerebro"],
-        ["🗣️", "hablar"], ["👤", "persona"], ["👥", "equipo"], ["🧑‍💻", "trabajo"], ["🧑‍🏫", "docente"], ["🧑‍🔧", "tecnico"],
-      ],
-    },
-    {
-      key: "animals",
-      label: "🐶",
-      title: "Animales",
-      items: [
-        ["🐶", "perro"], ["🐱", "gato"], ["🐭", "ratón"], ["🐹", "hamster"], ["🐰", "conejo"], ["🦊", "zorro"],
-        ["🐻", "oso"], ["🐼", "panda"], ["🐨", "koala"], ["🐯", "tigre"], ["🦁", "león"], ["🐮", "vaca"], ["🐷", "cerdo"],
-        ["🐸", "rana"], ["🐵", "mono"], ["🦄", "unicornio"], ["🐔", "gallo"], ["🐧", "pinguino"], ["🐦", "pajaro"],
-        ["🐺", "lobo"], ["🦉", "buho"], ["🦋", "mariposa"], ["🐝", "abeja"], ["🐢", "tortuga"], ["🐙", "pulpo"], ["🦈", "tiburon"],
-      ],
-    },
-    {
-      key: "food",
-      label: "🍔",
-      title: "Comida",
-      items: [
-        ["🍔", "hamburguesa"], ["🍟", "papas"], ["🍕", "pizza"], ["🌭", "pancho"], ["🌮", "taco"], ["🌯", "burrito"], ["🥪", "sándwich"],
-        ["🥗", "ensalada"], ["🍣", "sushi"], ["🍝", "pasta"], ["🍜", "ramen"], ["🍱", "bento"], ["🍛", "curry"],
-        ["🍎", "manzana"], ["🍌", "banana"], ["🍇", "uvas"], ["🍓", "frutilla"], ["🍑", "durazno"], ["🍍", "anana"],
-        ["🍰", "torta"], ["🧁", "cupcake"], ["🍪", "galleta"], ["🍫", "chocolate"], ["🍩", "dona"], ["🍿", "pochoclo"],
-        ["☕", "café"], ["🧉", "mate"], ["🥤", "bebida"], ["🍺", "cerveza"], ["🍷", "vino"], ["🥛", "leche"],
-      ],
-    },
-    {
-      key: "activity",
-      label: "⚽",
-      title: "Actividad",
-      items: [
-        ["⚽", "futbol"], ["🏀", "basket"], ["🏈", "futbol americano"], ["⚾", "beisbol"], ["🎾", "tenis"], ["🏐", "voley"], ["🏓", "ping pong"],
-        ["🏃", "correr"], ["🏋️", "gym"], ["🚴", "bici"], ["🧘", "yoga"],
-        ["🎯", "objetivo"], ["🎮", "juego"], ["🎲", "dados"], ["🎵", "música"], ["🎤", "cantar"], ["🎬", "cine"], ["🎨", "arte"],
-      ],
-    },
-    {
-      key: "travel",
-      label: "🚗",
-      title: "Viajes",
-      items: [
-        ["🚗", "auto"], ["🚌", "bus"], ["🚕", "taxi"], ["🚲", "bici"], ["🚆", "tren"], ["🚇", "subte"], ["🚀", "cohete"],
-        ["✈️", "avión"], ["🛫", "despegue"], ["🛬", "aterrizaje"], ["🛳️", "barco"], ["⛵", "vela"], ["🚤", "lancha"],
-        ["🗺️", "mapa"], ["📍", "ubicación"], ["🧳", "valija"], ["🏝️", "playa"], ["🏔️", "montaña"], ["🏁", "meta"], ["⏰", "reloj"],
-      ],
-    },
-    {
-      key: "objects",
-      label: "💡",
-      title: "Objetos",
-      items: [
-        ["💡", "idea"], ["📌", "pin"], ["📣", "megáfono"], ["📎", "clip"], ["🧩", "puzzle"], ["🧪", "prueba"],
-        ["🧯", "extintor"], ["🧹", "limpieza"], ["🗂️", "carpeta"], ["🧾", "recibo"], ["📈", "crecimiento"],
-      ],
-    },
-    {
-      key: "symbols",
-      label: "❤️",
-      title: "Símbolos",
-      items: [
-        ["✅", "ok listo"], ["❌", "error"], ["⚠️", "alerta"], ["🟢", "verde"], ["🟡", "amarillo"], ["🔴", "rojo"],
-        ["➡️", "derecha"], ["⬅️", "izquierda"], ["⬆️", "arriba"], ["⬇️", "abajo"], ["✨", "brillo"], ["🎉", "fiesta"],
-      ],
-    },
-    {
-      key: "flags",
-      label: "🏳️",
-      title: "Banderas",
-      items: [
-        ["🏳️", "bandera"], ["🏴", "bandera negra"], ["🏁", "meta"], ["🇦🇷", "argentina"], ["🇲🇽", "mexico"], ["🇨🇴", "colombia"],
-        ["🇺🇸", "usa"], ["🇪🇸", "españa"],
-      ],
-    },
+  // Emojis: panel visual con categorías + buscador.
+  // Prioridad: velocidad (dataset curado y grande), sin dependencias.
+  const EMOJI_DB = [
+    { key: "faces", label: "😀", items: [
+      { e: "😀", k: "cara feliz smile" }, { e: "😄", k: "sonrisa grin" }, { e: "😁", k: "feliz" }, { e: "😅", k: "sudor" },
+      { e: "😉", k: "guiño" }, { e: "🙂", k: "ok" }, { e: "🙃", k: "vuelta" }, { e: "😎", k: "cool" },
+      { e: "🤔", k: "pensando" }, { e: "😴", k: "dormir" }, { e: "😤", k: "enojo" }, { e: "😭", k: "llanto" },
+      { e: "🥹", k: "emocion" }, { e: "😡", k: "furia" }, { e: "🤯", k: "mind blown" }, { e: "🫡", k: "saludo" },
+    ]},
+    { key: "people", label: "🧑", items: [
+      { e: "🙌", k: "celebrar" }, { e: "👏", k: "aplausos" }, { e: "🤝", k: "acuerdo" }, { e: "🙏", k: "gracias" },
+      { e: "💪", k: "fuerza" }, { e: "🫶", k: "corazon" }, { e: "👀", k: "mirando" }, { e: "🧠", k: "idea" },
+      { e: "🗣️", k: "hablar" }, { e: "🧑‍💻", k: "dev" }, { e: "👩‍💻", k: "dev" }, { e: "👨‍💻", k: "dev" },
+    ]},
+    { key: "nature", label: "🐶", items: [
+      { e: "🐶", k: "perro" }, { e: "🐱", k: "gato" }, { e: "🦊", k: "zorro" }, { e: "🐼", k: "panda" },
+      { e: "🌿", k: "planta" }, { e: "🌸", k: "flor" }, { e: "🔥", k: "fuego" }, { e: "✨", k: "brillos" },
+    ]},
+    { key: "food", label: "🍔", items: [
+      { e: "☕", k: "cafe" }, { e: "🍔", k: "hamburguesa" }, { e: "🍕", k: "pizza" }, { e: "🍎", k: "manzana" },
+      { e: "🥑", k: "palta" }, { e: "🍪", k: "galleta" }, { e: "🍻", k: "birra" }, { e: "🥂", k: "brindis" },
+    ]},
+    { key: "activity", label: "⚽", items: [
+      { e: "🎯", k: "objetivo" }, { e: "🏁", k: "finish" }, { e: "🎉", k: "fiesta" }, { e: "📣", k: "anuncio" },
+      { e: "🚀", k: "lanzar" }, { e: "🧪", k: "test" }, { e: "🧯", k: "incendio" }, { e: "🧩", k: "puzzle" },
+    ]},
+    { key: "travel", label: "✈️", items: [
+      { e: "✈️", k: "viaje" }, { e: "🚗", k: "auto" }, { e: "🗺️", k: "mapa" }, { e: "📍", k: "pin" },
+      { e: "⏰", k: "hora" }, { e: "🕒", k: "tiempo" }, { e: "📅", k: "calendario" }, { e: "🧳", k: "valija" },
+    ]},
+    { key: "objects", label: "💡", items: [
+      { e: "💡", k: "idea" }, { e: "📌", k: "pin" }, { e: "📝", k: "nota" }, { e: "✍️", k: "escribir" },
+      { e: "🗂️", k: "archivo" }, { e: "🧾", k: "ticket" }, { e: "📈", k: "metricas" }, { e: "📊", k: "grafico" },
+      { e: "✅", k: "ok" }, { e: "⚠️", k: "warning" }, { e: "❌", k: "error" },
+    ]},
+    { key: "symbols", label: "🔣", items: [
+      { e: "🟢", k: "verde" }, { e: "🟡", k: "amarillo" }, { e: "🔴", k: "rojo" },
+      { e: "➡️", k: "derecha" }, { e: "⬅️", k: "izquierda" }, { e: "⬆️", k: "arriba" }, { e: "⬇️", k: "abajo" },
+      { e: "🔁", k: "reintento" }, { e: "♻️", k: "reciclar" }, { e: "🧹", k: "limpiar" },
+    ]},
+    { key: "flags", label: "🏳️", items: [
+      { e: "🇦🇷", k: "argentina" }, { e: "🇲🇽", k: "mexico" }, { e: "🇺🇸", k: "usa" }, { e: "🇪🇸", k: "españa" },
+      { e: "🇧🇷", k: "brasil" }, { e: "🇨🇴", k: "colombia" }, { e: "🇦🇼", k: "aruba" }, { e: "🇨🇼", k: "curazao" },
+    ]},
   ];
 
-  let emojiCat = "smileys";
-
-  const flattenEmoji = () => EMOJI_DATA.flatMap((c) => c.items.map(([ch, tags]) => ({ ch, tags: `${tags} ${c.title}`.toLowerCase(), cat: c.key })));
-  const EMOJI_FLAT = flattenEmoji();
+  let activeCat = "faces";
 
   const renderEmojiCats = () => {
     if (!emojiCats) return;
-    emojiCats.innerHTML = EMOJI_DATA.map((c) => {
-      const active = c.key === emojiCat ? "primary" : "ghost";
-      return `<button class="btn ${active}" data-ecat="${escapeAttr(c.key)}" type="button" title="${escapeAttr(c.title)}" style="padding:6px 10px">${escapeHtml(c.label)}</button>`;
+    emojiCats.innerHTML = EMOJI_DB.map((c) => {
+      const active = c.key === activeCat ? "primary" : "ghost";
+      return `<button class="btn ${active}" type="button" data-cat="${escapeAttr(c.key)}" style="padding:6px 10px">${escapeHtml(c.label)}</button>`;
     }).join("");
-    emojiCats.querySelectorAll("[data-ecat]").forEach((b) => {
-      b.addEventListener("click", () => {
-        emojiCat = unescapeAttr(b.getAttribute("data-ecat"));
+    emojiCats.querySelectorAll("[data-cat]").forEach((b) => {
+      b.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        activeCat = unescapeAttr(b.getAttribute("data-cat"));
         if (emojiSearch) emojiSearch.value = "";
-        renderEmojiGrid();
         renderEmojiCats();
+        renderEmojiGrid();
       });
     });
   };
 
   const renderEmojiGrid = () => {
     if (!emojiGrid) return;
-    const q = String(emojiSearch?.value || "").trim().toLowerCase();
-    let list;
+    const q = norm(String(emojiSearch?.value || ""));
+    let items = [];
     if (q) {
-      list = EMOJI_FLAT.filter((x) => x.tags.includes(q)).slice(0, 240);
+      for (const c of EMOJI_DB) {
+        for (const it of c.items) {
+          const hay = norm(`${it.k || ""} ${it.e || ""}`);
+          if (hay.includes(q)) items.push(it);
+        }
+      }
+      items = items.slice(0, 180);
     } else {
-      const cat = EMOJI_DATA.find((c) => c.key === emojiCat) || EMOJI_DATA[0];
-      list = cat.items.map(([ch, tags]) => ({ ch, tags }));
+      const cat = EMOJI_DB.find((x) => x.key === activeCat) || EMOJI_DB[0];
+      items = (cat?.items || []).slice();
     }
-    emojiGrid.innerHTML = list.map((x) => `<button class="btn ghost" data-e="${escapeAttr(x.ch)}" type="button" style="padding:6px 0">${escapeHtml(x.ch)}</button>`).join("");
+
+    emojiGrid.innerHTML = items.map((it) => `<button class="btn ghost" type="button" data-e="${escapeAttr(it.e)}" title="${escapeAttr(it.k || "")}" style="padding:6px 0">${escapeHtml(it.e)}</button>`).join("");
     emojiGrid.querySelectorAll("[data-e]").forEach((b) => {
-      b.addEventListener("click", () => {
+      b.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         insertAtCursor(ta, b.getAttribute("data-e") + " ");
-        if (emojiPanel) emojiPanel.style.display = "none";
+        if (emojiModal) emojiModal.style.display = "none";
       });
     });
   };
 
-  const closeEmoji = () => {
-    if (emojiPanel) emojiPanel.style.display = "none";
-  };
+  const openEmoji = () => { if (emojiModal) emojiModal.style.display = "block"; };
+  const closeEmoji = () => { if (emojiModal) emojiModal.style.display = "none"; };
 
   btnEmoji?.addEventListener("click", (e) => {
     e.preventDefault();
-    if (!emojiPanel) return;
-    const next = emojiPanel.style.display === "none" || !emojiPanel.style.display ? "block" : "none";
-    emojiPanel.style.display = next;
-    if (next === "block") {
-      renderEmojiCats();
-      renderEmojiGrid();
-      setTimeout(() => emojiSearch?.focus(), 0);
-    }
+    e.stopPropagation();
+    if (!emojiModal) return;
+    emojiModal.style.display = emojiModal.style.display === "none" ? "block" : "none";
   });
 
   btnEmojiClose?.addEventListener("click", (e) => {
     e.preventDefault();
+    e.stopPropagation();
     closeEmoji();
   });
 
@@ -1502,11 +1466,15 @@ function mountSlackCompose_() {
   }, 80));
 
   document.addEventListener("click", (e) => {
-    if (!emojiPanel || !btnEmoji) return;
+    if (!emojiModal || !btnEmoji) return;
     const t = e.target;
-    if (emojiPanel.contains(t) || btnEmoji.contains(t)) return;
+    if (emojiModal.contains(t) || btnEmoji.contains(t)) return;
     closeEmoji();
   });
+
+  // init emojis
+  renderEmojiCats();
+  renderEmojiGrid();
 
   // estado inicial
   renderPills();
