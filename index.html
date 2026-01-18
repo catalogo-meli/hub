@@ -112,6 +112,71 @@
     th.sortable{cursor:pointer;user-select:none}
     th.sortable .srt{margin-left:6px;color:var(--muted);font-size:11px}
 
+    /* Slack - Menciones: estabilidad visual + jerarquía secundaria */
+    .mention-wrap{position:relative}
+    .mention-dd{
+      position:absolute;
+      left:0;
+      right:0;
+      top:44px;
+      margin:0;
+      padding:6px;
+      max-height:190px;
+      overflow:auto;
+      z-index:140;
+    }
+    #slackMentionPills .pill{
+      padding:4px 8px;
+      gap:6px;
+      font-size:11px;
+      color:var(--muted);
+      background:rgba(255,255,255,.03);
+    }
+    #slackMentionPills .xbtn{
+      border:0;
+      background:transparent;
+      color:var(--muted);
+      cursor:pointer;
+      font-size:14px;
+      line-height:1;
+      padding:0 2px;
+      opacity:.8;
+    }
+    #slackMentionPills .xbtn:hover{opacity:1;color:var(--txt)}
+
+    /* Tooltip discreto (sin ocupar espacio permanente) */
+    .tip{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:18px;height:18px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      color:var(--muted);
+      font-size:12px;
+      cursor:help;
+      position:relative;
+      user-select:none;
+    }
+    .tip:hover{color:var(--txt)}
+    .tip:hover::after{
+      content:attr(data-tooltip);
+      white-space:pre-line;
+      position:absolute;
+      left:0;
+      top:24px;
+      min-width:260px;
+      max-width:340px;
+      background:rgba(10,12,18,.98);
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:10px;
+      color:var(--txt);
+      box-shadow:var(--shadow);
+      z-index:200;
+    }
+    [data-theme="light"] .tip:hover::after{background:rgba(255,255,255,.98)}
+
 
     .input, select, textarea{
       width:100%;
@@ -516,10 +581,15 @@
               <select class="input" id="slackComposeChannel"></select>
             </div>
             <div style="min-width:260px;flex:1">
-              <div class="muted" style="font-size:12px;margin-bottom:6px">Menciones (personas, @here/@channel/@everyone o #canal)</div>
+              <div class="row" style="gap:6px;align-items:center;margin-bottom:6px">
+                <div class="muted" style="font-size:12px">Menciones</div>
+                <span class="tip" data-tooltip="Personas, @here, @canal, @everyone\n⚠️ @canal y @here notifican. #canal solo enlaza.">ⓘ</span>
+              </div>
               <div class="card" style="padding:10px">
-                <input class="input" id="slackMentionSearch" placeholder="Buscar por nombre o mail productora..." />
-                <div id="slackMentionResults" class="card" style="display:none;margin-top:6px;padding:6px;max-height:180px;overflow:auto"></div>
+                <div class="mention-wrap" style="position:relative">
+                  <input class="input" id="slackMentionSearch" placeholder="Buscar por nombre o mail productora..." autocomplete="off" />
+                  <div id="slackMentionResults" class="card mention-dd" style="display:none"></div>
+                </div>
                 <div id="slackMentionPills" class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px"></div>
               </div>
             </div>
@@ -538,12 +608,11 @@
                       <input class="input" id="emojiSearch" placeholder="Buscar emoji..." style="flex:1" />
                       <button class="btn ghost" id="btnEmojiClose" type="button">Cerrar</button>
                     </div>
-                    <div class="row" id="emojiCats" style="gap:6px;flex-wrap:wrap;margin-top:10px"></div>
-                    <div id="emojiGrid" style="display:grid;grid-template-columns:repeat(10,1fr);gap:6px;margin-top:10px;max-height:260px;overflow:auto"></div>
+                    <div id="emojiGroups" style="margin-top:10px;max-height:300px;overflow:auto"></div>
                   </div>
                 </div>
               </div>
-              <div class="muted" style="font-size:12px;margin-top:6px">Tip: @channel/@here/@everyone notifican. #canal solo agrega un enlace. Usá las notificaciones masivas solo si es necesario.</div>
+              
             </div>
             <div style="min-width:260px">
               <div class="muted" style="font-size:12px;margin-bottom:6px">Programar</div>

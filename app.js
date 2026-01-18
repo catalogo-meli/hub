@@ -1058,10 +1058,10 @@ function mountSlackCompose_() {
   const btnSched = $("btnSchedule");
   const btnEmoji = $("btnEmoji");
   const emojiModal = $("emojiModal");
-  const emojiCats = $("emojiCats");
+  const emojiGroups = $("emojiGroups");
   const emojiSearch = $("emojiSearch");
   const btnEmojiClose = $("btnEmojiClose");
-  const emojiGrid = $("emojiGrid");
+  
 
   const mentionSearch = $("slackMentionSearch");
   const mentionResults = $("slackMentionResults");
@@ -1078,7 +1078,7 @@ function mountSlackCompose_() {
   // menciones (buscador + píldoras)
   // Fuente de menciones = colaboradores + notificaciones masivas + canales (link)
   const massMentions = [
-    { id: "__mass_channel", nombre: "@channel", mailProd: "Notifica al canal", slackId: "", token: "<!channel>" },
+    // Decisión de producto: unificamos notificación de canal en @canal (evita confusión semántica)
     { id: "__mass_canal", nombre: "@canal", mailProd: "Notifica al canal", slackId: "", token: "<!channel>" },
     { id: "__mass_here", nombre: "@here", mailProd: "Notifica a activos", slackId: "", token: "<!here>" },
     { id: "__mass_everyone", nombre: "@everyone", mailProd: "Notifica a todos", slackId: "", token: "<!everyone>" },
@@ -1351,96 +1351,57 @@ function mountSlackCompose_() {
     }
   });
 
-  // Emojis: panel visual con categorías + buscador.
-  // Prioridad: velocidad (dataset curado y grande), sin dependencias.
-  const EMOJI_DB = [
-    { key: "faces", label: "😀", items: [
-      { e: "😀", k: "cara feliz smile" }, { e: "😄", k: "sonrisa grin" }, { e: "😁", k: "feliz" }, { e: "😅", k: "sudor" },
-      { e: "😉", k: "guiño" }, { e: "🙂", k: "ok" }, { e: "🙃", k: "vuelta" }, { e: "😎", k: "cool" },
-      { e: "🤔", k: "pensando" }, { e: "😴", k: "dormir" }, { e: "😤", k: "enojo" }, { e: "😭", k: "llanto" },
-      { e: "🥹", k: "emocion" }, { e: "😡", k: "furia" }, { e: "🤯", k: "mind blown" }, { e: "🫡", k: "saludo" },
-    ]},
-    { key: "people", label: "🧑", items: [
-      { e: "🙌", k: "celebrar" }, { e: "👏", k: "aplausos" }, { e: "🤝", k: "acuerdo" }, { e: "🙏", k: "gracias" },
-      { e: "💪", k: "fuerza" }, { e: "🫶", k: "corazon" }, { e: "👀", k: "mirando" }, { e: "🧠", k: "idea" },
-      { e: "🗣️", k: "hablar" }, { e: "🧑‍💻", k: "dev" }, { e: "👩‍💻", k: "dev" }, { e: "👨‍💻", k: "dev" },
-    ]},
-    { key: "nature", label: "🐶", items: [
-      { e: "🐶", k: "perro" }, { e: "🐱", k: "gato" }, { e: "🦊", k: "zorro" }, { e: "🐼", k: "panda" },
-      { e: "🌿", k: "planta" }, { e: "🌸", k: "flor" }, { e: "🔥", k: "fuego" }, { e: "✨", k: "brillos" },
-    ]},
-    { key: "food", label: "🍔", items: [
-      { e: "☕", k: "cafe" }, { e: "🍔", k: "hamburguesa" }, { e: "🍕", k: "pizza" }, { e: "🍎", k: "manzana" },
-      { e: "🥑", k: "palta" }, { e: "🍪", k: "galleta" }, { e: "🍻", k: "birra" }, { e: "🥂", k: "brindis" },
-    ]},
-    { key: "activity", label: "⚽", items: [
-      { e: "🎯", k: "objetivo" }, { e: "🏁", k: "finish" }, { e: "🎉", k: "fiesta" }, { e: "📣", k: "anuncio" },
-      { e: "🚀", k: "lanzar" }, { e: "🧪", k: "test" }, { e: "🧯", k: "incendio" }, { e: "🧩", k: "puzzle" },
-    ]},
-    { key: "travel", label: "✈️", items: [
-      { e: "✈️", k: "viaje" }, { e: "🚗", k: "auto" }, { e: "🗺️", k: "mapa" }, { e: "📍", k: "pin" },
-      { e: "⏰", k: "hora" }, { e: "🕒", k: "tiempo" }, { e: "📅", k: "calendario" }, { e: "🧳", k: "valija" },
-    ]},
-    { key: "objects", label: "💡", items: [
-      { e: "💡", k: "idea" }, { e: "📌", k: "pin" }, { e: "📝", k: "nota" }, { e: "✍️", k: "escribir" },
-      { e: "🗂️", k: "archivo" }, { e: "🧾", k: "ticket" }, { e: "📈", k: "metricas" }, { e: "📊", k: "grafico" },
-      { e: "✅", k: "ok" }, { e: "⚠️", k: "warning" }, { e: "❌", k: "error" },
-    ]},
-    { key: "symbols", label: "🔣", items: [
-      { e: "🟢", k: "verde" }, { e: "🟡", k: "amarillo" }, { e: "🔴", k: "rojo" },
-      { e: "➡️", k: "derecha" }, { e: "⬅️", k: "izquierda" }, { e: "⬆️", k: "arriba" }, { e: "⬇️", k: "abajo" },
-      { e: "🔁", k: "reintento" }, { e: "♻️", k: "reciclar" }, { e: "🧹", k: "limpiar" },
-    ]},
-    { key: "flags", label: "🏳️", items: [
-      { e: "🇦🇷", k: "argentina" }, { e: "🇲🇽", k: "mexico" }, { e: "🇺🇸", k: "usa" }, { e: "🇪🇸", k: "españa" },
-      { e: "🇧🇷", k: "brasil" }, { e: "🇨🇴", k: "colombia" }, { e: "🇦🇼", k: "aruba" }, { e: "🇨🇼", k: "curazao" },
-    ]},
+  // Emojis: selector OPERATIVO (curado) agrupado por función (no por estética).
+  // Regla: usar exactamente este set (sin inventos) y mantener el foco del textarea.
+  const EMOJI_GROUPS = [
+    { title: "Atención / Acción", items: ["🚨","❗️","⚠️","🔔","⏰","📢","👀"], k: "alerta accion atencion" },
+    { title: "Estado / Resultado", items: ["✅","❌","🔄","⏳","🟢","🟡","🔴"], k: "estado resultado ok error" },
+    { title: "Información / Contexto", items: ["ℹ️","📌","🧩","📎","🔍"], k: "info contexto" },
+    { title: "Tiempo / Fechas", items: ["📅","⏱️","⌛️","🔜"], k: "tiempo fecha" },
+    { title: "Operativo / Procesos", items: ["📊","⚙️","🛠️","🧪"], k: "operativo procesos" },
+    { title: "Bloqueos / Problemas", items: ["🛑","🚫","🧱","🐞"], k: "bloqueo problema" },
+    { title: "Objetivo / Prioridad", items: ["🎯","🔝","🚀"], k: "objetivo prioridad" },
   ];
 
-  let activeCat = "faces";
-
-  const renderEmojiCats = () => {
-    if (!emojiCats) return;
-    emojiCats.innerHTML = EMOJI_DB.map((c) => {
-      const active = c.key === activeCat ? "primary" : "ghost";
-      return `<button class="btn ${active}" type="button" data-cat="${escapeAttr(c.key)}" style="padding:6px 10px">${escapeHtml(c.label)}</button>`;
-    }).join("");
-    emojiCats.querySelectorAll("[data-cat]").forEach((b) => {
-      b.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        activeCat = unescapeAttr(b.getAttribute("data-cat"));
-        if (emojiSearch) emojiSearch.value = "";
-        renderEmojiCats();
-        renderEmojiGrid();
-      });
-    });
-  };
-
-  const renderEmojiGrid = () => {
-    if (!emojiGrid) return;
-    const q = norm(String(emojiSearch?.value || ""));
-    let items = [];
-    if (q) {
-      for (const c of EMOJI_DB) {
-        for (const it of c.items) {
-          const hay = norm(`${it.k || ""} ${it.e || ""}`);
-          if (hay.includes(q)) items.push(it);
-        }
+  const EMOJI_INDEX = (() => {
+    const out = [];
+    for (const g of EMOJI_GROUPS) {
+      for (const e of g.items) {
+        out.push({ e, group: g.title, hay: norm(`${g.title} ${g.k || ""} ${e}`) });
       }
-      items = items.slice(0, 180);
+    }
+    return out;
+  })();
+
+  const renderEmojiPanel = () => {
+    if (!emojiGroups) return;
+    const q = norm(String(emojiSearch?.value || ""));
+
+    const button = (e) => `
+      <button class="btn ghost" type="button" data-e="${escapeAttr(e)}" style="padding:6px 8px;min-width:38px">${escapeHtml(e)}</button>
+    `;
+
+    if (q) {
+      const hits = EMOJI_INDEX.filter((x) => x.hay.includes(q)).slice(0, 80);
+      emojiGroups.innerHTML = `
+        <div class="muted" style="font-size:12px;margin-bottom:8px">Resultados</div>
+        <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:6px">${hits.map((x) => button(x.e)).join("") || `<div class="muted" style="font-size:12px">Sin resultados.</div>`}</div>
+      `;
     } else {
-      const cat = EMOJI_DB.find((x) => x.key === activeCat) || EMOJI_DB[0];
-      items = (cat?.items || []).slice();
+      emojiGroups.innerHTML = EMOJI_GROUPS.map((g) => {
+        return `
+          <div class="muted" style="font-size:12px;margin:10px 0 6px">${escapeHtml(g.title)}</div>
+          <div class="row" style="gap:6px;flex-wrap:wrap">${g.items.map(button).join("")}</div>
+        `;
+      }).join("");
     }
 
-    emojiGrid.innerHTML = items.map((it) => `<button class="btn ghost" type="button" data-e="${escapeAttr(it.e)}" title="${escapeAttr(it.k || "")}" style="padding:6px 0">${escapeHtml(it.e)}</button>`).join("");
-    emojiGrid.querySelectorAll("[data-e]").forEach((b) => {
-      b.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+    emojiGroups.querySelectorAll("[data-e]").forEach((b) => {
+      b.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
         insertAtCursor(ta, b.getAttribute("data-e") + " ");
-        if (emojiModal) emojiModal.style.display = "none";
+        // No cerramos el panel: permite insertar varios emojis rápido.
       });
     });
   };
@@ -1462,7 +1423,7 @@ function mountSlackCompose_() {
   });
 
   emojiSearch?.addEventListener("input", debounce(() => {
-    renderEmojiGrid();
+    renderEmojiPanel();
   }, 80));
 
   document.addEventListener("click", (e) => {
@@ -1473,8 +1434,7 @@ function mountSlackCompose_() {
   });
 
   // init emojis
-  renderEmojiCats();
-  renderEmojiGrid();
+  renderEmojiPanel();
 
   // estado inicial
   renderPills();
