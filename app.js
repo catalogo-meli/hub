@@ -607,16 +607,22 @@ function renderFlujos() {
         await API.configFlujosSetIncluirMensaje(unescapeAttr(flujo), value);
         // Si se desactiva Slack, se limpia el canal (no se exige)
         if (!value) {
-          setChannelId("");
+          // UX: ocultar el valor cuando está deshabilitado, pero NO borrar el canal guardado.
+          // Esto permite que, al volver a activar Slack, el canal vuelva por defecto.
           if (chInp) { chInp.value = ""; chInp.disabled = true; }
           chWrap?.classList.remove("invalid");
-          // persisto canal vacío, manteniendo perfiles requeridos
-          const perfiles = Number(inp?.value || 0) || 0;
-          saveFlujoDebounced(unescapeAttr(flujo), perfiles, "");
         } else {
           if (chInp) { chInp.disabled = false; chInp.focus(); }
-          // si no hay canal, marcar error
-          if (!getChannelId()) chWrap?.classList.add("invalid");
+          // si ya había canal guardado, mostrarlo por defecto
+          const existing = getChannelId();
+          if (existing) {
+            const ch = resolveChannel_(existing);
+            chInp.value = ch ? ch.name : existing;
+            chWrap?.classList.remove("invalid");
+          } else {
+            // si no hay canal, marcar error
+            chWrap?.classList.add("invalid");
+          }
         }
         // actualizar cache local si existe
         const idx = (S.flujos || []).findIndex((x) => String(x.flujo) === String(unescapeAttr(flujo)));
@@ -2189,17 +2195,16 @@ async function main() {
 
   $("btnAddFlujo")?.addEventListener("click", async () => {
     const name = $("newFlujoName")?.value?.trim() || "";
-    const req = Number($("newFlujoReq")?.value || 0) || 0;
     if (!name) return setErr("Flujos: escribí el nombre del flujo.");
 
     try {
       $("dailyStatus").textContent = "Guardando...";
-      await API.flujosUpsert(name, req, "");
+      // Perfiles requeridos por defecto = 0 (reduce fricción)
+      await API.flujosUpsert(name, 0, "");
       S.flujos = await API.flujosList();
       renderFlujos();
       toast("Flujo agregado", name);
       $("newFlujoName").value = "";
-      $("newFlujoReq").value = "";
     } catch (e) {
       setErr(`Flujos: ${e.message || e}`);
     } finally {
