@@ -59,29 +59,53 @@ function fmtDateDMY(isoYMD) {
 }
 
 function fmtDateAny(val) {
-  if (!val) return "";
-  // Date instance
-  if (val instanceof Date && !isNaN(val.getTime())) {
-    const y = val.getFullYear();
-    const m = String(val.getMonth() + 1).padStart(2, "0");
-    const d = String(val.getDate()).padStart(2, "0");
-    return `${d}-${m}-${y}`;
+  const ts = parseDateAnyToTs_(val);
+  if (!Number.isFinite(ts)) return "—";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "—";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = d.getFullYear();
+  return `${dd}-${mm}-${yy}`;
+}
+
+// Normaliza múltiples formatos de fecha a timestamp (ms). Devuelve NaN si es inválido.
+function parseDateAnyToTs_(val) {
+  if (val == null || val === "") return NaN;
+  if (val instanceof Date) {
+    const t = val.getTime();
+    return Number.isFinite(t) ? t : NaN;
+  }
+  if (typeof val === "number") {
+    return Number.isFinite(val) ? val : NaN;
   }
 
   const s = String(val).trim();
-  if (!s) return "";
+  if (!s) return NaN;
 
-  // ISO yyyy-mm-dd
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return fmtDateDMY(s);
+  // ISO completo (con T/Z) o variantes parseables
+  const parsed = Date.parse(s);
+  if (!Number.isNaN(parsed)) return parsed;
 
-  // dd/mm/yyyy
-  const m1 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m1) return `${String(m1[1]).padStart(2,"0")}-${String(m1[2]).padStart(2,"0")}-${m1[3]}`;
+  // yyyy-mm-dd
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) {
+    const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+    const dt = new Date(y, mo - 1, d);
+    const t = dt.getTime();
+    return Number.isFinite(t) ? t : NaN;
+  }
 
-  // dd-mm-yyyy already
-  if (/^\d{2}-\d{2}-\d{4}$/.test(s)) return s;
+  // dd/mm/yyyy o dd-mm-yyyy
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (m) {
+    const d = Number(m[1]), mo = Number(m[2]), y = Number(m[3]);
+    const dt = new Date(y, mo - 1, d);
+    const t = dt.getTime();
+    return Number.isFinite(t) ? t : NaN;
+  }
 
-  return s;
+  return NaN;
 }
 
 function parseEstadoStampToDate(estado) {
@@ -1746,9 +1770,14 @@ function renderColabs() {
   const sorted = filtered.slice().sort((a, b) => {
     const av = a?.[key] ?? "";
     const bv = b?.[key] ?? "";
-    // ingreso as date-friendly
+    // ingreso: keep correct chronological sort while rendering dd-mm-yyyy
     if (key === "ingreso") {
-      return dir * fmtDateAny(av).localeCompare(fmtDateAny(bv));
+      const ta = parseDateAnyToTs_(av);
+      const tb = parseDateAnyToTs_(bv);
+      const na = Number.isFinite(ta) ? ta : -Infinity;
+      const nb = Number.isFinite(tb) ? tb : -Infinity;
+      if (na === nb) return 0;
+      return dir * (na - nb);
     }
     return dir * String(av).localeCompare(String(bv));
   });
@@ -2082,10 +2111,15 @@ function renderDashboard() {
   const colabs = (S.colabs || []).map(colabRowView).filter((x) => x.id);
   const total = colabs.length;
 
+  // Distribución por rol 100% data-driven (sin roles hardcodeados)
+  const normRole = (r) => {
+    const s = String(r || "").trim();
+    return s || "Sin rol";
+  };
   const counts = new Map();
   for (const c of colabs) {
-    const b = roleBucket(c.rol);
-    counts.set(b, (counts.get(b) || 0) + 1);
+    const r = normRole(c.rol);
+    counts.set(r, (counts.get(r) || 0) + 1);
   }
 
   // presentes hoy por rol (cruza presWeek + colaboradores)
@@ -2100,20 +2134,23 @@ function renderDashboard() {
       const vday = String(r.vals?.[today] || "").trim();
       if (vday !== "P") continue;
       const meta = colabsById.get(r.id_meli);
-      const bucket = roleBucket(meta?.rol || "");
-      presentesPorRol.set(bucket, (presentesPorRol.get(bucket) || 0) + 1);
+      const role = normRole(meta?.rol || "");
+      presentesPorRol.set(role, (presentesPorRol.get(role) || 0) + 1);
     }
   }
 
-  // tabla base
-  let rowsRoles = ROLES_BUCKETS.map((k) => ({
-    rol: k,
-    nomina: counts.get(k) || 0,
-    presentes: presentesPorRol.get(k) || 0,
-  }));
+  // tabla base (oculta roles con 0 en nómina)
+  let rowsRoles = Array.from(counts.keys())
+    .map((rol) => ({
+      rol,
+      nomina: counts.get(rol) || 0,
+      presentes: presentesPorRol.get(rol) || 0,
+    }))
+    .filter((r) => r.nomina > 0);
 
   // sort
-  const ss = S.sort?.dashRoles || { key: "rol", dir: 1 };
+  // Orden estable por defecto: nómina DESC (si no se tocó el sort manual)
+  const ss = S.sort?.dashRoles || { key: "nomina", dir: -1 };
   const key = ss.key || "rol";
   const dir = ss.dir || 1;
   rowsRoles.sort((a, b) => {
