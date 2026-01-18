@@ -120,7 +120,7 @@
       right:0;
       top:44px;
       margin:0;
-      padding:6px;
+      padding:4px;
       max-height:190px;
       overflow:auto;
       z-index:140;
@@ -152,13 +152,15 @@
     }
 
     /* Emojis: todos juntos, un poco más grandes, sin recuadro */
-    #emojiGroups .emoji-grid{display:grid;grid-template-columns:repeat(9,1fr);gap:10px}
+    #emojiGroups .emoji-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:8px}
+    @media (max-width: 900px){#emojiGroups .emoji-grid{grid-template-columns:repeat(10,1fr)}}
+    @media (max-width: 600px){#emojiGroups .emoji-grid{grid-template-columns:repeat(8,1fr)}}
     #emojiGroups .emoji-btn{
       border:0;
       background:transparent;
-      font-size:20px;
+      font-size:22px;
       line-height:1;
-      padding:6px;
+      padding:4px;
       cursor:pointer;
       color:var(--txt);
     }
@@ -700,7 +702,11 @@
 
               <div>
                 <div class="muted" style="font-size:12px;margin-bottom:6px">Programar</div>
-                <input class="input" type="datetime-local" id="slackComposeWhen" />
+                <div class="row" style="gap:8px;align-items:center">
+                  <input class="input" type="datetime-local" id="slackComposeWhen" style="flex:1;min-width:0" />
+                  <button class="btn" id="btnWhenConfirm" type="button" style="white-space:nowrap">Confirmar</button>
+                  <span id="whenConfirmedBadge" class="badge" style="display:none">Confirmado</span>
+                </div>
                 <div class="row" style="margin-top:10px;justify-content:flex-end">
                   <button class="btn" id="btnComposeClear" type="button">Descartar</button>
                   <button class="btn" id="btnSaveDraft" type="button">Guardar borrador</button>

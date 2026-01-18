@@ -1052,6 +1052,8 @@ function mountSlackCompose_() {
   const selCh = $("slackComposeChannel");
   const ta = $("slackComposeMsg");
   const when = $("slackComposeWhen");
+  const btnWhenConfirm = $("btnWhenConfirm");
+  const whenBadge = $("whenConfirmedBadge");
   const btnClear = $("btnComposeClear");
   const btnDraft = $("btnSaveDraft");
   const btnSendNow = $("btnSendNow");
@@ -1068,13 +1070,42 @@ function mountSlackCompose_() {
   const mentionResults = $("slackMentionResults");
   const mentionPills = $("slackMentionPills");
 
-  if (!selCh || !ta || !when || !btnClear || !btnDraft || !btnSched || !btnSendNow) return;
+  if (!selCh || !ta || !when || !btnClear || !btnDraft || !btnSched || !btnSendNow || !btnWhenConfirm) return;
+
+  // estado de confirmación de programación (evita errores por pick accidental del datetime)
+  let whenConfirmed = false;
+  const setWhenConfirmed = (v) => {
+    whenConfirmed = !!v;
+    if (whenBadge) {
+      whenBadge.style.display = whenConfirmed ? "inline-flex" : "none";
+    }
+    if (btnWhenConfirm) {
+      btnWhenConfirm.classList.toggle("primary", !whenConfirmed && String(when?.value||"").trim());
+    }
+  };
 
   // canales
   const refreshChannels = () => {
     selCh.innerHTML = channelOptionsHtml("");
   };
   refreshChannels();
+
+  // Programar: requiere confirmación explícita del datetime (botón Confirmar)
+  when?.addEventListener("change", () => {
+    // cualquier cambio invalida confirmación previa
+    setWhenConfirmed(false);
+  });
+  btnWhenConfirm?.addEventListener("click", () => {
+    if (!when) return;
+    const v = String(when.value || "").trim();
+    if (!v) {
+      setWhenConfirmed(false);
+      toast("Programar", "Elegí fecha y hora");
+      return;
+    }
+    setWhenConfirmed(true);
+    toast("Programar", "Fecha/hora confirmada");
+  });
 
   // menciones (buscador + píldoras)
   // Fuente de menciones = colaboradores + notificaciones masivas + canales (link)
@@ -1273,6 +1304,7 @@ function mountSlackCompose_() {
     selCh.value = "";
     ta.value = "";
     when.value = "";
+    setWhenConfirmed(false);
     selMentions.clear();
     renderPills();
     if (mentionSearch) mentionSearch.value = "";
@@ -1333,6 +1365,7 @@ function mountSlackCompose_() {
       const v = String(when.value || "").trim();
       if (!mensaje) throw new Error("Escribí un mensaje.");
       if (!v) throw new Error("Elegí fecha y hora para programar.");
+      if (!whenConfirmed) throw new Error("Confirmá fecha y hora.");
 
       const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
       // 1) crear fila como borrador
@@ -1351,30 +1384,38 @@ function mountSlackCompose_() {
       setErr(`Programar: ${e.message || e}`);
     }
   });
+  // Emojis: paleta operativa (vista unificada).
+  // - Sin tabs ni categorías visibles.
+  // - Orden implícito por grupos (sin títulos) según especificación.
+  // - Inserción 1 click, mantiene foco del textarea, no altera contenido existente.
 
-  // Emojis: selector OPERATIVO (curado). Se muestran TODOS juntos (no por categoría visual).
-  // Regla: usar exactamente este set (sin inventos) y mantener el foco del textarea.
   const EMOJI_GROUPS = [
-    { title: "Atención / Acción", items: ["🚨","❗️","⚠️","🔔","⏰","📢","👀"], k: "alerta accion atencion" },
-    { title: "Estado / Resultado", items: ["✅","❌","🔄","⏳","🟢","🟡","🔴"], k: "estado resultado ok error" },
-    { title: "Información / Contexto", items: ["ℹ️","📌","🧩","📎","🔍"], k: "info contexto" },
-    { title: "Tiempo / Fechas", items: ["📅","⏱️","⌛️","🔜"], k: "tiempo fecha" },
-    { title: "Operativo / Procesos", items: ["📊","⚙️","🛠️","🧪"], k: "operativo procesos" },
-    { title: "Bloqueos / Problemas", items: ["🛑","🚫","🧱","🐞"], k: "bloqueo problema" },
-    { title: "Objetivo / Prioridad", items: ["🎯","🔝","🚀"], k: "objetivo prioridad" },
+    { k: "urgencia accion", items: ["🚨","❗️","‼️","⚠️","🔔","⏰","⏱️","📢","👀","👆","👇","👉","👈","🆘","🔥","🚩"] },
+    { k: "estado progreso", items: ["✅","☑️","✔️","❌","✖️","⛔️","🛑","🚫","🔄","♻️","⏳","⌛️","🟢","🟡","🔴","⚪️","⚫️","📍","📌"] },
+    { k: "bloqueos riesgos", items: ["🧨","💥","🚧","🐞","🐛","🧱","❓"] },
+    { k: "tiempo fechas", items: ["📅","🗓️","🕘","🕙","🕚","🕛","⏱️","⌛️","🔜","🔚","📆"] },
+    { k: "operativo procesos", items: ["📊","📈","📉","🗂️","🗃️","🗄️","⚙️","🛠️","🔧","🧰","🧪","🔬","📦","🏷️"] },
+    { k: "info contexto", items: ["ℹ️","💡","📝","✍️","📎","🔗","🔍","🔎","🧩","📚"] },
+    { k: "objetivos prioridad", items: ["🎯","⭐️","🌟","🔝","⬆️","⬇️","🥇","🥈","🥉","🧭","🚀"] },
+    { k: "personas comunicacion", items: ["👤","👥","👪","🧑‍💻","👨‍💻","👩‍💻","🙋‍♂️","🙋‍♀️","🤝","👋","👂"] },
+    { k: "feedback cierre", items: ["💬","🗣️","👍","👎","👌","👏","🙌","🙏","🤔"] },
+    { k: "orden limpieza", items: ["🧹","🧼","🗑️","🔄","🧯","📤","📥"] },
   ];
 
   const EMOJI_INDEX = (() => {
     const out = [];
-    for (const g of EMOJI_GROUPS) {
-      for (const e of g.items) {
-        out.push({ e, group: g.title, hay: norm(`${g.title} ${g.k || ""} ${e}`) });
+    for (let gi = 0; gi < EMOJI_GROUPS.length; gi++) {
+      const g = EMOJI_GROUPS[gi];
+      for (let ii = 0; ii < g.items.length; ii++) {
+        const e = g.items[ii];
+        // "hay" permite búsqueda sin mostrar categorías.
+        out.push({ e, hay: norm(`${g.k} ${e}`) });
       }
     }
     return out;
   })();
 
-  const renderEmojiPanel = () => {
+const renderEmojiPanel = () => {
     if (!emojiGroups) return;
     const q = norm(String(emojiSearch?.value || ""));
 
