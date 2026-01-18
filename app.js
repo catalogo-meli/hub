@@ -1011,7 +1011,9 @@ function renderOutbox() {
       tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
         setErr("");
         try {
-          const v = (whenISO || "").trim();
+          // NOTE: este handler es para programar desde la Outbox (fila existente).
+          // Acá NO aplica el estado del compose (whenISO). Se toma el valor del input de la fila.
+          const v = (when?.value || "").trim();
           if (!v) throw new Error("Elegí fecha y hora para programar.");
           // guardo antes de programar
           const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
