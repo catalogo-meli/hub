@@ -1052,8 +1052,7 @@ function mountSlackCompose_() {
   const selCh = $("slackComposeChannel");
   const ta = $("slackComposeMsg");
   const when = $("slackComposeWhen");
-  const btnWhenConfirm = $("btnWhenConfirm");
-  const whenBadge = $("whenConfirmedBadge");
+  // v9.5_patch: se elimina confirmación extra para programación
   const btnClear = $("btnComposeClear");
   const btnDraft = $("btnSaveDraft");
   const btnSendNow = $("btnSendNow");
@@ -1070,19 +1069,7 @@ function mountSlackCompose_() {
   const mentionResults = $("slackMentionResults");
   const mentionPills = $("slackMentionPills");
 
-  if (!selCh || !ta || !when || !btnClear || !btnDraft || !btnSched || !btnSendNow || !btnWhenConfirm) return;
-
-  // estado de confirmación de programación (evita errores por pick accidental del datetime)
-  let whenConfirmed = false;
-  const setWhenConfirmed = (v) => {
-    whenConfirmed = !!v;
-    if (whenBadge) {
-      whenBadge.style.display = whenConfirmed ? "inline-flex" : "none";
-    }
-    if (btnWhenConfirm) {
-      btnWhenConfirm.classList.toggle("primary", !whenConfirmed && String(when?.value||"").trim());
-    }
-  };
+  if (!selCh || !ta || !when || !btnClear || !btnDraft || !btnSched || !btnSendNow) return;
 
   // canales
   const refreshChannels = () => {
@@ -1090,22 +1077,7 @@ function mountSlackCompose_() {
   };
   refreshChannels();
 
-  // Programar: requiere confirmación explícita del datetime (botón Confirmar)
-  when?.addEventListener("change", () => {
-    // cualquier cambio invalida confirmación previa
-    setWhenConfirmed(false);
-  });
-  btnWhenConfirm?.addEventListener("click", () => {
-    if (!when) return;
-    const v = String(when.value || "").trim();
-    if (!v) {
-      setWhenConfirmed(false);
-      toast("Programar", "Elegí fecha y hora");
-      return;
-    }
-    setWhenConfirmed(true);
-    toast("Programar", "Fecha/hora confirmada");
-  });
+  // Programar: validación simple (fecha/hora requerida)
 
   // menciones (buscador + píldoras)
   // Fuente de menciones = colaboradores + notificaciones masivas + canales (link)
@@ -1304,7 +1276,6 @@ function mountSlackCompose_() {
     selCh.value = "";
     ta.value = "";
     when.value = "";
-    setWhenConfirmed(false);
     selMentions.clear();
     renderPills();
     if (mentionSearch) mentionSearch.value = "";
@@ -1365,7 +1336,6 @@ function mountSlackCompose_() {
       const v = String(when.value || "").trim();
       if (!mensaje) throw new Error("Escribí un mensaje.");
       if (!v) throw new Error("Elegí fecha y hora para programar.");
-      if (!whenConfirmed) throw new Error("Confirmá fecha y hora.");
 
       const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
       // 1) crear fila como borrador

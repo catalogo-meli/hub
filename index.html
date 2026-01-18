@@ -151,16 +151,16 @@
       .slack-compose-grid{grid-template-columns:1fr}
     }
 
-    /* Emojis: todos juntos, un poco más grandes, sin recuadro */
-    #emojiGroups .emoji-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:8px}
-    @media (max-width: 900px){#emojiGroups .emoji-grid{grid-template-columns:repeat(10,1fr)}}
-    @media (max-width: 600px){#emojiGroups .emoji-grid{grid-template-columns:repeat(8,1fr)}}
+    /* Emojis: paleta operativa, sin scroll horizontal (solo vertical si hace falta) */
+    #emojiModal{width:420px;max-width:min(460px,92vw)}
+    #emojiGroups{overflow-y:auto;overflow-x:hidden}
+    #emojiGroups .emoji-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:6px}
     #emojiGroups .emoji-btn{
       border:0;
       background:transparent;
-      font-size:22px;
+      font-size:20px;
       line-height:1;
-      padding:4px;
+      padding:2px;
       cursor:pointer;
       color:var(--txt);
     }
@@ -704,8 +704,7 @@
                 <div class="muted" style="font-size:12px;margin-bottom:6px">Programar</div>
                 <div class="row" style="gap:8px;align-items:center">
                   <input class="input" type="datetime-local" id="slackComposeWhen" style="flex:1;min-width:0" />
-                  <button class="btn" id="btnWhenConfirm" type="button" style="white-space:nowrap">Confirmar</button>
-                  <span id="whenConfirmedBadge" class="badge" style="display:none">Confirmado</span>
+                  <!-- v9.5_patch: se elimina confirmación extra para programación (menos fricción) -->
                 </div>
                 <div class="row" style="margin-top:10px;justify-content:flex-end">
                   <button class="btn" id="btnComposeClear" type="button">Descartar</button>
