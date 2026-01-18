@@ -59,29 +59,69 @@ function fmtDateDMY(isoYMD) {
 }
 
 function fmtDateAny(val) {
-  if (!val) return "";
-  // Date instance
-  if (val instanceof Date && !isNaN(val.getTime())) {
-    const y = val.getFullYear();
-    const m = String(val.getMonth() + 1).padStart(2, "0");
-    const d = String(val.getDate()).padStart(2, "0");
-    return `${d}-${m}-${y}`;
+  const ts = parseDateAnyToTs_(val);
+  if (!Number.isFinite(ts)) return "—";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "—";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = d.getFullYear();
+  return `${dd}-${mm}-${yy}`;
+}
+
+// Normaliza múltiples formatos de fecha a timestamp (ms). Devuelve NaN si es inválido.
+function parseDateAnyToTs_(val) {
+  if (val == null || val === "") return NaN;
+  if (val instanceof Date) {
+    const t = val.getTime();
+    return Number.isFinite(t) ? t : NaN;
+  }
+  if (typeof val === "number") {
+    return Number.isFinite(val) ? val : NaN;
   }
 
   const s = String(val).trim();
-  if (!s) return "";
+  if (!s) return NaN;
 
-  // ISO yyyy-mm-dd
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return fmtDateDMY(s);
+  // ISO completo (con T/Z) o variantes parseables
+  const parsed = Date.parse(s);
+  if (!Number.isNaN(parsed)) return parsed;
 
-  // dd/mm/yyyy
-  const m1 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m1) return `${String(m1[1]).padStart(2,"0")}-${String(m1[2]).padStart(2,"0")}-${m1[3]}`;
+  // yyyy-mm-dd
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) {
+    const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+    const dt = new Date(y, mo - 1, d);
+    const t = dt.getTime();
+    return Number.isFinite(t) ? t : NaN;
+  }
 
-  // dd-mm-yyyy already
-  if (/^\d{2}-\d{2}-\d{4}$/.test(s)) return s;
+  // dd/mm/yyyy o dd-mm-yyyy
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (m) {
+    const d = Number(m[1]), mo = Number(m[2]), y = Number(m[3]);
+    const dt = new Date(y, mo - 1, d);
+    const t = dt.getTime();
+    return Number.isFinite(t) ? t : NaN;
+  }
 
-  return s;
+  return NaN;
+}
+
+function parseEstadoStampToDate(estado) {
+  const s = String(estado || "");
+  // Busca dd/mm/yyyy hh:mm (formato usado por scheduler)
+  const m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const d = Number(m[1]);
+  const mo = Number(m[2]);
+  const y = Number(m[3]);
+  const hh = Number(m[4]);
+  const mm = Number(m[5]);
+  if (!y || !mo || !d) return null;
+  const dt = new Date(y, mo - 1, d, hh || 0, mm || 0, 0, 0);
+  if (isNaN(dt.getTime())) return null;
+  return dt;
 }
 
 function norm(s) {
@@ -459,37 +499,30 @@ function syncPresSemanaSelect_() {
 }
 
 
-function currentSemanaKey_() {
-  // Intenta detectar la semana actual desde la estructura ya cargada.
-  const w = S.presWeek || {};
-  const k = w.semana || w.Semana || w.week || w.W || "";
-  return String(k || "").trim();
-}
 
 function navigatePresSemana_(delta) {
-  const opts = (S.presSemanas || []).filter(Boolean);
-  if (!opts.length) return;
-
-  const active = (S.presSemanaSel || currentSemanaKey_());
-  let idx = opts.indexOf(active);
-  if (idx < 0) idx = opts.length - 1;
-
-  idx = (idx + delta + opts.length) % opts.length;
-  const next = opts[idx];
-
   const sel = $("presSemana");
-  if (sel) sel.value = next;
-  S.presSemanaSel = next;
-  // dispara el mismo flujo que cambiar el select
-  sel?.dispatchEvent(new Event("change"));
-}
+  if (!sel) return;
 
+  const opts = [""].concat((S.presSemanas || []).filter(Boolean));
+  const cur = String(S.presSemanaSel || "").trim();
+  const idx = opts.indexOf(cur);
+  const i0 = idx >= 0 ? idx : 0;
+  let i1 = i0 + (delta < 0 ? -1 : 1);
+  if (i1 < 0) i1 = 0;
+  if (i1 >= opts.length) i1 = opts.length - 1;
+
+  const nextVal = opts[i1];
+  sel.value = nextVal;
+  // Dispara el mismo flujo que change (sin duplicar lógica)
+  sel.dispatchEvent(new Event("change", { bubbles: true }));
+}
 /* ========= Operativa diaria: Flujos autosave ========= */
-const saveFlujoDebounced = debounce(async (flujo, perfiles) => {
+const saveFlujoDebounced = debounce(async (flujo, perfiles, channel_id) => {
   setErr("");
   try {
     $("dailyStatus").textContent = "Guardando...";
-    await API.flujosUpsert(flujo, perfiles, "");
+    await API.flujosUpsert(flujo, perfiles, channel_id || "");
     S.flujos = await API.flujosList();
     renderFlujos();
     toast("Guardado", flujo);
@@ -499,6 +532,35 @@ const saveFlujoDebounced = debounce(async (flujo, perfiles) => {
     $("dailyStatus").textContent = "Listo";
   }
 }, 420);
+
+function resolveChannelByIdOrName_(val) {
+  const raw = String(val || "").trim();
+  if (!raw) return { channel_id: "", canal: "" };
+  const canales = S.canales || [];
+  // match by id
+  let c = canales.find((x) => String(x.channel_id || "").trim() === raw);
+  if (c) return { channel_id: String(c.channel_id || "").trim(), canal: String(c.canal || "").trim() };
+  // match by name (#canal)
+  c = canales.find((x) => String(x.canal || "").trim() === raw);
+  if (c) return { channel_id: String(c.channel_id || "").trim(), canal: String(c.canal || "").trim() };
+  // unknown: keep raw as display
+  return { channel_id: raw, canal: raw };
+}
+
+function validateFlujosSlackConfig_(rows) {
+  const list = rows || (S.flujos || []);
+  const missing = list
+    .filter((f) => {
+      const incluir = !(f.incluir_en_mensaje === false || ["FALSE", "NO", "0"].includes(String(f.incluir_en_mensaje ?? "").toUpperCase()));
+      if (!incluir) return false;
+      const ch = String(f.channel_id || "").trim();
+      return !ch;
+    })
+    .map((f) => String(f.flujo || "").trim())
+    .filter(Boolean);
+  const hasSlack = list.some((f) => !(f.incluir_en_mensaje === false || ["FALSE", "NO", "0"].includes(String(f.incluir_en_mensaje ?? "").toUpperCase())));
+  return { hasSlack, missing };
+}
 
 async function onFlujoDelete(flujo) {
   setErr("");
@@ -519,17 +581,47 @@ function renderFlujos() {
   const tb = $("tblFlujos")?.querySelector("tbody");
   if (!tb) return;
 
+  const canales = S.canales || [];
+  const canalById = new Map(canales.map((c) => [String(c.channel_id || "").trim(), c]));
+  const idByCanal = new Map(canales.map((c) => [String(c.canal || "").trim(), String(c.channel_id || "").trim()]));
+
+  const resolveChannel_ = (raw) => {
+    const v = String(raw || "").trim();
+    if (!v) return { channel_id: "", canal: "" };
+    if (canalById.has(v)) {
+      const c = canalById.get(v);
+      return { channel_id: String(c.channel_id || "").trim(), canal: String(c.canal || "").trim() };
+    }
+    // si vino como nombre (#canal)
+    if (idByCanal.has(v)) {
+      const id = idByCanal.get(v);
+      const c = canalById.get(id);
+      return { channel_id: id, canal: String(c?.canal || v) };
+    }
+    // fallback: muestro lo que haya, pero no lo tomo como id válido
+    return { channel_id: "", canal: v };
+  };
+
   const rows = (S.flujos || []).slice().sort((a, b) => String(a.flujo).localeCompare(String(b.flujo)));
   tb.innerHTML = rows
     .map((f) => {
       const name = f.flujo ?? "";
       const req = Number(f.perfiles_requeridos ?? f.cantidad ?? 0) || 0;
       const incluir = !(f.incluir_en_mensaje === false || ["FALSE","NO","0"].includes(String(f.incluir_en_mensaje ?? "").toUpperCase()));
+      const ch = resolveChannel_(f.channel_id);
+      const invalid = incluir && !ch.channel_id;
       return `
-        <tr data-flujo="${escapeAttr(name)}">
+        <tr data-flujo="${escapeAttr(name)}" data-channel-id="${escapeAttr(ch.channel_id || "")}">
           <td><b>${escapeHtml(name)}</b></td>
-          <td style="text-align:center;min-width:110px">
+          <td style="text-align:center;min-width:140px">
             <input type="checkbox" data-inc-msg ${incluir ? "checked" : ""} />
+          </td>
+          <td style="min-width:240px">
+            <div class="flow-channel ${invalid ? "invalid" : ""}" data-ch-wrap>
+              <input class="input" data-ch-inp placeholder="Seleccionar canal..." value="${escapeAttr(ch.canal || "")}" ${incluir ? "" : "disabled"} />
+              <div class="dd" data-ch-dd></div>
+              <div class="err">Seleccioná un canal.</div>
+            </div>
           </td>
           <td class="right nowrap" style="min-width:140px">
             <input class="input smallnum" type="number" min="0" step="1" value="${req}" data-req />
@@ -539,18 +631,42 @@ function renderFlujos() {
           </td>
         </tr>
       `;
-    });
+    })
     .join("");
 
   tb.querySelectorAll("tr").forEach((tr) => {
     const flujo = tr.getAttribute("data-flujo");
     const inp = tr.querySelector("[data-req]");
+    const chWrap = tr.querySelector("[data-ch-wrap]");
+    const chInp = tr.querySelector("[data-ch-inp]");
+    const chDd = tr.querySelector("[data-ch-dd]");
+    const getChannelId = () => String(tr.getAttribute("data-channel-id") || "").trim();
+    const setChannelId = (id) => tr.setAttribute("data-channel-id", String(id || ""));
     // Incluir / Excluir en mensaje GENERAL (persistido en Config_Flujos)
     const chk = tr.querySelector("[data-inc-msg]");
     chk?.addEventListener("change", async () => {
       const value = !!chk.checked;
       try {
         await API.configFlujosSetIncluirMensaje(unescapeAttr(flujo), value);
+        // Si se desactiva Slack, se limpia el canal (no se exige)
+        if (!value) {
+          // UX: ocultar el valor cuando está deshabilitado, pero NO borrar el canal guardado.
+          // Esto permite que, al volver a activar Slack, el canal vuelva por defecto.
+          if (chInp) { chInp.value = ""; chInp.disabled = true; }
+          chWrap?.classList.remove("invalid");
+        } else {
+          if (chInp) { chInp.disabled = false; chInp.focus(); }
+          // si ya había canal guardado, mostrarlo por defecto
+          const existing = getChannelId();
+          if (existing) {
+            const ch = resolveChannel_(existing);
+            chInp.value = ch ? ch.name : existing;
+            chWrap?.classList.remove("invalid");
+          } else {
+            // si no hay canal, marcar error
+            chWrap?.classList.add("invalid");
+          }
+        }
         // actualizar cache local si existe
         const idx = (S.flujos || []).findIndex((x) => String(x.flujo) === String(unescapeAttr(flujo)));
         if (idx >= 0) S.flujos[idx].incluir_en_mensaje = value;
@@ -559,23 +675,89 @@ function renderFlujos() {
         setErr(e?.message || String(e));
         chk.checked = !value; // rollback visual
       }
+      updateDailyGenerateDisabled_();
     });
 
     // autosave on input (debounced) + blur (for mobile)
     inp.addEventListener("input", () => {
       const perfiles = Number(inp.value || 0) || 0;
-      saveFlujoDebounced(unescapeAttr(flujo), perfiles);
+      saveFlujoDebounced(unescapeAttr(flujo), perfiles, getChannelId());
     });
     inp.addEventListener("blur", () => {
       const perfiles = Number(inp.value || 0) || 0;
-      saveFlujoDebounced(unescapeAttr(flujo), perfiles);
+      saveFlujoDebounced(unescapeAttr(flujo), perfiles, getChannelId());
     });
+
+    // Canal Slack combo (búsqueda, dropdown absoluto)
+    if (chInp && chDd && chWrap) {
+      const close = () => chWrap.classList.remove("open");
+      const open = () => chWrap.classList.add("open");
+
+      const renderDd = (q) => {
+        const qq = norm(q || "");
+        const list = (S.canales || [])
+          .filter((c) => {
+            const name = String(c.canal || "");
+            return !qq || norm(name).includes(qq);
+          })
+          .slice(0, 10);
+
+        if (!list.length) {
+          chDd.innerHTML = `<div class="it"><span class="muted">Sin resultados</span></div>`;
+          return;
+        }
+
+        chDd.innerHTML = list
+          .map((c) => {
+            const name = String(c.canal || "");
+            const id = String(c.channel_id || "");
+            return `<div class="it" data-pick="${escapeAttr(id)}"><span>${escapeHtml(name)}</span><span class="muted">${escapeHtml(id)}</span></div>`;
+          })
+          .join("");
+
+        chDd.querySelectorAll("[data-pick]").forEach((it) => {
+          it.addEventListener("mousedown", (ev) => {
+            ev.preventDefault(); // evita blur antes de seleccionar
+            const id = it.getAttribute("data-pick");
+            const c = (S.canales || []).find((x) => String(x.channel_id || "") === String(id));
+            const canal = String(c?.canal || "").trim();
+            setChannelId(id);
+            chInp.value = canal;
+            chWrap.classList.remove("invalid");
+            close();
+            const perfiles = Number(inp?.value || 0) || 0;
+            saveFlujoDebounced(unescapeAttr(flujo), perfiles, id);
+            updateDailyGenerateDisabled_();
+          });
+        });
+      };
+
+      chInp.addEventListener("focus", () => {
+        if (chInp.disabled) return;
+        renderDd(chInp.value);
+        open();
+      });
+      chInp.addEventListener("input", () => {
+        if (chInp.disabled) return;
+        renderDd(chInp.value);
+        open();
+        // si escribe, invalido hasta que seleccione un canal válido
+        if (!getChannelId()) chWrap.classList.add("invalid");
+        updateDailyGenerateDisabled_();
+      });
+
+      document.addEventListener("mousedown", (ev) => {
+        if (!chWrap.contains(ev.target)) close();
+      });
+    }
 
     tr.querySelector("[data-del]")?.addEventListener("click", async () => {
       if (!confirm(`Eliminar flujo "${unescapeAttr(flujo)}"?`)) return;
       await onFlujoDelete(unescapeAttr(flujo));
     });
   });
+
+  updateDailyGenerateDisabled_();
 
   // Alerta: perfiles disponibles vs requeridos (basado en presentes hoy)
   const alertEl = $("dailyAssignAlert");
@@ -603,10 +785,35 @@ if (diff > 0) {
     alertEl.innerHTML = escapeHtml(msg);
   }
 
-}/* ========= Planificación: columnas + generar mensaje por flujo ========= */
+}
+
+function updateDailyGenerateDisabled_() {
+  const btn = $("btnGenerarPlan");
+  if (!btn) return;
+
+  const trs = Array.from(document.querySelectorAll("#tblFlujos tbody tr"));
+  let anySlack = false;
+  let missing = false;
+  for (const tr of trs) {
+    const chk = tr.querySelector("[data-inc-msg]");
+    const on = !!chk?.checked;
+    if (on) {
+      anySlack = true;
+      const ch = String(tr.getAttribute("data-channel-id") || "").trim();
+      if (!ch) missing = true;
+    }
+  }
+  btn.disabled = anySlack && missing;
+}
+
+/* ========= Planificación: columnas + generar mensaje por flujo ========= */
 function renderPlan() {
   const host = $("planGrid");
   if (!host) return;
+
+  // UI state (solo para esta sección)
+  S._planUI = S._planUI || { q: "", sort: "alpha", expanded: new Set() };
+  mountPlanControls_();
 
   const plan = (S.plan || []).filter((r) => r?.flujo);
   if (!plan.length) {
@@ -614,49 +821,171 @@ function renderPlan() {
     return;
   }
 
+  // Index
   const by = {};
   for (const r of plan) {
-    const f = r.flujo;
+    const f = String(r.flujo || "").trim();
+    if (!f) continue;
     by[f] = by[f] || [];
     by[f].push(r);
   }
-  const flujosOrden = Object.keys(by).sort((a, b) => a.localeCompare(b));
 
-  host.innerHTML = flujosOrden
+  // filters
+  const q = norm(S._planUI.q);
+  let flujos = Object.keys(by);
+  if (q) flujos = flujos.filter((f) => norm(f).includes(q));
+
+  // sort
+  const reqMap = new Map((S.flujos || []).map((x) => [String(x.flujo || "").trim(), Number(x.perfiles_requeridos ?? x.cantidad ?? 0) || 0]));
+  if (S._planUI.sort === "load") {
+    flujos.sort((a, b) => {
+      const ai = (by[a] || []).filter((x) => x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES").length;
+      const bi = (by[b] || []).filter((x) => x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES").length;
+      const ar = reqMap.get(a) || 0;
+      const br = reqMap.get(b) || 0;
+      const aRatio = ar ? ai / ar : ai ? 99 : 0;
+      const bRatio = br ? bi / br : bi ? 99 : 0;
+      return bRatio - aRatio || a.localeCompare(b);
+    });
+  } else {
+    flujos.sort((a, b) => a.localeCompare(b));
+  }
+
+  host.innerHTML = flujos
     .map((f) => {
-      const items = by[f] || [];
-      const lis = items
-        .map((x) => {
-          const fijo = x.es_fijo === "SI" ? " F" : "";
-          const name = x.nombre || x.id_meli || "";
-          return `<li>${escapeHtml(name)}${fijo}</li>`;
-        });
-        .join("");
+      const itemsRaw = (by[f] || []).filter((x) => x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES");
+      const items = itemsRaw.slice().sort((a, b) => String(a.nombre || a.id_meli || "").localeCompare(String(b.nombre || b.id_meli || "")));
+      const assigned = items.length;
+      const req = reqMap.get(f) || 0;
+      const ratio = req ? assigned / req : assigned ? 99 : 0;
+      const loadCls = ratio > 1 ? "bad" : ratio >= 0.8 ? "warn" : "ok";
+
+      const status = flowMsgStatus_(f);
+      const expanded = S._planUI.expanded.has(f);
+      const maxPeek = 5;
+      const peekNames = items.slice(0, maxPeek).map((x) => {
+        const fijo = x.es_fijo === "SI" ? " <b>F</b>" : "";
+        const name = escapeHtml(x.nombre || x.id_meli || "");
+        return `${name}${fijo}`;
+      }).join(" · ");
+      const remaining = Math.max(0, assigned - maxPeek);
+
+      const lis = expanded
+        ? items
+            .map((x) => {
+              const fijo = x.es_fijo === "SI" ? " <b>F</b>" : "";
+              const name = x.nombre || x.id_meli || "";
+              return `<li>${escapeHtml(name)}${fijo}</li>`;
+            })
+            .join("")
+        : "";
+
+      const toggleLabel = expanded ? "Colapsar" : (remaining > 0 ? `+${remaining} más` : "Ver");
+      const canToggle = assigned > maxPeek;
 
       return `
         <div class="flow-col" data-flow="${escapeAttr(f)}">
-          <h3>
-            <span>${escapeHtml(f)}</span>
-            <button class="btn ghost" style="padding:8px 10px;border-radius:12px" data-genmsg>Generar mensaje</button>
-          </h3>
-          <ul>${lis || `<li class="muted">—</li>`}</ul>
+          <div class="flow-head">
+            <div class="flow-head-top">
+              <div class="flow-name">${escapeHtml(f)}</div>
+              <button class="btn ghost" style="padding:8px 10px;border-radius:12px" data-genmsg>Generar mensaje</button>
+            </div>
+            <div class="flow-meta">
+              <span class="chip ${loadCls}" title="Asignados / Requeridos"><span class="dot"></span>${assigned} / ${req || "—"}</span>
+              <span class="chip ${status.cls}" title="Estado del mensaje"><span class="dot"></span>${escapeHtml(status.label)}</span>
+              ${canToggle ? `<button class="linkbtn" type="button" data-toggle>${escapeHtml(toggleLabel)}</button>` : ``}
+            </div>
+          </div>
+
+          <div class="flow-peek">
+            ${peekNames || `<span class="muted">—</span>`}
+            ${(!expanded && remaining > 0) ? ` · <button class="linkbtn" type="button" data-toggle>+${remaining} más</button>` : ``}
+          </div>
+
+          ${expanded ? `<ul class="flow-list">${lis}</ul>` : ``}
         </div>
       `;
-    });
+    })
     .join("");
 
   host.querySelectorAll("[data-genmsg]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const flow = btn.closest("[data-flow]")?.getAttribute("data-flow");
       if (!flow) return;
-      await generarMensajePorFlujo_(unescapeAttr(flow));
+      await generarMensajePorFlujo_(unescapeAttr(flow), btn);
+    });
+  });
+
+  host.querySelectorAll("[data-toggle]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const flow = btn.closest("[data-flow]")?.getAttribute("data-flow");
+      if (!flow) return;
+      const f = unescapeAttr(flow);
+      if (S._planUI.expanded.has(f)) S._planUI.expanded.delete(f);
+      else S._planUI.expanded.add(f);
+      renderPlan();
     });
   });
 }
 
-async function generarMensajePorFlujo_(flujo) {
+function mountPlanControls_() {
+  if (mountPlanControls_._mounted) return;
+  const inp = $("planSearch");
+  const clr = $("planSearchClear");
+  const sel = $("planSort");
+  if (!inp || !sel) return; // no está en la vista
+
+  mountPlanControls_._mounted = true;
+
+  inp.value = S._planUI?.q || "";
+  sel.value = S._planUI?.sort || "alpha";
+  const wrap = inp.closest(".search");
+  if (wrap) wrap.classList.toggle("has", !!inp.value);
+
+  inp.addEventListener("input", debounce(() => {
+    S._planUI.q = inp.value || "";
+    if (wrap) wrap.classList.toggle("has", !!inp.value);
+    renderPlan();
+  }, 180));
+
+  clr?.addEventListener("click", () => {
+    inp.value = "";
+    S._planUI.q = "";
+    if (wrap) wrap.classList.remove("has");
+    renderPlan();
+  });
+
+  sel.addEventListener("change", () => {
+    S._planUI.sort = sel.value || "alpha";
+    renderPlan();
+  });
+}
+
+function flowMsgStatus_(flow) {
+  const today = todayYMD();
+  const out = (S.outbox || []).slice();
+  // POR_FLUJO guarda el nombre del flujo en el campo "canal"
+  const rows = out.filter((r) => String(r?.tipo || "").toUpperCase() === "POR_FLUJO" && String(r?.canal || "") === String(flow) && String(r?.fecha || "") === String(today));
+  if (!rows.length) return { label: "Mensaje: —", cls: "" };
+  // tomamos la última por row (mayor)
+  rows.sort((a, b) => Number(b.row || 0) - Number(a.row || 0));
+  const estado = String(rows[0].estado || "").toUpperCase();
+  if (estado.includes("ENVIADO")) return { label: "Mensaje: enviado", cls: "ok" };
+  if (estado.includes("ERROR")) return { label: "Mensaje: error", cls: "bad" };
+  if (estado.includes("PROGRAMADO")) return { label: "Mensaje: programado", cls: "warn" };
+  return { label: "Mensaje: pendiente", cls: "warn" };
+}
+
+async function generarMensajePorFlujo_(flujo, btn = null) {
   setErr("");
   try {
+    // feedback inmediato y seguro (evita doble click)
+    const prevTxt = btn ? btn.textContent : "";
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Generando...";
+    }
+
     const items = (S.plan || []).filter((x) => x?.flujo === flujo && x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES");
     if (!items.length) return toast("Mensaje", "No hay perfiles asignados");
 
@@ -677,9 +1006,15 @@ async function generarMensajePorFlujo_(flujo) {
     await API.slackOutboxAppend(fechaISO, "POR_FLUJO", flujo, "", msg, "PENDIENTE - SIN CANAL");
     S.outbox = await API.slackOutboxList();
     renderOutbox();
-    toast("Outbox", `Mensaje generado: ${flujo}`);
+    renderPlan();
+    toast("Outbox", `Mensaje generado: ${flujo} · ${items.length} perfiles`);
   } catch (e) {
     setErr(`Mensaje por flujo: ${e.message || e}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Generar mensaje";
+    }
   }
 }
 
@@ -691,7 +1026,7 @@ function channelOptionsHtml(selectedId = "") {
       const name = c.canal || "";
       const sel = id === selectedId ? "selected" : "";
       return `<option value="${escapeAttr(id)}" ${sel}>${escapeHtml(name)} (${escapeHtml(id)})</option>`;
-    });
+    })
   );
   return opts.join("");
 }
@@ -709,142 +1044,722 @@ const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
 }, 500);
 
 function renderOutbox() {
-  const tb = $("tblOutbox")?.querySelector("tbody");
-  if (!tb) return;
-
-  const out = (S.outbox || []).slice().sort((a, b) => (b.row || 0) - (a.row || 0));
-  if (!out.length) {
-    tb.innerHTML = `<tr><td colspan="5" class="muted">Sin mensajes pendientes.</td></tr>`;
+  const tbDrafts = $("tblDrafts")?.querySelector("tbody");
+  const tbScheduled = $("tblScheduled")?.querySelector("tbody");
+  const tbSent = $("tblSent")?.querySelector("tbody");
+  const btnRefreshSent = $("btnRefreshSent");
+  if (!tbDrafts || !tbScheduled || !tbSent) {
+    // fallback a versiones viejas
+    const tbLegacy = $("tblOutbox")?.querySelector("tbody");
+    if (!tbLegacy) return;
+    tbLegacy.innerHTML = `<tr><td colspan="5" class="muted">Actualizá el hub para ver el nuevo compose.</td></tr>`;
     return;
   }
 
-  // Convierte ISO Z a dd/mm/yyyy HH:mm (hora local del navegador)
+  const out = (S.outbox || []).slice().sort((a, b) => (b.row || 0) - (a.row || 0));
+
+  const isSent_ = (estado) => String(estado || "").toUpperCase().includes("ENVIADO");
+  const isProg_ = (estado) => String(estado || "").toUpperCase().includes("PROGRAMADO");
+
+  const drafts = out.filter((r) => !isSent_(r.estado) && !isProg_(r.estado));
+  const scheduled = out.filter((r) => !isSent_(r.estado) && isProg_(r.estado));
+
+  // Enviados: mostrar últimos 14 días (por estado timestamp; fallback a fecha)
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const sentAll = out.filter((r) => isSent_(r.estado));
+  const sent = sentAll.filter((r) => {
+    const dt = parseEstadoStampToDate(r.estado) || (r.fecha ? parseEstadoStampToDate(String(r.fecha)) : null);
+    // si no hay timestamp, lo mostramos igual pero al final; es mejor ver algo que nada
+    if (!dt) return true;
+    return dt >= cutoff;
+  });
+
   const formatEstado = (estado) => {
     const s = String(estado || "");
     const m = s.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/);
     if (!m) return s;
-
     const d = new Date(m[1]);
     if (isNaN(d.getTime())) return s;
-
     const dd = String(d.getDate()).padStart(2, "0");
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const yyyy = d.getFullYear();
     const HH = String(d.getHours()).padStart(2, "0");
     const MM = String(d.getMinutes()).padStart(2, "0");
-
     return s.replace(m[1], `${dd}/${mm}/${yyyy} ${HH}:${MM}`);
   };
 
-  tb.innerHTML = out
-    .map((r) => {
-      const rawEstado = r.estado || "";
-      const estado = formatEstado(rawEstado);
+  const rowHtml = (r, { mode }) => {
+    const rawEstado = r.estado || "";
+    const estUp = String(rawEstado || "").toUpperCase();
+    const isErr = estUp.includes("ERROR");
+    const isSent = estUp.includes("ENVIADO");
+    const isProg = estUp.includes("PROGRAMADO");
 
-      const estUp = String(rawEstado || "").toUpperCase();
-      const isErr = estUp.includes("ERROR");
-      const isSent = estUp.includes("ENVIADO");
-      const isProg = estUp.includes("PROGRAMADO");
+    const badge = isErr ? "badge bad" : isSent ? "badge ok" : "badge";
+    const date = r.fecha || "";
+    const chId = r.channel_id || "";
+    const msg = r.mensaje || "";
+    const row = r.row;
 
-      const badge = isErr ? "badge bad" : isSent ? "badge ok" : "badge";
-      const date = r.fecha || "";
-      const chId = r.channel_id || "";
-      const msg = r.mensaje || "";
-      const row = r.row;
-
-      // Acciones:
-      // - ENVIADO: no mostrar programar/enviar ni el datetime
-      // - PROGRAMADO: mostrar datetime solo lectura y sin botones
-      // - PENDIENTE/ERROR: mostrar todo
-      const accionesHtml = isSent
-        ? ""
-        : isProg
-          ? `
-            <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-              <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" disabled />
-              <div style="display:flex;gap:8px;justify-content:flex-end">
-                <button class="btn ghost" data-prog disabled title="Ya está programado">Programar</button>
-                <button class="btn primary" data-send disabled title="Ya está programado">Enviar</button>
-              </div>
+    const actions = (() => {
+      // Drafts: enviar / programar + eliminar
+      if (mode === "draft") {
+        return `
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+            <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" />
+            <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
+              <button class="xbtn" data-del title="Eliminar">×</button>
+              <button class="btn ghost" data-prog>Programar</button>
+              <button class="btn primary" data-send>Enviar</button>
             </div>
-          `
-          : `
-            <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-              <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" />
-              <div style="display:flex;gap:8px;justify-content:flex-end">
-                <button class="btn ghost" data-prog>Programar</button>
-                <button class="btn primary" data-send>Enviar</button>
-              </div>
-            </div>
-          `;
+          </div>
+        `;
+      }
 
+      // Scheduled: solo eliminar (no reprogramar acá; menos estados raros)
       return `
-        <tr data-row="${row}" data-sent="${isSent ? "1" : "0"}" data-prog="${isProg ? "1" : "0"}">
-          <td class="nowrap">${escapeHtml(date)}</td>
-          <td>
-            <select data-ch ${isSent ? "disabled" : ""}>${channelOptionsHtml(chId)}</select>
-          </td>
-          <td>
-            <textarea data-msg ${isSent ? "disabled" : ""}>${escapeHtml(msg)}</textarea>
-          </td>
-          <td class="nowrap"><span class="${badge}">${escapeHtml(estado)}</span></td>
-          <td class="right nowrap">${accionesHtml}</td>
-        </tr>
+        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+          <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" disabled />
+          <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
+            <button class="xbtn" data-del title="Eliminar">×</button>
+          </div>
+        </div>
       `;
-    });
-    .join("");
+    })();
 
-  tb.querySelectorAll("tr").forEach((tr) => {
-    const row = Number(tr.getAttribute("data-row"));
-    const isSent = tr.getAttribute("data-sent") === "1";
-    const isProg = tr.getAttribute("data-prog") === "1";
+    const disableEdits = mode !== "draft";
 
-    const sel = tr.querySelector("[data-ch]");
-    const txt = tr.querySelector("[data-msg]");
-    const when = tr.querySelector("[data-when]");
+    return `
+      <tr data-row="${row}" data-mode="${mode}">
+        <td class="nowrap">${escapeHtml(date)}</td>
+        <td>
+          <select data-ch ${disableEdits ? "disabled" : ""}>${channelOptionsHtml(chId)}</select>
+        </td>
+        <td>
+          <textarea data-msg ${disableEdits ? "disabled" : ""}>${escapeHtml(msg)}</textarea>
+        </td>
+        <td class="nowrap"><span class="${badge}">${escapeHtml(formatEstado(rawEstado))}</span></td>
+        <td class="right nowrap">${actions}</td>
+      </tr>
+    `;
+  };
 
-    // Si ya fue enviado, no hay listeners (evita autosave y acciones)
-    if (isSent) return;
+  tbDrafts.innerHTML = drafts.length
+    ? drafts.map((r) => rowHtml(r, { mode: "draft" })).join("")
+    : `<tr><td colspan="5" class="muted">Sin borradores.</td></tr>`;
 
-    const triggerSave = () => outboxAutosave(row, sel.value, txt.value);
+  tbScheduled.innerHTML = scheduled.length
+    ? scheduled.map((r) => rowHtml(r, { mode: "scheduled" })).join("")
+    : `<tr><td colspan="5" class="muted">Sin mensajes programados.</td></tr>`;
 
-    sel?.addEventListener("change", triggerSave);
-    txt?.addEventListener("input", triggerSave);
-    txt?.addEventListener("blur", triggerSave);
+  // Sent (read-only)
+  const sentRowHtml = (r) => {
+    const rawEstado = r.estado || "";
+    const estUp = String(rawEstado || "").toUpperCase();
+    const isErr = estUp.includes("ERROR");
+    const badge = isErr ? "badge bad" : "badge ok";
+    const date = r.fecha || "";
+    const canalTxt = r.canal || "";
+    const chId = r.channel_id || "";
+    const msg = r.mensaje || "";
+    const chLabel = canalTxt ? `${canalTxt}${chId ? ` · ${chId}` : ""}` : (chId || "");
+    return `
+      <tr>
+        <td class="nowrap">${escapeHtml(date)}</td>
+        <td>${escapeHtml(chLabel)}</td>
+        <td><div style="max-width:720px;white-space:pre-wrap">${escapeHtml(msg)}</div></td>
+        <td class="nowrap"><span class="${badge}">${escapeHtml(formatEstado(rawEstado))}</span></td>
+      </tr>
+    `;
+  };
 
-    tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
-      setErr("");
+  tbSent.innerHTML = sent.length
+    ? sent.map(sentRowHtml).join("")
+    : `<tr><td colspan="4" class="muted">Sin mensajes enviados en las últimas 2 semanas.</td></tr>`;
+
+  if (btnRefreshSent && !btnRefreshSent._bound) {
+    btnRefreshSent._bound = true;
+    btnRefreshSent.addEventListener("click", async () => {
       try {
-        // Si ya está programado, no permitir reprogramar desde UI (evita duplicados)
-        if (isProg) return;
-
-        const v = (when?.value || "").trim();
-        if (!v) throw new Error("Elegí fecha y hora para programar.");
-
-        // guardo antes de programar
-        const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
-        await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
-
-        await API.slackOutboxProgramar(row, v);
+        setErr("");
         S.outbox = await API.slackOutboxList();
         renderOutbox();
-        toast("Outbox", "Programado");
+        toast("Outbox", "Actualizado");
       } catch (e) {
-        setErr(`Programar: ${e.message || e}`);
+        setErr(`Outbox: ${e.message || e}`);
       }
     });
+  }
 
-    tr.querySelector("[data-send]")?.addEventListener("click", async () => {
-      // Si ya está programado, no permitir enviar manual (evita duplicados)
-      if (isProg) return;
+  // listeners: drafts (autosave, programar, enviar, eliminar)
+  const bindTable = (root) => {
+    root.querySelectorAll("tr[data-row]").forEach((tr) => {
+      const row = Number(tr.getAttribute("data-row"));
+      const mode = tr.getAttribute("data-mode");
+      const sel = tr.querySelector("[data-ch]");
+      const txt = tr.querySelector("[data-msg]");
+      const when = tr.querySelector("[data-when]");
 
-      // guardo antes de enviar
-      const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
-      await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
+      tr.querySelector("[data-del]")?.addEventListener("click", async () => {
+        setErr("");
+        try {
+          if (!confirm("Eliminar este mensaje?")) return;
+          await API.slackOutboxDelete(row);
+          S.outbox = await API.slackOutboxList();
+          renderOutbox();
+          toast("Outbox", "Eliminado");
+        } catch (e) {
+          setErr(`Eliminar: ${e.message || e}`);
+        }
+      });
 
-      await onOutboxSend(row);
+      if (mode !== "draft") return;
+
+      const triggerSave = () => outboxAutosave(row, sel.value, txt.value);
+      sel?.addEventListener("change", triggerSave);
+      txt?.addEventListener("input", triggerSave);
+      txt?.addEventListener("blur", triggerSave);
+
+      tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
+        setErr("");
+        try {
+          const v = (when?.value || "").trim();
+          if (!v) throw new Error("Elegí fecha y hora para programar.");
+          // guardo antes de programar
+          const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
+          await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
+          await API.slackOutboxProgramar(row, v);
+          S.outbox = await API.slackOutboxList();
+          renderOutbox();
+          toast("Outbox", "Programado");
+        } catch (e) {
+          setErr(`Programar: ${e.message || e}`);
+        }
+      });
+
+      tr.querySelector("[data-send]")?.addEventListener("click", async () => {
+        setErr("");
+        try {
+          // guardo antes de enviar
+          const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
+          await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
+          await onOutboxSend(row);
+        } catch (e) {
+          setErr(`Enviar: ${e.message || e}`);
+        }
+      });
+    });
+  };
+
+  bindTable(tbDrafts);
+  bindTable(tbScheduled);
+
+  // Vista rápida de borradores generados desde Operativa diaria (por canal)
+  renderDailyDrafts_();
+}
+
+function renderDailyDrafts_() {
+  const wrap = $("dailyDraftsWrap");
+  const host = $("dailyDrafts");
+  const meta = $("dailyDraftsMeta");
+  if (!wrap || !host) return;
+
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const now = new Date();
+  const today = `${pad2(now.getDate())}/${pad2(now.getMonth() + 1)}/${now.getFullYear()}`;
+
+  const items = (S.outbox || [])
+    .filter((r) => String(r.estado || "").toUpperCase().includes("PLANNING"))
+    .filter((r) => String(r.fecha || "") === today)
+    .slice()
+    .sort((a, b) => (b.row || 0) - (a.row || 0));
+
+  if (!items.length) {
+    wrap.style.display = "none";
+    host.innerHTML = "";
+    if (meta) meta.textContent = "";
+    return;
+  }
+
+  // Agrupar por canal
+  const byCh = new Map();
+  for (const r of items) {
+    const key = String(r.channel_id || r.canal || "").trim() || "SIN_CANAL";
+    if (!byCh.has(key)) byCh.set(key, []);
+    byCh.get(key).push(r);
+  }
+
+  const groups = Array.from(byCh.entries()).map(([k, list]) => {
+    // mostramos el más reciente por canal
+    const r = list[0];
+    const label = r.canal ? `${r.canal}${r.channel_id ? ` · ${r.channel_id}` : ""}` : (r.channel_id || "");
+    return { key: k, row: r.row, label, msg: r.mensaje || "" };
+  });
+
+  wrap.style.display = "block";
+  if (meta) meta.textContent = `${groups.length} canal${groups.length !== 1 ? "es" : ""}`;
+
+  host.innerHTML = groups
+    .map((g) => {
+      return `
+        <div class="card" style="padding:12px">
+          <div class="row" style="margin-bottom:8px">
+            <div class="pill">${escapeHtml(g.label || "(sin canal)")}</div>
+            <div class="spacer"></div>
+            <button class="btn ghost" data-copy="${g.row}">Copiar</button>
+            <button class="btn ghost" data-del="${g.row}">Eliminar borrador</button>
+          </div>
+          <div style="white-space:pre-wrap">${escapeHtml(g.msg)}</div>
+        </div>
+      `;
+    })
+    .join("");
+
+  host.querySelectorAll("[data-copy]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const row = Number(b.getAttribute("data-copy"));
+      const r = (S.outbox || []).find((x) => Number(x.row) === row);
+      if (!r) return;
+      try {
+        await navigator.clipboard.writeText(String(r.mensaje || ""));
+        toast("Copiado", "Mensaje en portapapeles");
+      } catch {
+        // fallback: selecciono texto
+        toast("Copiar", "No se pudo copiar automáticamente");
+      }
     });
   });
+
+  host.querySelectorAll("[data-del]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const row = Number(b.getAttribute("data-del"));
+      if (!row) return;
+      if (!confirm("Eliminar este borrador?")) return;
+      try {
+        await API.slackOutboxDelete(row);
+        S.outbox = await API.slackOutboxList();
+        renderOutbox();
+        toast("Outbox", "Eliminado");
+      } catch (e) {
+        setErr(`Eliminar borrador: ${e.message || e}`);
+      }
+    });
+  });
+}
+
+// ===== Compose (siempre disponible) =====
+let _slackComposeMounted = false;
+function mountSlackCompose_() {
+  if (_slackComposeMounted) return;
+  _slackComposeMounted = true;
+
+  const selCh = $("slackComposeChannel");
+  const ta = $("slackComposeMsg");
+  const when = $("slackComposeWhen");
+  // v9.5_patch: se elimina confirmación extra para programación
+  const btnClear = $("btnComposeClear");
+  const btnDraft = $("btnSaveDraft");
+  const btnSendNow = $("btnSendNow");
+  const btnSched = $("btnSchedule");
+  const btnEmoji = $("btnEmoji");
+  const emojiModal = $("emojiModal");
+  const emojiGroups = $("emojiGroups");
+  const emojiSearch = $("emojiSearch");
+  const emojiSearchClear = $("emojiSearchClear");
+  const btnEmojiClose = $("btnEmojiClose");
+  
+
+  const mentionSearch = $("slackMentionSearch");
+  const mentionResults = $("slackMentionResults");
+  const mentionPills = $("slackMentionPills");
+
+  if (!selCh || !ta || !when || !btnClear || !btnDraft || !btnSched || !btnSendNow) return;
+
+  // canales
+  const refreshChannels = () => {
+    selCh.innerHTML = channelOptionsHtml("");
+  };
+  refreshChannels();
+
+  // Programar: validación simple (fecha/hora requerida)
+
+  // menciones (buscador + píldoras)
+  // Fuente de menciones = colaboradores + notificaciones masivas + canales (link)
+  const massMentions = [
+    // Decisión de producto: unificamos notificación de canal en @canal (evita confusión semántica)
+    { id: "__mass_canal", nombre: "@canal", mailProd: "Notifica al canal", slackId: "", token: "<!channel>" },
+    { id: "__mass_here", nombre: "@here", mailProd: "Notifica a activos", slackId: "", token: "<!here>" },
+    { id: "__mass_everyone", nombre: "@everyone", mailProd: "Notifica a todos", slackId: "", token: "<!everyone>" },
+  ];
+
+  const colabMentions = (S.colabs || [])
+    .map(colabRowView)
+    .filter((v) => v.nombre || v.mailProd)
+    .map((v) => {
+      const label = `${v.nombre || v.id}${v.mailProd ? ` · ${v.mailProd}` : ""}`;
+      const hay = norm(`${v.nombre || ""} ${v.mailProd || ""} ${v.id || ""}`);
+      return {
+        id: v.id,
+        nombre: v.nombre || v.id,
+        mailProd: v.mailProd || "",
+        label,
+        hay,
+        slackId: v.slackId || "",
+        token: v.slackId ? `<@${v.slackId}>` : "",
+      };
+    })
+    .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || "")));
+
+  const channelMentions = (S.canales || [])
+    .filter((c) => c?.channel_id && c?.canal)
+    .map((c) => {
+      const nombre = `#${c.canal}`;
+      return {
+        id: `__ch_${c.channel_id}`,
+        nombre,
+        mailProd: "Link a canal",
+        label: nombre,
+        hay: norm(`${c.canal} ${nombre}`),
+        slackId: "",
+        token: `<#${c.channel_id}|${c.canal}>`,
+      };
+    });
+
+  const allMentions = [...massMentions, ...colabMentions, ...channelMentions].map((x) => {
+    const hay = x.hay || norm(`${x.nombre || ""} ${x.mailProd || ""}`);
+    return { ...x, hay };
+  });
+
+  const selMentions = new Map(); // id -> item
+
+  const renderPills = () => {
+    if (!mentionPills) return;
+    const items = [...selMentions.values()];
+    mentionPills.innerHTML = items.length
+      ? items
+          .map(
+            (x) => `
+        <span class="pill" style="display:inline-flex;gap:6px;align-items:center">
+          <span>${escapeHtml(x.nombre)}</span>
+          <button class="xbtn" data-rm="${escapeAttr(x.id)}" title="Quitar">×</button>
+        </span>`
+          )
+          .join("")
+      : `<span class="muted" style="font-size:12px">Sin menciones.</span>`;
+
+    mentionPills.querySelectorAll("[data-rm]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const id = unescapeAttr(b.getAttribute("data-rm"));
+        selMentions.delete(id);
+        renderPills();
+      });
+    });
+  };
+
+  const closeMentionResults = () => {
+    if (!mentionResults) return;
+    mentionResults.style.display = "none";
+    mentionResults.innerHTML = "";
+  };
+
+  const renderMentionResults = (q) => {
+    if (!mentionResults) return;
+    const nq = norm(q);
+    if (!nq) return closeMentionResults();
+    const hits = allMentions.filter((x) => x.hay.includes(nq)).slice(0, 10);
+    if (!hits.length) {
+      mentionResults.style.display = "block";
+      mentionResults.innerHTML = `<div class="muted" style="font-size:12px;padding:6px">Sin resultados.</div>`;
+      return;
+    }
+    mentionResults.style.display = "block";
+    mentionResults.innerHTML = hits
+      .map((x) => {
+        const disabled = selMentions.has(x.id) ? "disabled" : "";
+        return `
+          <button class="btn ghost" data-pick="${escapeAttr(x.id)}" ${disabled} style="width:100%;justify-content:flex-start;gap:10px;padding:8px">
+            <span style="font-weight:600">${escapeHtml(x.nombre)}</span>
+            <span class="muted" style="font-size:12px">${escapeHtml(x.mailProd)}</span>
+          </button>
+        `;
+      })
+      .join("");
+
+    mentionResults.querySelectorAll("[data-pick]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const id = unescapeAttr(b.getAttribute("data-pick"));
+        const it = allMentions.find((x) => x.id === id);
+        if (!it) return;
+        selMentions.set(it.id, it);
+        renderPills();
+        if (mentionSearch) mentionSearch.value = "";
+        closeMentionResults();
+        ta.focus();
+      });
+    });
+  };
+
+  mentionSearch?.addEventListener("input", debounce(() => {
+    renderMentionResults(mentionSearch.value);
+  }, 120));
+
+  document.addEventListener("click", (e) => {
+    if (!mentionResults || !mentionSearch) return;
+    const t = e.target;
+    if (mentionResults.contains(t) || mentionSearch.contains(t)) return;
+    closeMentionResults();
+  });
+
+  const getSelectedMentions = () => {
+    const picked = [...selMentions.values()];
+    const tokens = picked.map((x) => x.token || "").filter(Boolean);
+    return { tokens, picked };
+  };
+
+  // Inserta menciones al FINAL del mensaje (no al inicio).
+  // - No duplica si el token ya está en el texto.
+  // - Para notificaciones masivas, chequea también @alias (por si el user lo escribió).
+  const buildMessageWithMentions = (raw) => {
+    // Normaliza menciones masivas a tokens Slack para que realmente notifiquen
+    // (Slack API no siempre linkea @channel/@here/@everyone si no se setea link_names).
+    const normalized = String(raw || "")
+      .replace(/\B@canal\b/gi, "<!channel>")
+      .replace(/\B@channel\b/gi, "<!channel>")
+      .replace(/\B@here\b/gi, "<!here>")
+      .replace(/\B@everyone\b/gi, "<!everyone>")
+      .trim();
+
+    const base = normalized;
+    const { tokens, picked } = getSelectedMentions();
+    if (!tokens.length) return base;
+
+    const existing = base;
+
+    const toAdd = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      const p = picked[i];
+      if (!tok) continue;
+
+      // Mass mentions: si el usuario ya escribió @channel/@canal/etc, no lo repetimos.
+      if (tok === "<!channel>") {
+        const has = /<\!channel>|\B@channel\b|\B@canal\b/i.test(existing);
+        if (!has) toAdd.push(tok);
+        continue;
+      }
+      if (tok === "<!here>") {
+        const has = /<\!here>|\B@here\b/i.test(existing);
+        if (!has) toAdd.push(tok);
+        continue;
+      }
+      if (tok === "<!everyone>") {
+        const has = /<\!everyone>|\B@everyone\b/i.test(existing);
+        if (!has) toAdd.push(tok);
+        continue;
+      }
+
+      if (existing.includes(tok)) continue;
+      toAdd.push(tok);
+    }
+
+    if (!toAdd.length) return base;
+    return base ? `${base}\n\n${toAdd.join(" ")}` : toAdd.join(" ");
+  };
+
+  const insertAtCursor = (textarea, text) => {
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? textarea.value.length;
+    const v = textarea.value || "";
+    textarea.value = v.slice(0, start) + text + v.slice(end);
+    const pos = start + text.length;
+    textarea.setSelectionRange(pos, pos);
+    textarea.focus();
+  };
+
+  const clearCompose = () => {
+    selCh.value = "";
+    ta.value = "";
+    when.value = "";
+    selMentions.clear();
+    renderPills();
+    if (mentionSearch) mentionSearch.value = "";
+    closeMentionResults();
+    toast("Compose", "Listo");
+  };
+
+  btnClear.addEventListener("click", clearCompose);
+
+  btnDraft.addEventListener("click", async () => {
+    setErr("");
+    try {
+      const channel_id = String(selCh.value || "").trim();
+      const mensaje = buildMessageWithMentions(ta.value);
+      if (!mensaje) throw new Error("Escribí un mensaje.");
+
+      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
+      await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
+      S.outbox = await API.slackOutboxList();
+      renderOutbox();
+      clearCompose();
+      toast("Outbox", "Borrador guardado");
+    } catch (e) {
+      setErr(`Borrador: ${e.message || e}`);
+    }
+  });
+
+  btnSendNow.addEventListener("click", async () => {
+    setErr("");
+    try {
+      const channel_id = String(selCh.value || "").trim();
+      const mensaje = buildMessageWithMentions(ta.value);
+      if (!mensaje) throw new Error("Escribí un mensaje.");
+
+      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
+      // 1) append
+      await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
+      S.outbox = await API.slackOutboxList();
+      const newest = (S.outbox || []).slice().sort((a, b) => (b.row || 0) - (a.row || 0))[0];
+      if (!newest?.row) throw new Error("No se pudo obtener la fila creada.");
+
+      // 2) send
+      await API.slackSendRow(newest.row);
+      S.outbox = await API.slackOutboxList();
+      renderOutbox();
+      clearCompose();
+      toast("Slack", "Enviado");
+    } catch (e) {
+      setErr(`Enviar: ${e.message || e}`);
+    }
+  });
+
+  btnSched.addEventListener("click", async () => {
+    setErr("");
+    try {
+      const channel_id = String(selCh.value || "").trim();
+      const mensaje = buildMessageWithMentions(ta.value);
+      const v = String(when.value || "").trim();
+      if (!mensaje) throw new Error("Escribí un mensaje.");
+      if (!v) throw new Error("Elegí fecha y hora para programar.");
+
+      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
+      // 1) crear fila como borrador
+      await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
+      S.outbox = await API.slackOutboxList();
+      const newest = (S.outbox || []).slice().sort((a,b)=>(b.row||0)-(a.row||0))[0];
+      if (!newest?.row) throw new Error("No se pudo obtener la fila creada.");
+
+      // 2) programar
+      await API.slackOutboxProgramar(newest.row, v);
+      S.outbox = await API.slackOutboxList();
+      renderOutbox();
+      clearCompose();
+      toast("Outbox", "Mensaje programado");
+    } catch (e) {
+      setErr(`Programar: ${e.message || e}`);
+    }
+  });
+  // Emojis: paleta operativa (vista unificada).
+  // - Sin tabs ni categorías visibles.
+  // - Orden implícito por grupos (sin títulos) según especificación.
+  // - Inserción 1 click, mantiene foco del textarea, no altera contenido existente.
+
+  const EMOJI_GROUPS = [
+    { k: "urgencia accion", items: ["🚨","❗️","‼️","⚠️","🔔","⏰","⏱️","📢","👀","👆","👇","👉","👈","🆘","🔥","🚩"] },
+    { k: "estado progreso", items: ["✅","☑️","✔️","❌","✖️","⛔️","🛑","🚫","🔄","♻️","⏳","⌛️","🟢","🟡","🔴","⚪️","⚫️","📍","📌"] },
+    { k: "bloqueos riesgos", items: ["🧨","💥","🚧","🐞","🐛","🧱","❓"] },
+    { k: "tiempo fechas", items: ["📅","🗓️","🕘","🕙","🕚","🕛","⏱️","⌛️","🔜","🔚","📆"] },
+    { k: "operativo procesos", items: ["📊","📈","📉","🗂️","🗃️","🗄️","⚙️","🛠️","🔧","🧰","🧪","🔬","📦","🏷️"] },
+    { k: "info contexto", items: ["ℹ️","💡","📝","✍️","📎","🔗","🔍","🔎","🧩","📚"] },
+    { k: "objetivos prioridad", items: ["🎯","⭐️","🌟","🔝","⬆️","⬇️","🥇","🥈","🥉","🧭","🚀"] },
+    { k: "personas comunicacion", items: ["👤","👥","👪","🧑‍💻","👨‍💻","👩‍💻","🙋‍♂️","🙋‍♀️","🤝","👋","👂"] },
+    { k: "feedback cierre", items: ["💬","🗣️","👍","👎","👌","👏","🙌","🙏","🤔"] },
+    { k: "orden limpieza", items: ["🧹","🧼","🗑️","🔄","🧯","📤","📥"] },
+  ];
+
+  const EMOJI_INDEX = (() => {
+    const out = [];
+    for (let gi = 0; gi < EMOJI_GROUPS.length; gi++) {
+      const g = EMOJI_GROUPS[gi];
+      for (let ii = 0; ii < g.items.length; ii++) {
+        const e = g.items[ii];
+        // "hay" permite búsqueda sin mostrar categorías.
+        out.push({ e, hay: norm(`${g.k} ${e}`) });
+      }
+    }
+    return out;
+  })();
+
+const renderEmojiPanel = () => {
+    if (!emojiGroups) return;
+    const q = norm(String(emojiSearch?.value || ""));
+
+    const items = q ? EMOJI_INDEX.filter((x) => x.hay.includes(q)) : EMOJI_INDEX;
+
+    emojiGroups.innerHTML = `
+      <div class="emoji-grid">${items.map((x) => `<button type="button" class="emoji-btn" data-e="${escapeAttr(x.e)}">${escapeHtml(x.e)}</button>`).join("")}</div>
+      ${q && !items.length ? `<div class="muted" style="font-size:12px;margin-top:10px">Sin resultados.</div>` : ""}
+    `;
+
+    emojiGroups.querySelectorAll("[data-e]").forEach((b) => {
+      b.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        insertAtCursor(ta, b.getAttribute("data-e") + " ");
+      });
+    });
+  };
+
+  const openEmoji = () => { if (emojiModal) emojiModal.style.display = "block"; };
+  const closeEmoji = () => { if (emojiModal) emojiModal.style.display = "none"; };
+
+  btnEmoji?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!emojiModal) return;
+    emojiModal.style.display = emojiModal.style.display === "none" ? "block" : "none";
+  });
+
+  btnEmojiClose?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeEmoji();
+  });
+
+  emojiSearch?.addEventListener("input", debounce(() => {
+    // mostrar/ocultar X de limpieza (mismo patrón que otros search del hub)
+    try {
+      const wrap = emojiSearch?.closest?.(".search");
+      if (wrap) wrap.classList.toggle("has", !!String(emojiSearch.value || "").trim());
+    } catch (_) {}
+    renderEmojiPanel();
+  }, 80));
+
+  emojiSearchClear?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!emojiSearch) return;
+    emojiSearch.value = "";
+    try {
+      const wrap = emojiSearch.closest?.(".search");
+      if (wrap) wrap.classList.remove("has");
+    } catch (_) {}
+    renderEmojiPanel();
+    emojiSearch.focus();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!emojiModal || !btnEmoji) return;
+    const t = e.target;
+    if (emojiModal.contains(t) || btnEmoji.contains(t)) return;
+    closeEmoji();
+  });
+
+  // init emojis
+  renderEmojiPanel();
+
+  // estado inicial
+  renderPills();
 }
 
 async function onOutboxSend(row) {
@@ -874,9 +1789,14 @@ function renderColabs() {
   const sorted = filtered.slice().sort((a, b) => {
     const av = a?.[key] ?? "";
     const bv = b?.[key] ?? "";
-    // ingreso as date-friendly
+    // ingreso: keep correct chronological sort while rendering dd-mm-yyyy
     if (key === "ingreso") {
-      return dir * fmtDateAny(av).localeCompare(fmtDateAny(bv));
+      const ta = parseDateAnyToTs_(av);
+      const tb = parseDateAnyToTs_(bv);
+      const na = Number.isFinite(ta) ? ta : -Infinity;
+      const nb = Number.isFinite(tb) ? tb : -Infinity;
+      if (na === nb) return 0;
+      return dir * (na - nb);
     }
     return dir * String(av).localeCompare(String(bv));
   });
@@ -915,7 +1835,7 @@ function renderColabs() {
           <td class="nowrap">${escapeHtml(fmtDateAny(v.ingreso))}</td>
         </tr>
       `;
-    });
+    })
     .join("");
 
   // single-cell copy
@@ -1015,11 +1935,11 @@ function renderHabil() {
               </label>
             </td>
           `;
-        });
+        })
         .join("");
 
       return `<tr><td>${escapeHtml(label)}</td>${cells}</tr>`;
-    });
+    })
     .join("");
 
   body.querySelectorAll("input[data-h]").forEach((cb) => {
@@ -1142,15 +2062,26 @@ function renderPresentismo() {
       const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
       const tds = days
         .map((d) => {
-          const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
+          const vraw = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
+          let v = vraw;
+          let title = "";
+          if (vraw && String(vraw).startsWith("PF|")) {
+            const parts = String(vraw).split("|");
+            const tipo = (parts[1] || "").trim();
+            const estado = (parts[2] || "").trim();
+            const impacto = (parts[3] || "").trim();
+            v = tipo + (impacto ? ` (${impacto})` : "");
+            title = "PeopleForce" + (estado ? `: ${estado}` : "");
+          }
           const cls = d.isFeriado ? "feriado" : "";
-          const isLic = v && String(v).trim() !== "P";
+          const isLic = vraw && String(vraw).trim() !== "P";
           const c2 = [cls, isLic ? "lic" : ""].filter(Boolean).join(" ");
-          return `<td class="${c2}">${escapeHtml(v)}</td>`;
-        });
+          const tAttr = title ? ` title="${escapeAttr(title)}"` : "";
+          return `<td class="${c2}"${tAttr}>${escapeHtml(v)}</td>`;
+        })
         .join("");
       return `<tr><td>${escapeHtml(label)}</td>${tds}</tr>`;
-    });
+    })
     .join("");
 }
 
@@ -1210,10 +2141,15 @@ function renderDashboard() {
   const colabs = (S.colabs || []).map(colabRowView).filter((x) => x.id);
   const total = colabs.length;
 
+  // Distribución por rol 100% data-driven (sin roles hardcodeados)
+  const normRole = (r) => {
+    const s = String(r || "").trim();
+    return s || "Sin rol";
+  };
   const counts = new Map();
   for (const c of colabs) {
-    const b = roleBucket(c.rol);
-    counts.set(b, (counts.get(b) || 0) + 1);
+    const r = normRole(c.rol);
+    counts.set(r, (counts.get(r) || 0) + 1);
   }
 
   // presentes hoy por rol (cruza presWeek + colaboradores)
@@ -1228,20 +2164,23 @@ function renderDashboard() {
       const vday = String(r.vals?.[today] || "").trim();
       if (vday !== "P") continue;
       const meta = colabsById.get(r.id_meli);
-      const bucket = roleBucket(meta?.rol || "");
-      presentesPorRol.set(bucket, (presentesPorRol.get(bucket) || 0) + 1);
+      const role = normRole(meta?.rol || "");
+      presentesPorRol.set(role, (presentesPorRol.get(role) || 0) + 1);
     }
   }
 
-  // tabla base
-  let rowsRoles = ROLES_BUCKETS.map((k) => ({
-    rol: k,
-    nomina: counts.get(k) || 0,
-    presentes: presentesPorRol.get(k) || 0,
-  }));
+  // tabla base (oculta roles con 0 en nómina)
+  let rowsRoles = Array.from(counts.keys())
+    .map((rol) => ({
+      rol,
+      nomina: counts.get(rol) || 0,
+      presentes: presentesPorRol.get(rol) || 0,
+    }))
+    .filter((r) => r.nomina > 0);
 
   // sort
-  const ss = S.sort?.dashRoles || { key: "rol", dir: 1 };
+  // Orden estable por defecto: nómina DESC (si no se tocó el sort manual)
+  const ss = S.sort?.dashRoles || { key: "nomina", dir: -1 };
   const key = ss.key || "rol";
   const dir = ss.dir || 1;
   rowsRoles.sort((a, b) => {
@@ -1323,17 +2262,16 @@ async function main() {
 
   $("btnAddFlujo")?.addEventListener("click", async () => {
     const name = $("newFlujoName")?.value?.trim() || "";
-    const req = Number($("newFlujoReq")?.value || 0) || 0;
     if (!name) return setErr("Flujos: escribí el nombre del flujo.");
 
     try {
       $("dailyStatus").textContent = "Guardando...";
-      await API.flujosUpsert(name, req, "");
+      // Perfiles requeridos por defecto = 0 (reduce fricción)
+      await API.flujosUpsert(name, 0, "");
       S.flujos = await API.flujosList();
       renderFlujos();
       toast("Flujo agregado", name);
       $("newFlujoName").value = "";
-      $("newFlujoReq").value = "";
     } catch (e) {
       setErr(`Flujos: ${e.message || e}`);
     } finally {
@@ -1379,7 +2317,7 @@ async function main() {
   });
 
   $("presSemanaPrev")?.addEventListener("click", () => navigatePresSemana_(-1));
-  $("presSemanaNext")?.addEventListener("click", () => navigatePresSemana_(+1));
+  $("presSemanaNext")?.addEventListener("click", () => navigatePresSemana_(1));
 
   $("btnSetLicencia")?.addEventListener("click", onSetLicencia);
 
@@ -1460,6 +2398,7 @@ async function main() {
   });
 
   await loadCore();
+  mountSlackCompose_();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
