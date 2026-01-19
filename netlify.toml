@@ -10,3 +10,7 @@
 
 [functions]
   node_bundler = "esbuild"
+
+# Scheduled function real (cron). Dejá slack_scheduler.js como endpoint manual.
+[functions."slack_cron"]
+  schedule = "*/1 * * * *"
