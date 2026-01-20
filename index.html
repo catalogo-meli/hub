@@ -112,6 +112,152 @@
     th.sortable{cursor:pointer;user-select:none}
     th.sortable .srt{margin-left:6px;color:var(--muted);font-size:11px}
 
+    /* Slack - Menciones: estabilidad visual + jerarquía secundaria */
+    .mention-wrap{position:relative}
+    .mention-dd{
+      position:absolute;
+      left:0;
+      right:0;
+      top:44px;
+      margin:0;
+      padding:4px;
+      max-height:190px;
+      overflow:auto;
+      z-index:140;
+      /* Fondo sólido: evita transparencias raras y mejora legibilidad */
+      background:rgba(8,12,20,.98);
+      border:1px solid rgba(255,255,255,.10);
+      box-shadow:0 16px 48px rgba(0,0,0,.45);
+    }
+
+    [data-theme="light"] .mention-dd{
+      background:rgba(255,255,255,.98);
+      border-color:rgba(0,0,0,.12);
+      box-shadow:0 16px 48px rgba(0,0,0,.15);
+    }
+
+    /* Slack - Emoji panel: superficie sólida + estable */
+    #emojiModal{
+      background:rgba(8,12,20,.98);
+      border:1px solid rgba(255,255,255,.10);
+      box-shadow:0 16px 48px rgba(0,0,0,.45);
+    }
+
+    /* Slack Compose: layout 50/50 estable (Canal+Mensaje / Menciones+Programar) */
+    .slack-compose-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+    .slack-compose-col{display:flex;flex-direction:column;gap:10px}
+    .slack-compose-col .card{height:100%}
+    @media (max-width: 900px){
+      .slack-compose-grid{grid-template-columns:1fr}
+    }
+
+    /* Emojis: paleta operativa, sin scroll horizontal (solo vertical si hace falta) */
+    #emojiModal{width:420px;max-width:min(460px,92vw)}
+    #emojiGroups{overflow-y:auto;overflow-x:hidden}
+    #emojiGroups .emoji-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:6px}
+    #emojiGroups .emoji-btn{
+      border:0;
+      background:transparent;
+      font-size:20px;
+      line-height:1;
+      padding:2px;
+      cursor:pointer;
+      color:var(--txt);
+    }
+    #emojiGroups .emoji-btn:hover{filter:brightness(1.1)}
+    #emojiTabs .etab{
+      padding:4px 8px;
+      font-size:11px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.03);
+      color:var(--muted);
+      cursor:pointer;
+      user-select:none;
+    }
+    #emojiTabs .etab.active{
+      color:var(--txt);
+      background:rgba(255,255,255,.07);
+      border-color:rgba(255,255,255,.18);
+    }
+    [data-theme="light"] #emojiModal{
+      background:rgba(255,255,255,.98);
+      border-color:rgba(0,0,0,.12);
+      box-shadow:0 16px 48px rgba(0,0,0,.15);
+    }
+    [data-theme="light"] #emojiTabs .etab{
+      border-color:rgba(0,0,0,.12);
+      background:rgba(0,0,0,.03);
+      color:rgba(0,0,0,.65);
+    }
+    [data-theme="light"] #emojiTabs .etab.active{
+      background:rgba(0,0,0,.06);
+      color:rgba(0,0,0,.9);
+      border-color:rgba(0,0,0,.18);
+    }
+
+    .emoji-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+    .emoji-tab{
+      padding:5px 8px;border-radius:999px;border:1px solid var(--line);
+      background:rgba(255,255,255,.04);color:var(--muted);
+      cursor:pointer;font-size:12px;user-select:none
+    }
+    .emoji-tab.active{color:var(--txt);background:rgba(59,130,246,.18);border-color:rgba(59,130,246,.35)}
+    #slackMentionPills .pill{
+      padding:4px 8px;
+      gap:6px;
+      font-size:11px;
+      color:var(--muted);
+      background:rgba(255,255,255,.03);
+    }
+    #slackMentionPills .xbtn{
+      border:0;
+      background:transparent;
+      color:var(--muted);
+      cursor:pointer;
+      font-size:14px;
+      line-height:1;
+      padding:0 2px;
+      opacity:.8;
+    }
+    #slackMentionPills .xbtn:hover{opacity:1;color:var(--txt)}
+
+    /* Mantener el dropdown dentro del componente (sin tapar acciones abajo) */
+    .mention-box{position:relative; overflow:hidden;}
+
+    /* Tooltip discreto (sin ocupar espacio permanente) */
+    .tip{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:18px;height:18px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      color:var(--muted);
+      font-size:12px;
+      cursor:help;
+      position:relative;
+      user-select:none;
+    }
+    .tip:hover{color:var(--txt)}
+    .tip:hover::after{
+      content:attr(data-tooltip);
+      white-space:pre-line;
+      position:absolute;
+      left:0;
+      top:24px;
+      min-width:260px;
+      max-width:340px;
+      background:rgba(10,12,18,.98);
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:10px;
+      color:var(--txt);
+      box-shadow:var(--shadow);
+      z-index:200;
+    }
+    [data-theme="light"] .tip:hover::after{background:rgba(255,255,255,.98)}
+
 
     .input, select, textarea{
       width:100%;
@@ -265,6 +411,33 @@
     }
     .search.has .x{display:flex}
 
+    /* Operativa diaria → Configuración de flujos: Canal Slack (combo con búsqueda) */
+    #tblFlujos td{overflow:visible}
+    .flow-channel{position:relative}
+    .flow-channel .dd{
+      position:absolute;left:0;right:0;top:40px;
+      max-height:180px;overflow:auto;
+      background:rgba(15,23,42,.98);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:12px;
+      box-shadow:0 10px 30px rgba(0,0,0,.35);
+      z-index:60;
+      display:none;
+    }
+    [data-theme="light"] .flow-channel .dd{
+      background:rgba(255,255,255,.98);
+      border-color:rgba(15,23,42,.12);
+      box-shadow:0 10px 30px rgba(15,23,42,.12);
+    }
+    .flow-channel.open .dd{display:block}
+    .flow-channel .dd .it{padding:10px 12px;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
+    .flow-channel .dd .it:hover{background:rgba(255,255,255,.06)}
+    [data-theme="light"] .flow-channel .dd .it:hover{background:rgba(15,23,42,.05)}
+    .flow-channel .dd .muted{font-size:12px;color:var(--muted)}
+    .flow-channel .err{margin-top:6px;font-size:12px;color:#ffb4b4;display:none}
+    [data-theme="light"] .flow-channel .err{color:#b42318}
+    .flow-channel.invalid .err{display:block}
+
     .copyable{cursor:pointer}
     .copyable:hover{opacity:.85;text-decoration:underline}
 
@@ -289,9 +462,58 @@
       background:rgba(255,255,255,.03);
       padding:12px;
     }
-    .flow-col h3{margin:0 0 10px;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:10px}
-    .flow-col ul{margin:0;padding-left:16px;color:var(--muted)}
-    .flow-col li{margin:6px 0}
+    /* Planificación → Asignación por flujo (optimización operativa) */
+    .plan-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+    .plan-controls .input{height:38px}
+    .plan-controls .select{height:38px}
+
+    .flow-head{
+      position:sticky;
+      top:0;
+      z-index:2;
+      background:linear-gradient(to bottom, rgba(10,15,22,.98), rgba(10,15,22,.92));
+      border:1px solid rgba(255,255,255,.06);
+      border-radius:12px;
+      padding:10px 10px;
+      margin-bottom:10px;
+      backdrop-filter: blur(6px);
+    }
+    [data-theme="light"] .flow-head{
+      background:linear-gradient(to bottom, rgba(255,255,255,.98), rgba(255,255,255,.92));
+      border-color:rgba(15,23,42,.10);
+    }
+    .flow-head-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .flow-name{font-weight:800;font-size:14px;letter-spacing:-.2px}
+    .flow-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+    .chip{
+      display:inline-flex;align-items:center;gap:8px;
+      padding:4px 8px;border-radius:999px;
+      font-size:12px;border:1px solid var(--line);
+      background:rgba(255,255,255,.04);
+      color:var(--muted);
+      white-space:nowrap;
+    }
+    .dot{width:8px;height:8px;border-radius:99px;background:rgba(148,163,184,.65)}
+    .chip.ok{border-color:rgba(34,197,94,.25);background:rgba(34,197,94,.10);color:#c8ffe0}
+    .chip.ok .dot{background:rgba(34,197,94,.9)}
+    .chip.warn{border-color:rgba(245,158,11,.25);background:rgba(245,158,11,.10);color:#ffe6b8}
+    .chip.warn .dot{background:rgba(245,158,11,.95)}
+    .chip.bad{border-color:rgba(239,68,68,.25);background:rgba(239,68,68,.10);color:#ffd4d4}
+    .chip.bad .dot{background:rgba(239,68,68,.95)}
+    [data-theme="light"] .chip.ok{color:#0f5132}
+    [data-theme="light"] .chip.warn{color:#7a4b00}
+    [data-theme="light"] .chip.bad{color:#842029}
+
+    .flow-peek{color:var(--muted);font-size:13px;line-height:1.35}
+    .flow-peek b{color:var(--txt)}
+    .linkbtn{
+      border:none;background:transparent;color:var(--muted);
+      cursor:pointer;padding:0;text-decoration:underline;
+      text-underline-offset:3px;
+    }
+    .linkbtn:hover{opacity:.9}
+    .flow-list{margin:10px 0 0;padding-left:16px;color:var(--muted)}
+    .flow-list li{margin:6px 0}
     .feriado{
       outline:2px solid rgba(245,158,11,.22);
       background:rgba(245,158,11,.08) !important;
@@ -411,12 +633,14 @@
 
         </div>
 
-        <div style="margin-top:10px;overflow:auto">
+        <!-- overflow-y visible para que el selector de canal (position:absolute) no se recorte -->
+        <div style="margin-top:10px;overflow-x:auto;overflow-y:visible;position:relative">
           <table class="table" id="tblFlujos">
             <thead>
               <tr>
                 <th>Flujo</th>
-                <th class="nowrap" style="text-align:center;min-width:110px">Enviar Slack </th>
+                <th class="nowrap" style="text-align:center;min-width:140px">Notificar por Slack</th>
+                <th class="nowrap" style="min-width:240px">Canal Slack</th>
                 <th class="right nowrap">Perfiles requeridos</th>
                 <th class="right nowrap">Acciones</th>
               </tr>
@@ -425,32 +649,119 @@
             <tfoot>
               <tr>
                 <td style="min-width:240px">
-                  <input class="input" id="newFlujoName" placeholder="+ Nuevo flujo..." />
+                  <div class="row" style="gap:10px">
+                    <input class="input" id="newFlujoName" placeholder="+ Nuevo flujo..." />
+                    <button class="btn primary" id="btnAddFlujo">Agregar</button>
+                  </div>
                 </td>
-                <td style="min-width:110px"></td>
-                <td class="right nowrap" style="min-width:140px">
-                  <input class="input smallnum" id="newFlujoReq" type="number" min="0" step="1" placeholder="Req." />
-                </td>
-                <td class="right nowrap" style="min-width:140px">
-                  <button class="btn primary" id="btnAddFlujo">Agregar</button>
-                </td>
+                <td style="min-width:140px"></td>
+                <td style="min-width:240px"></td>
+                <td class="right nowrap" style="min-width:140px"></td>
+                <td class="right nowrap" style="min-width:140px"></td>
               </tr>
             </tfoot>
           </table>
+        </div>
+
+        <div class="card" id="dailyDraftsWrap" style="margin-top:14px;display:none">
+          <div class="row" style="margin-bottom:8px">
+            <div class="pill"><b>Mensajes generados (borradores)</b></div>
+            <div class="spacer"></div>
+            <div class="pill" id="dailyDraftsMeta"></div>
+          </div>
+          <div class="flow-grid" id="dailyDrafts" style="grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:10px"></div>
         </div>
 
         <div class="hr"></div>
 
         <h2 style="margin-top:0">Planificación</h2>
         <div class="muted">Asignación por flujo</div>
+        <div class="plan-controls" id="planControls">
+          <div class="search" style="max-width:420px">
+            <input class="input" id="planSearch" placeholder="Buscar flujo..." />
+            <div class="x" id="planSearchClear" title="Limpiar">×</div>
+          </div>
+          <select class="input" id="planSort" style="max-width:240px">
+            <option value="alpha">Orden: A → Z</option>
+            <option value="load">Orden: Mayor carga</option>
+          </select>
+        </div>
         <div style="margin-top:12px" id="planGrid" class="flow-grid"></div>
 
         <div class="hr"></div>
 
         <h2 style="margin-top:0">Mensajes de Slack</h2>
         <div class="muted">Gestión de comunicación</div>
+        <!-- Compose (siempre disponible) -->
+        <div class="flow-col" id="slackCompose" style="margin-top:12px">
+          <div class="slack-compose-grid">
+            <!-- Columna izquierda: Canal + Mensaje (mismo ancho) -->
+            <div class="slack-compose-col">
+              <div>
+                <div class="muted" style="font-size:12px;margin-bottom:6px">Canal</div>
+                <select class="input" id="slackComposeChannel"></select>
+              </div>
+
+              <div>
+                <div class="muted" style="font-size:12px;margin-bottom:6px">Mensaje</div>
+                <div style="position:relative">
+                  <textarea class="input" id="slackComposeMsg" placeholder="Escribí el mensaje..." style="padding-right:56px"></textarea>
+                  <button class="btn icon-btn" id="btnEmoji" type="button" title="Emojis" style="position:absolute;right:10px;top:10px">😀</button>
+
+                  <div id="emojiModal" class="card" style="display:none;position:absolute;right:0;top:50px;min-width:380px;max-width:460px;padding:10px;z-index:120">
+                    <div class="row" style="gap:8px;align-items:center">
+                      <div class="search" style="min-width:0;flex:1">
+                        <input class="input" id="emojiSearch" placeholder="Buscar emoji..." />
+                        <div class="x" id="emojiSearchClear" title="Limpiar">×</div>
+                      </div>
+                      <button class="btn ghost" id="btnEmojiClose" type="button">Cerrar</button>
+                    </div>
+                    <div id="emojiGroups" style="margin-top:10px;max-height:280px;overflow:auto"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Columna derecha: Menciones + Programar (mismo ancho) -->
+            <div class="slack-compose-col">
+              <div>
+                <div class="row" style="gap:6px;align-items:center;margin-bottom:6px">
+                  <div class="muted" style="font-size:12px">Menciones</div>
+                  <span class="tip" data-tooltip="Personas, @here, @canal, @everyone\n⚠️ @canal y @here notifican. #canal solo enlaza.">ⓘ</span>
+                </div>
+                <div class="card mention-box" style="padding:10px">
+                  <div class="mention-wrap" style="position:relative">
+                    <input class="input" id="slackMentionSearch" placeholder="Buscar por nombre o mail productora..." autocomplete="off" />
+                    <div id="slackMentionResults" class="card mention-dd" style="display:none"></div>
+                  </div>
+                  <div id="slackMentionPills" class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+                </div>
+              </div>
+
+              <div>
+                <div class="muted" style="font-size:12px;margin-bottom:6px">Programar</div>
+                <div class="row" style="gap:8px;align-items:center">
+                  <input class="input" type="datetime-local" id="slackComposeWhen" style="flex:1;min-width:0" />
+                  <!-- v9.5_patch: se elimina confirmación extra para programación (menos fricción) -->
+                </div>
+                <div class="row" style="margin-top:10px;justify-content:flex-end">
+                  <button class="btn" id="btnComposeClear" type="button">Descartar</button>
+                  <button class="btn" id="btnSaveDraft" type="button">Guardar borrador</button>
+                  <button class="btn" id="btnSendNow" type="button">Enviar</button>
+                  <button class="btn primary" id="btnSchedule" type="button">Programar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="pill"><b>Borradores</b></div>
+        </div>
         <div style="margin-top:12px;overflow:auto">
-          <table class="table" id="tblOutbox">
+          <table class="table" id="tblDrafts">
             <thead>
               <tr>
                 <th class="nowrap">Fecha</th>
@@ -463,6 +774,47 @@
             <tbody></tbody>
           </table>
         </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="pill"><b>Programados</b></div>
+        </div>
+        <div style="margin-top:12px;overflow:auto">
+          <table class="table" id="tblScheduled">
+            <thead>
+              <tr>
+                <th class="nowrap">Fecha</th>
+                <th style="min-width:220px">Canal</th>
+                <th>Mensaje</th>
+                <th class="nowrap">Estado</th>
+                <th class="right nowrap">Acción</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row" style="align-items:center;justify-content:space-between">
+          <div class="pill"><b>Enviados</b> <span class="muted" style="font-weight:400">(últimas 2 semanas)</span></div>
+          <button class="btn ghost" id="btnRefreshSent" type="button">Refrescar</button>
+        </div>
+        <div style="margin-top:12px;overflow:auto">
+          <table class="table" id="tblSent">
+            <thead>
+              <tr>
+                <th class="nowrap">Fecha</th>
+                <th style="min-width:220px">Canal</th>
+                <th>Mensaje</th>
+                <th class="nowrap">Estado</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
       </section>
 
       <!-- Colaboradores -->
@@ -571,13 +923,9 @@
         <div class="row">
           <div class="ms" id="msRolesPres"></div>
           <div class="ms" id="msEquiposPres"></div>
-          <div style="min-width:220px">
+          <div style="min-width:160px">
             <div class="muted" style="font-size:12px;margin-bottom:6px">Semana</div>
-            <div class="row" style="gap:6px;flex-wrap:nowrap;align-items:stretch">
-              <button class="btn ghost icon-btn" id="presSemanaPrev" title="Semana anterior">‹</button>
-              <select id="presSemana" style="min-width:160px"></select>
-              <button class="btn ghost icon-btn" id="presSemanaNext" title="Semana siguiente">›</button>
-            </div>
+            <select id="presSemana"></select>
           </div>
           <div class="search" id="searchPresWrap">
             <input class="input" id="searchPres" placeholder="Buscar..." />
