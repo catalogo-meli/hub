@@ -2152,7 +2152,7 @@ const c2 = [base, imp.cls]
   tbody.innerHTML = parts.join("");
 
   const note = $("presLegendNote");
-  if (note) note.textContent = group ? "Ordenado por impacto (semana) → nombre" : "Ordenado por nombre";
+  if (note) note.textContent = group ? "Agrupado por estado → nombre" : "Ordenado por nombre";
 }
 
 async function onSetLicencia() {
