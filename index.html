@@ -552,7 +552,19 @@
     th.sortable .srt{margin-left:6px;opacity:.7;font-size:12px}
     .selbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
     .selbar .btn{padding:9px 12px}
-  </style>
+  
+/* Presentismo statuses (PeopleForce codes) */
+.st { font-weight:700; letter-spacing:.3px; }
+.st.ok { background: rgba(46, 204, 113, .14); border: 1px solid rgba(46, 204, 113, .28); }
+.st.warn { background: rgba(241, 196, 15, .14); border: 1px solid rgba(241, 196, 15, .28); }
+.st.bad { background: rgba(231, 76, 60, .14); border: 1px solid rgba(231, 76, 60, .28); }
+
+td.pres-ok { background: rgba(46, 204, 113, .08); }
+td.pres-warn { background: rgba(241, 196, 15, .10); }
+td.pres-bad { background: rgba(231, 76, 60, .10); }
+tr.pres-group-row td { background: rgba(255,255,255,.03); font-weight: 800; }
+
+</style>
 </head>
 
 <body>
@@ -975,7 +987,21 @@
           <button class="btn primary" id="btnSetLicencia">Guardar</button>
         </div>
 
-        <div class="hr"></div>
+        
+<div class="row" style="gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0">
+  <label class="pill" style="cursor:pointer;display:flex;align-items:center;gap:8px">
+    <input type="checkbox" id="presGroupImpact" />
+    <span><b>Agrupar por impacto</b></span>
+  </label>
+
+  <div class="pill st ok" title="Presente (P)">P</div>
+  <div class="pill st warn" title="Presente parcial (PAR_*)">PAR</div>
+  <div class="pill st bad" title="Ausente (AUS_*)">AUS</div>
+
+  <div class="muted" style="margin-left:auto;font-size:12px" id="presLegendNote"></div>
+</div>
+
+<div class="hr"></div>
 
         <div style="overflow:auto">
           <table class="table" id="tblPresWeek">

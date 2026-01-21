@@ -1964,6 +1964,25 @@ async function setHabilitacion(idMeli, flujo, habilitado, fijo) {
 }
 
 /* ========= Presentismo ========= */
+
+function presImpactFromCode_(code) {
+  const v = (code || "").toString().trim();
+  if (!v) return { impact: "Presente", cls: "pres-ok", label: "P" };
+  if (v === "P") return { impact: "Presente", cls: "pres-ok", label: "P" };
+  if (v.startsWith("AUS_") || v === "AUS") return { impact: "Ausente", cls: "pres-bad", label: v };
+  if (v.startsWith("PAR_") || v === "PP") return { impact: "Presente parcial", cls: "pres-warn", label: v };
+  // fallback: treat anything not P as licencia -> warn (safer)
+  return { impact: "Licencia", cls: "pres-warn", label: v };
+}
+
+function presGroupKey_(code) {
+  const i = presImpactFromCode_(code).impact;
+  if (i === "Ausente") return 0;
+  if (i === "Presente parcial") return 1;
+  return 2; // Presente / otros
+}
+
+
 function mountPresentismoSelect() {
   const sel = $("presSelectColab");
   if (!sel) return;
@@ -2037,22 +2056,58 @@ function renderPresentismo() {
     return;
   }
 
-  tbody.innerHTML = filtered
-    .map((r) => {
-      const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
-      const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
-      const tds = days
-        .map((d) => {
-          const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
-          const cls = d.isFeriado ? "feriado" : "";
-          const isLic = v && String(v).trim() !== "P";
-          const c2 = [cls, isLic ? "lic" : ""].filter(Boolean).join(" ");
-          return `<td class="${c2}">${escapeHtml(v)}</td>`;
-        })
-        .join("");
-      return `<tr><td>${escapeHtml(label)}</td>${tds}</tr>`;
-    })
-    .join("");
+  const group = $("presGroupImpact") ? $("presGroupImpact").checked : false;
+
+  const sorted = filtered.slice().sort((a,b)=>{
+    const ma = colabsById.get(a.id_meli) || {};
+    const mb = colabsById.get(b.id_meli) || {};
+    const nameA = (ma.nombre || a.nombre || "").toString().toLowerCase();
+    const nameB = (mb.nombre || b.nombre || "").toString().toLowerCase();
+
+    if (!group) return nameA.localeCompare(nameB);
+
+    // group by impact of HOY (last day in the week range)
+    const todayKey = days[days.length - 1].key;
+    const ca = (a.vals && a.vals[todayKey]) ? String(a.vals[todayKey]) : "";
+    const cb = (b.vals && b.vals[todayKey]) ? String(b.vals[todayKey]) : "";
+    const ga = presGroupKey_(ca);
+    const gb = presGroupKey_(cb);
+    if (ga !== gb) return ga - gb;
+    return nameA.localeCompare(nameB);
+  });
+
+  const parts = [];
+  let lastGroup = null;
+
+  for (const r of sorted) {
+    const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
+    const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
+
+    // impact grouping based on HOY (last day in range)
+    const todayKey = days[days.length - 1].key;
+    const vHoy = (r.vals && r.vals[todayKey]) ? String(r.vals[todayKey]) : "";
+    const gName = presImpactFromCode_(vHoy).impact;
+
+    if (group && gName !== lastGroup) {
+      lastGroup = gName;
+      parts.push(`<tr class="pres-group-row"><td colspan="${1 + days.length}">${escapeHtml(gName)}</td></tr>`);
+    }
+
+    const tds = days.map((d) => {
+      const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
+      const base = d.isFeriado ? "feriado" : "";
+      const imp = presImpactFromCode_(v);
+      const c2 = [base, imp.cls, v && v.trim() !== "P" ? "lic" : ""].filter(Boolean).join(" ");
+      return `<td class="${c2}" title="${escapeHtml(imp.label)}">${escapeHtml(v)}</td>`;
+    }).join("");
+
+    parts.push(`<tr><td>${escapeHtml(label)}</td>${tds}</tr>`);
+  }
+
+  tbody.innerHTML = parts.join("");
+
+  const note = $("presLegendNote");
+  if (note) note.textContent = group ? "Ordenado por impacto (hoy) → nombre" : "Ordenado por nombre";
 }
 
 async function onSetLicencia() {
@@ -2287,6 +2342,7 @@ async function main() {
   });
 
   $("btnSetLicencia")?.addEventListener("click", onSetLicencia);
+  $("presGroupImpact")?.addEventListener("change", () => { renderPresentismo(); });
 
   // Filters
   const rolesList = ["Analista KV", "Analista PM", "Analista QA", "Líderes"];
