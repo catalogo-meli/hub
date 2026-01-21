@@ -1969,8 +1969,20 @@ function presImpactFromCode_(code) {
   const v = (code || "").toString().trim();
   if (!v) return { impact: "Presente", cls: "pres-ok", label: "P" };
   if (v === "P") return { impact: "Presente", cls: "pres-ok", label: "P" };
+
+  // Esquema anterior (prefijos)
   if (v.startsWith("AUS_") || v === "AUS") return { impact: "Ausente", cls: "pres-bad", label: v };
   if (v.startsWith("PAR_") || v === "PP") return { impact: "Presente parcial", cls: "pres-warn", label: v };
+
+  // Esquema nuevo (códigos definidos en Config_Licencias_PF)
+  // Nota: esto es un fallback front-only (no rompe nada). Si sumás nuevos códigos,
+  // agregalos acá o migramos a leer el mapping desde Sheets.
+  const BAD = new Set(["V", "M", "E", "TP", "N", "MUD", "MAT", "MATR", "DUELO", "CF", "DS", "MHM"]);
+  const WARN = new Set(["TM/TR", "CJ"]);
+
+  if (BAD.has(v)) return { impact: "Ausente", cls: "pres-bad", label: v };
+  if (WARN.has(v)) return { impact: "Presente parcial", cls: "pres-warn", label: v };
+
   // fallback: treat anything not P as licencia -> warn (safer)
   return { impact: "Licencia", cls: "pres-warn", label: v };
 }
