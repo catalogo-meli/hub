@@ -1966,25 +1966,39 @@ async function setHabilitacion(idMeli, flujo, habilitado, fijo) {
 /* ========= Presentismo ========= */
 
 function presImpactFromCode_(code) {
-  const v = (code || "").toString().trim();
-  if (!v) return { impact: "Presente", cls: "pres-ok", label: "P" };
-  if (v === "P") return { impact: "Presente", cls: "pres-ok", label: "P" };
+  // Normaliza para matchear aunque el dato venga con espacios o slashes raros
+  const norm_ = (v) => String(v || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[⁄∕]/g, "/")     // slashes unicode -> "/"
+    .replace(/\s+/g, "")       // sin espacios
+    ;
 
-  // Esquema anterior (prefijos)
-  if (v.startsWith("AUS_") || v === "AUS") return { impact: "Ausente", cls: "pres-bad", label: v };
-  if (v.startsWith("PAR_") || v === "PP") return { impact: "Presente parcial", cls: "pres-warn", label: v };
+  const raw = String(code || "").trim();
+  const v = norm_(raw);
 
-  // Esquema nuevo (códigos definidos en Config_Licencias_PF)
-  // Nota: esto es un fallback front-only (no rompe nada). Si sumás nuevos códigos,
-  // agregalos acá o migramos a leer el mapping desde Sheets.
-  const BAD = new Set(["V", "M", "E", "TP", "N", "MUD", "MAT", "MATR", "DUELO", "CF", "DS", "MHM"]);
-  const WARN = new Set(["TM/TR", "CJ"]);
+  if (!v) return { kind: "ok", rank: 2, label: "" };
 
-  if (BAD.has(v)) return { impact: "Ausente", cls: "pres-bad", label: v };
-  if (WARN.has(v)) return { impact: "Presente parcial", cls: "pres-warn", label: v };
+  // Reglas rápidas por prefijo
+  if (v === "P") return { kind: "ok", rank: 2, label: "P" };
+  if (v.startsWith("AUS_")) return { kind: "bad", rank: 0, label: raw };
+  if (v.startsWith("PAR_")) return { kind: "warn", rank: 1, label: raw };
 
-  // fallback: treat anything not P as licencia -> warn (safer)
-  return { impact: "Licencia", cls: "pres-warn", label: v };
+  // Catálogo manual PF (códigos cortos) + tolerancia a variantes
+  const BAD = new Set([
+    "V","M","E","TP","N","MUD","MAT","MATR","DUELO","CF","DS","MHM"
+  ].map(norm_));
+
+  const WARN = new Set([
+    "TM/TR","TMTR",  // tolerancia
+    "CJ"
+  ].map(norm_));
+
+  if (WARN.has(v)) return { kind: "warn", rank: 1, label: raw };
+  if (BAD.has(v))  return { kind: "bad",  rank: 0, label: raw };
+
+  // Default: si no lo conozco, lo trato como "bad" para que no pase desapercibido
+  return { kind: "bad", rank: 0, label: raw };
 }
 
 function presGroupKey_(code) {
@@ -2119,7 +2133,7 @@ function renderPresentismo() {
   tbody.innerHTML = parts.join("");
 
   const note = $("presLegendNote");
-  if (note) note.textContent = group ? "Ordenado por impacto (hoy) → nombre" : "Ordenado por nombre";
+  if (note) note.textContent = group ? "Ordenado por impacto (semana) → nombre" : "Ordenado por nombre";
 }
 
 async function onSetLicencia() {
