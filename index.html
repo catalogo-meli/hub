@@ -956,22 +956,27 @@ tr.pres-group-row td { background: rgba(255,255,255,.03); font-weight: 800; }
 
           <div style="max-width:220px">
             <div class="muted" style="font-size:12px;margin-bottom:6px">Tipo</div>
-            <select id="presTipo">
-              <option value="AI">V - Vacaciones</option>
-              <option value="E">M - Licencia médica</option>
-              <option value="M">E - Día de estudio</option>
-              <option value="MM">TP - Trámites prematriomniales</option>
-              <option value="V">N - Nacimiento</option>
-              <option value="V">MUD - Mudanza</option>
-              <option value="V">MAT - Maternidad</option>
-              <option value="V">MATR - Matrimonio</option>
-              <option value="V">DUELO - Fallecimiento familiar</option>
-              <option value="V">CF - Cuidado de familiar</option>
-              <option value="V">DS - Donación de sangre</option>
-              <option value="V">TM/TR - Turno médico o trámite rápido</option>
-              <option value="V">CJ - Citación judicial</option>
-              <option value="V">MHM - Enfermedad hijo/a menor 12 años</option>
-            </select>
+<select id="presTipo">
+  <option value="P">P - Presente</option>
+
+  <option value="V">V - Vacaciones</option>
+  <option value="M">M - Licencia médica</option>
+  <option value="E">E - Día de estudio</option>
+  <option value="TP">TP - Trámites prematrimoniales</option>
+  <option value="N">N - Nacimiento</option>
+  <option value="MUD">MUD - Mudanza</option>
+  <option value="MAT">MAT - Maternidad</option>
+  <option value="MATR">MATR - Matrimonio</option>
+  <option value="DUELO">DUELO - Fallecimiento familiar</option>
+  <option value="CF">CF - Cuidado de familiar</option>
+  <option value="DS">DS - Donación de sangre</option>
+
+  <!-- Parciales -->
+  <option value="TM/TR">TM/TR - Turno médico o trámite rápido</option>
+  <option value="CJ">CJ - Citación judicial</option>
+
+  <option value="MHM">MHM - Enfermedad hijo/a menor 12 años</option>
+</select>
           </div>
 
           <div style="max-width:220px">
