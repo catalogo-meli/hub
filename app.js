@@ -1966,39 +1966,28 @@ async function setHabilitacion(idMeli, flujo, habilitado, fijo) {
 /* ========= Presentismo ========= */
 
 function presImpactFromCode_(code) {
-  // Normaliza para matchear aunque el dato venga con espacios o slashes raros
-  const norm_ = (v) => String(v || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[⁄∕]/g, "/")     // slashes unicode -> "/"
-    .replace(/\s+/g, "")       // sin espacios
-    ;
+  const v = (code || "").toString().trim();
 
-  const raw = String(code || "").trim();
-  const v = norm_(raw);
+  // vacío -> tratamos como Presente (por cómo se arma la grilla)
+  if (!v) return { impact: "Presente", cls: "pres-ok", label: "P" };
 
-  if (!v) return { kind: "ok", rank: 2, label: "" };
+  // Presente
+  if (v === "P") return { impact: "Presente", cls: "pres-ok", label: "P" };
 
-  // Reglas rápidas por prefijo
-  if (v === "P") return { kind: "ok", rank: 2, label: "P" };
-  if (v.startsWith("AUS_")) return { kind: "bad", rank: 0, label: raw };
-  if (v.startsWith("PAR_")) return { kind: "warn", rank: 1, label: raw };
+  // Compatibilidad con esquema anterior
+  if (v.startsWith("AUS_") || v === "AUS") return { impact: "Ausente", cls: "pres-bad", label: v };
+  if (v.startsWith("PAR_") || v === "PP") return { impact: "Presente parcial", cls: "pres-warn", label: v };
 
-  // Catálogo manual PF (códigos cortos) + tolerancia a variantes
-  const BAD = new Set([
-    "V","M","E","TP","N","MUD","MAT","MATR","DUELO","CF","DS","MHM"
-  ].map(norm_));
+  // Esquema nuevo (códigos manuales / PF)
+  // PAR (presente parcial)
+  const isPar =
+    v === "TM/TR" ||
+    v === "CJ";
 
-  const WARN = new Set([
-    "TM/TR","TMTR",  // tolerancia
-    "CJ"
-  ].map(norm_));
+  if (isPar) return { impact: "Presente parcial", cls: "pres-warn", label: v };
 
-  if (WARN.has(v)) return { kind: "warn", rank: 1, label: raw };
-  if (BAD.has(v))  return { kind: "bad",  rank: 0, label: raw };
-
-  // Default: si no lo conozco, lo trato como "bad" para que no pase desapercibido
-  return { kind: "bad", rank: 0, label: raw };
+  // Todo lo que NO sea P y NO sea PAR lo tratamos como AUSENTE (licencia/ausencia)
+  return { impact: "Ausente", cls: "pres-bad", label: v };
 }
 
 function presGroupKey_(code) {
@@ -2084,7 +2073,41 @@ function renderPresentismo() {
 
   const group = $("presGroupImpact") ? $("presGroupImpact").checked : false;
 
-  const sorted = filtered.slice().sort((a,b)=>{
+  // ====== NUEVO: agrupar por IMPACTO DE LA SEMANA (peor valor en cualquier día) ======
+  // Construye el set de códigos PAR desde config (si está), y fallback a los que ya usás.
+  const PAR_SET = (() => {
+    const s = new Set();
+    const cfg = S.licencias_pf || S.licenciasPF || S.pfLicencias || S.pfLicenciasCfg || [];
+    if (Array.isArray(cfg) && cfg.length) {
+      cfg.forEach((x) => {
+        const code = String(x.codigo_presentismo || x.codigo || x.code || "").trim().toUpperCase();
+        const impacto = String(x.impacto_hub || x.impacto || "").trim().toLowerCase();
+        if (code && impacto === "presente parcial") s.add(code);
+      });
+    }
+    // fallback mínimo por si no está cargado cfg en front
+    if (!s.size) ["TM/TR", "CJ"].forEach((c) => s.add(c));
+    return s;
+  })();
+
+  // 0=AUS, 1=PAR, 2=P (mientras más bajo, peor)
+  const weekKeyForRow_ = (r) => {
+    let worst = 2;
+    for (const d of days) {
+      const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]).trim().toUpperCase() : "";
+      let k = 2;
+      if (!v || v === "P") k = 2;
+      else if (PAR_SET.has(v)) k = 1;
+      else k = 0; // cualquier otro código ≠ P y ≠ PAR => AUS
+      if (k < worst) worst = k;
+      if (worst === 0) break;
+    }
+    return worst;
+  };
+
+  const groupNameFromKey_ = (k) => (k === 0 ? "Ausente" : (k === 1 ? "Presente parcial" : "Presente"));
+
+  const sorted = filtered.slice().sort((a, b) => {
     const ma = colabsById.get(a.id_meli) || {};
     const mb = colabsById.get(b.id_meli) || {};
     const nameA = (ma.nombre || a.nombre || "").toString().toLowerCase();
@@ -2092,13 +2115,9 @@ function renderPresentismo() {
 
     if (!group) return nameA.localeCompare(nameB);
 
-    // group by impact of HOY (last day in the week range)
-    const todayKey = days[days.length - 1].key;
-    const ca = (a.vals && a.vals[todayKey]) ? String(a.vals[todayKey]) : "";
-    const cb = (b.vals && b.vals[todayKey]) ? String(b.vals[todayKey]) : "";
-    const ga = presGroupKey_(ca);
-    const gb = presGroupKey_(cb);
-    if (ga !== gb) return ga - gb;
+    const ga = weekKeyForRow_(a);
+    const gb = weekKeyForRow_(b);
+    if (ga !== gb) return ga - gb; // AUS primero, luego PAR, luego P
     return nameA.localeCompare(nameB);
   });
 
@@ -2109,11 +2128,8 @@ function renderPresentismo() {
     const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
     const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
 
-    // impact grouping based on HOY (last day in range)
-    const todayKey = days[days.length - 1].key;
-    const vHoy = (r.vals && r.vals[todayKey]) ? String(r.vals[todayKey]) : "";
-    const gName = presImpactFromCode_(vHoy).impact;
-
+    // NUEVO: header por grupo usando impacto semanal
+    const gName = groupNameFromKey_(weekKeyForRow_(r));
     if (group && gName !== lastGroup) {
       lastGroup = gName;
       parts.push(`<tr class="pres-group-row"><td colspan="${1 + days.length}">${escapeHtml(gName)}</td></tr>`);
