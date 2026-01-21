@@ -2138,8 +2138,11 @@ function renderPresentismo() {
     const tds = days.map((d) => {
       const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
       const base = d.isFeriado ? "feriado" : "";
-      const imp = presImpactFromCode_(v);
-      const c2 = [base, imp.cls, v && v.trim() !== "P" ? "lic" : ""].filter(Boolean).join(" ");
+     const imp = presImpactFromCode_(v);
+// El color se define SOLO por impacto (ok / warn / bad)
+const c2 = [base, imp.cls]
+  .filter(Boolean)
+  .join(" ");
       return `<td class="${c2}" title="${escapeHtml(imp.label)}">${escapeHtml(v)}</td>`;
     }).join("");
 
