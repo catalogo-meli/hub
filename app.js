@@ -2181,27 +2181,40 @@ async function onSetLicencia() {
 
 /* ========= Dashboard ========= */
 function countAnalistasDisponiblesHoy_() {
-  // usa presWeek (hoy) para no inventar
-  if (!S.presWeek?.days?.length || !S.presWeek?.rows?.length) return 0;
+  // Para Planificación: "Presente parcial" (TM/TR, CJ, etc.) cuenta como Presente.
+  // Regla: solo excluimos a quienes estén en impacto "Ausente" para HOY.
+  const today = todayYMD_();
 
-  const today = todayYMD();
+  // Mapa colabs para filtrar rol (solo analistas)
   const colabsById = new Map((S.colabs || []).map((c) => {
     const v = colabRowView(c);
     return [v.id, v];
   }));
 
-  let n = 0;
-  for (const r of S.presWeek.rows) {
-    const v = r.vals?.[today];
-    if (String(v || "").trim() !== "P") continue;
+  // Construyo un mapa id_meli -> row de presentismo (para acceder rápido a vals[today])
+  const presRows = (S.presWeek && Array.isArray(S.presWeek.rows)) ? S.presWeek.rows : [];
+  const presById = new Map(presRows.map((r) => [r.id_meli, r]));
 
-    const meta = colabsById.get(r.id_meli);
-    const bucket = roleBucket(meta?.rol || "");
-    if (bucket === "Líderes") continue;
-    n++;
+  let count = 0;
+
+  for (const [id, c] of colabsById.entries()) {
+    // solo analistas (no TL/CP/PM)
+    const rb = roleBucket(c.rol);
+    if (rb !== "Analista") continue;
+
+    const pr = presById.get(id);
+    const v = pr && pr.vals ? String(pr.vals[today] || "").trim() : "";
+    if (!v) continue; // si no hay marca para HOY, no lo cuento (evita inflar)
+
+    const imp = presImpactFromCode_(v); // { impact, cls, label }
+    if (imp.impact === "Ausente") continue;
+
+    count++;
   }
-  return n;
+
+  return count;
 }
+
 
 function renderDashboard() {
   const kpi = $("dashKpis");
