@@ -2183,7 +2183,7 @@ async function onSetLicencia() {
 function countAnalistasDisponiblesHoy_() {
   // Para Planificación: "Presente parcial" (TM/TR, CJ, etc.) cuenta como Presente.
   // Regla: solo excluimos a quienes estén en impacto "Ausente" para HOY.
-  const today = todayYMD_();
+  const today = todayYMD();
 
   // Mapa colabs para filtrar rol (solo analistas)
   const colabsById = new Map((S.colabs || []).map((c) => {
