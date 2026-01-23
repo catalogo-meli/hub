@@ -1990,6 +1990,12 @@ function presImpactFromCode_(code) {
   return { impact: "Ausente", cls: "pres-bad", label: v };
 }
 
+function isPresentForPlanning_(code) {
+  const imp = presImpactFromCode_(code || "");
+  return imp.impact === "Presente" || imp.impact === "Presente parcial";
+}
+
+
 function presGroupKey_(code) {
   const i = presImpactFromCode_(code).impact;
   if (i === "Ausente") return 0;
@@ -2180,51 +2186,26 @@ async function onSetLicencia() {
 }
 
 /* ========= Dashboard ========= */
-function countAnalistasDisponiblesHoy_(colabs, presWeek) {
-  if (!Array.isArray(colabs) || colabs.length === 0) return 0;
-  if (!presWeek || !Array.isArray(presWeek.days) || !Array.isArray(presWeek.rows)) return 0;
+function countAnalistasDisponiblesHoy_() {
+  // usa presWeek (hoy) para no inventar
+  if (!S.presWeek?.days?.length || !S.presWeek?.rows?.length) return 0;
 
-  // 1) Determinar qué columna usar para "hoy" (robusto ante keys distintas)
-  const t = todayYMD();
-  let dayKey = null;
+  const today = todayYMD();
+  const colabsById = new Map((S.colabs || []).map((c) => {
+    const v = colabRowView(c);
+    return [v.id, v];
+  }));
 
-  // match exacto
-  const exact = presWeek.days.find((d) => String(d.key || "") === t);
-  if (exact) {
-    dayKey = exact.key;
-  } else {
-    // match "por fecha" (si viniera con hora u otro formato compatible en el prefijo)
-    const t10 = String(t).slice(0, 10);
-    const loose = presWeek.days.find((d) => String(d.key || "").slice(0, 10) === t10);
-    if (loose) {
-      dayKey = loose.key;
-    } else {
-      // fallback: usar el último día visible de la semana cargada
-      dayKey = presWeek.days[presWeek.days.length - 1].key;
-    }
-  }
-
-  // 2) Map id_meli -> valor del día elegido
-  const rowById = new Map(
-    presWeek.rows.map((r) => [String(r.id_meli || ""), r])
-  );
-
-  // 3) Contar "disponibles": NO ausentes (Presente parcial cuenta como presente)
   let n = 0;
-  for (const c of colabs) {
-    const id = String(c.id || c.id_meli || "");
-    if (!id) continue;
+  for (const r of S.presWeek.rows) {
+    const v = r.vals?.[today];
+    if (!isPresentForPlanning_(v)) continue;
 
-    const r = rowById.get(id);
-    if (!r || !r.vals) continue;
-
-    const v = (r.vals && r.vals[dayKey]) ? String(r.vals[dayKey]).trim() : "P";
-    const imp = presImpactFromCode_(v);
-
-    // Disponible = todo lo que NO sea Ausente (incluye "Presente parcial")
-    if (imp.impact !== "Ausente") n++;
+    const meta = colabsById.get(r.id_meli);
+    const bucket = roleBucket(meta?.rol || "");
+    if (bucket === "Líderes") continue;
+    n++;
   }
-
   return n;
 }
 
@@ -2256,8 +2237,8 @@ function renderDashboard() {
       return [v.id, v];
     }));
     for (const r of S.presWeek.rows) {
-      const vday = String(r.vals?.[today] || "").trim();
-      if (vday !== "P") continue;
+      const vday = r.vals?.[today];
+      if (!isPresentForPlanning_(vday)) continue;
       const meta = colabsById.get(r.id_meli);
       const role = normRole(meta?.rol || "");
       presentesPorRol.set(role, (presentesPorRol.get(role) || 0) + 1);
