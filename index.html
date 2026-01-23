@@ -1,9 +1,5 @@
 <!doctype html>
 <html lang="es">
-<link rel="icon" href="/favicon.png" type="image/png" />
-<link rel="icon" sizes="192x192" href="/favicon-192.png" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -113,6 +109,15 @@
     .pill.ok{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.28);color:var(--txt)}
     .pill.warn{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.28);color:var(--txt)}
     .pill.bad{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.28);color:var(--txt)}
+
+    /* UX v12.2 (solo front): simplificación visual */
+    #planControls{display:none!important} /* Asignación por flujo: sin buscador/orden */
+    .chip.neutral{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--txt)}
+    .chip.neutral .dot{background:rgba(148,163,184,.9)}
+    .daily-drafts-summary{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .daily-drafts-summary .btn{padding:7px 10px}
+    #dailyDraftsExpanded{margin-top:10px}
+    #dailyDraftsExpanded[hidden]{display:none!important}
     th.sortable{cursor:pointer;user-select:none}
     th.sortable .srt{margin-left:6px;color:var(--muted);font-size:11px}
 
@@ -556,19 +561,7 @@
     th.sortable .srt{margin-left:6px;opacity:.7;font-size:12px}
     .selbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
     .selbar .btn{padding:9px 12px}
-  
-/* Presentismo statuses (PeopleForce codes) */
-.st { font-weight:700; letter-spacing:.3px; }
-.st.ok { background: rgba(46, 204, 113, .14); border: 1px solid rgba(46, 204, 113, .28); }
-.st.warn { background: rgba(241, 196, 15, .14); border: 1px solid rgba(241, 196, 15, .28); }
-.st.bad { background: rgba(231, 76, 60, .14); border: 1px solid rgba(231, 76, 60, .28); }
-
-td.pres-ok { background: rgba(46, 204, 113, .08); }
-td.pres-warn { background: rgba(241, 196, 15, .10); }
-td.pres-bad { background: rgba(231, 76, 60, .10); }
-tr.pres-group-row td { background: rgba(255,255,255,.03); font-weight: 800; }
-
-</style>
+  </style>
 </head>
 
 <body>
@@ -680,12 +673,19 @@ tr.pres-group-row td { background: rgba(255,255,255,.03); font-weight: 800; }
         </div>
 
         <div class="card" id="dailyDraftsWrap" style="margin-top:14px;display:none">
-          <div class="row" style="margin-bottom:8px">
-            <div class="pill"><b>Mensajes generados (borradores)</b></div>
-            <div class="spacer"></div>
+          <div class="row" style="margin-bottom:8px;align-items:center">
+            <div class="pill"><b>Borradores generados</b></div>
             <div class="pill" id="dailyDraftsMeta"></div>
+            <div class="spacer"></div>
+            <button class="btn" id="btnDailyDraftsGo" type="button">Editar en Borradores</button>
+            <button class="btn" id="btnDailyDraftsToggle" type="button">Ver detalle</button>
           </div>
-          <div class="flow-grid" id="dailyDrafts" style="grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:10px"></div>
+
+          <div class="muted" style="font-size:12px;margin:6px 2px 0 2px">
+            Se guardaron en <b>Slack_Outbox</b>. Esta vista es solo un resumen para evitar duplicar la edición.
+          </div>
+
+          <div class="flow-grid" id="dailyDrafts" style="margin-top:10px;display:none;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:10px"></div>
         </div>
 
         <div class="hr"></div>
@@ -960,25 +960,22 @@ tr.pres-group-row td { background: rgba(255,255,255,.03); font-weight: 800; }
 
           <div style="max-width:220px">
             <div class="muted" style="font-size:12px;margin-bottom:6px">Tipo</div>
-<select id="presTipo">
-  <option value="V">V - Vacaciones</option>
-  <option value="M">M - Licencia médica</option>
-  <option value="E">E - Día de estudio</option>
-  <option value="TP">TP - Trámites prematrimoniales</option>
-  <option value="N">N - Nacimiento</option>
-  <option value="MUD">MUD - Mudanza</option>
-  <option value="MAT">MAT - Maternidad</option>
-  <option value="MATR">MATR - Matrimonio</option>
-  <option value="DUELO">DUELO - Fallecimiento familiar</option>
-  <option value="CF">CF - Cuidado de familiar</option>
-  <option value="DS">DS - Donación de sangre</option>
-
-  <!-- Parciales -->
-  <option value="TM/TR">TM/TR - Turno médico o trámite rápido</option>
-  <option value="CJ">CJ - Citación judicial</option>
-
-  <option value="MHM">MHM - Enfermedad hijo/a menor 12 años</option>
-</select>
+            <select id="presTipo">
+              <option value="AI">V - Vacaciones</option>
+              <option value="E">M - Licencia médica</option>
+              <option value="M">E - Día de estudio</option>
+              <option value="MM">TP - Trámites prematriomniales</option>
+              <option value="V">N - Nacimiento</option>
+              <option value="V">MUD - Mudanza</option>
+              <option value="V">MAT - Maternidad</option>
+              <option value="V">MATR - Matrimonio</option>
+              <option value="V">DUELO - Fallecimiento familiar</option>
+              <option value="V">CF - Cuidado de familiar</option>
+              <option value="V">DS - Donación de sangre</option>
+              <option value="V">TM/TR - Turno médico o trámite rápido</option>
+              <option value="V">CJ - Citación judicial</option>
+              <option value="V">MHM - Enfermedad hijo/a menor 12 años</option>
+            </select>
           </div>
 
           <div style="max-width:220px">
@@ -994,21 +991,7 @@ tr.pres-group-row td { background: rgba(255,255,255,.03); font-weight: 800; }
           <button class="btn primary" id="btnSetLicencia">Guardar</button>
         </div>
 
-        
-<div class="row" style="gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0">
-  <label class="pill" style="cursor:pointer;display:flex;align-items:center;gap:8px">
-    <input type="checkbox" id="presGroupImpact" />
-    <span><b>Agrupar por estado</b></span>
-  </label>
-
-  <div class="pill st ok" title="Presente (P)">P</div>
-  <div class="pill st warn" title="Presente parcial (PAR_*)">PP</div>
-  <div class="pill st bad" title="Ausente (AUS_*)">A</div>
-
-  <div class="muted" style="margin-left:auto;font-size:12px" id="presLegendNote"></div>
-</div>
-
-<div class="hr"></div>
+        <div class="hr"></div>
 
         <div style="overflow:auto">
           <table class="table" id="tblPresWeek">
