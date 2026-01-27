@@ -838,12 +838,10 @@ function renderPlan() {
       const items = itemsRaw.slice().sort((a, b) => String(a.nombre || a.id_meli || "").localeCompare(String(b.nombre || b.id_meli || "")));
       const assigned = items.length;
       const req = reqMap.get(f) || 0;
-      // UX v12.2: el color variable del chip generaba confusión.
-      // Dejar solo el conteo (misma estética siempre).
-      const loadCls = "neutral";
+      const ratio = req ? assigned / req : assigned ? 99 : 0;
+      const loadCls = ratio > 1 ? "bad" : ratio >= 0.8 ? "warn" : "ok";
 
       const status = flowMsgStatus_(f);
-      const showStatus = status && status.label && status.label !== "-";
       const expanded = S._planUI.expanded.has(f);
       const maxPeek = 5;
       const peekNames = items.slice(0, maxPeek).map((x) => {
@@ -875,7 +873,7 @@ function renderPlan() {
             </div>
             <div class="flow-meta">
               <span class="chip ${loadCls}" title="Asignados / Requeridos"><span class="dot"></span>${assigned} / ${req || "—"}</span>
-              ${showStatus ? `<span class="chip ${status.cls}" title="Estado del mensaje"><span class="dot"></span>${escapeHtml(status.label)}</span>` : ``}
+              <span class="chip ${status.cls}" title="Estado del mensaje"><span class="dot"></span>${escapeHtml(status.label)}</span>
               ${canToggle ? `<button class="linkbtn" type="button" data-toggle>${escapeHtml(toggleLabel)}</button>` : ``}
             </div>
           </div>
@@ -1244,12 +1242,9 @@ function renderOutbox() {
 
 function renderDailyDrafts_() {
   const wrap = $("dailyDraftsWrap");
-  const body = $("dailyDraftsBody");
-  const host = $("dailyDraftsExpanded");
+  const host = $("dailyDrafts");
   const meta = $("dailyDraftsMeta");
-  const btnGo = $("btnDailyDraftsGo");
-  const btnToggle = $("btnDailyDraftsToggle");
-  if (!wrap || !body || !host) return;
+  if (!wrap || !host) return;
 
   const pad2 = (n) => String(n).padStart(2, "0");
   const now = new Date();
@@ -1283,72 +1278,24 @@ function renderDailyDrafts_() {
     return { key: k, row: r.row, label, msg: r.mensaje || "" };
   });
 
-  if (!groups.length) {
-    wrap.style.display = "none";
-    return;
-  }
-
   wrap.style.display = "block";
+  if (meta) meta.textContent = `${groups.length} canal${groups.length !== 1 ? "es" : ""}`;
 
-  const draftCount = items.length;
-  const channelsCount = groups.length;
-  if (meta) meta.textContent = `${channelsCount} canal${channelsCount !== 1 ? "es" : ""} · ${draftCount} borrador${draftCount !== 1 ? "es" : ""}`;
-
-  // UX v12.2: evitar duplicación. Este bloque es un resumen con acceso rápido.
-  S.ui = S.ui || {};
-  if (typeof S.ui.dailyDraftsExpanded !== "boolean") S.ui.dailyDraftsExpanded = false;
-
-  if (btnGo) {
-    btnGo.onclick = () => {
-      const t = $("tblDrafts") || $("secOutbox");
-      if (t && t.scrollIntoView) t.scrollIntoView({ behavior: "smooth", block: "start" });
-    };
-  }
-
-  if (btnToggle) {
-    btnToggle.textContent = S.ui.dailyDraftsExpanded ? "Ocultar" : "Ver";
-    btnToggle.onclick = () => {
-      S.ui.dailyDraftsExpanded = !S.ui.dailyDraftsExpanded;
-      renderDailyDrafts_();
-    };
-  }
-
-  if (body) {
-    body.innerHTML = `
-      <div class="muted" style="margin-bottom:10px">
-        Se generaron borradores para hoy. Para editar, programar o enviar, usá la sección <b>Borradores</b>.
-      </div>
-      <div class="row" style="gap:8px;flex-wrap:wrap">
-        ${groups
-          .map((g) => `<span class="pill" style="max-width:100%">${escapeHtml(g.label || "(sin canal)")}</span>`)
-          .join("")}
-      </div>
-    `;
-  }
-
-  // Vista expandida opcional (solo Copiar/Eliminar)
-  if (host) {
-    host.style.display = S.ui.dailyDraftsExpanded ? "grid" : "none";
-    host.innerHTML = S.ui.dailyDraftsExpanded
-      ? groups
-          .map((g) => {
-            return `
-              <div class="card" style="padding:12px">
-                <div class="row" style="margin-bottom:8px">
-                  <div class="pill">${escapeHtml(g.label || "(sin canal)")}</div>
-                  <div class="spacer"></div>
-                  <button class="btn ghost" data-copy="${g.row}">Copiar</button>
-                  <button class="btn ghost" data-del="${g.row}">Eliminar borrador</button>
-                </div>
-                <div style="white-space:pre-wrap">${escapeHtml(g.msg)}</div>
-              </div>
-            `;
-          })
-          .join("")
-      : "";
-  }
-
-  if (!host) return;
+  host.innerHTML = groups
+    .map((g) => {
+      return `
+        <div class="card" style="padding:12px">
+          <div class="row" style="margin-bottom:8px">
+            <div class="pill">${escapeHtml(g.label || "(sin canal)")}</div>
+            <div class="spacer"></div>
+            <button class="btn ghost" data-copy="${g.row}">Copiar</button>
+            <button class="btn ghost" data-del="${g.row}">Eliminar borrador</button>
+          </div>
+          <div style="white-space:pre-wrap">${escapeHtml(g.msg)}</div>
+        </div>
+      `;
+    })
+    .join("");
 
   host.querySelectorAll("[data-copy]").forEach((b) => {
     b.addEventListener("click", async () => {
@@ -2039,6 +1986,31 @@ function renderPresentismo() {
     return;
   }
 
+  // ---- helpers (local, to avoid global collisions) ----
+  const impactFromCode = (code) => {
+    const v = (code || "").toString().trim();
+    if (!v) return { impact: "Presente", cls: "ok", label: "Sin carga" };
+    if (v === "P") return { impact: "Presente", cls: "ok", label: "Presente" };
+    if (v === "TM/TR" || v === "CJ") return { impact: "Presente parcial", cls: "warn", label: "Presente parcial" };
+    // Todo lo demás es ausencia (licencias)
+    return { impact: "Ausente", cls: "bad", label: "Ausente" };
+  };
+
+  const worstImpactOfWeek = (vals, days) => {
+    // Order: Ausente (0) -> Presente parcial (1) -> Presente (2)
+    let k = 2; // assume ok
+    for (const d of days) {
+      const v = vals && vals[d.key] ? String(vals[d.key]) : "";
+      const imp = impactFromCode(v);
+      if (imp.cls === "bad") return 0;
+      if (imp.cls === "warn") k = Math.min(k, 1);
+    }
+    return k;
+  };
+
+  const groupLabelFromKey = (k) => (k === 0 ? "Ausente" : k === 1 ? "Presente parcial" : "Presente");
+  const groupClsFromKey = (k) => (k === 0 ? "bad" : k === 1 ? "warn" : "ok");
+
   const days = S.presWeek.days; // includes isFeriado
   const rows = S.presWeek.rows;
 
@@ -2066,7 +2038,7 @@ function renderPresentismo() {
     return true;
   });
 
-  // sort base (nombre)
+  // sort (solo por colaborador por ahora)
   const sp = S.sort.pres || { key: "nombre", dir: 1 };
   filtered.sort((a, b) => {
     const am = colabsById.get(a.id_meli) || { nombre: a.nombre || a.id_meli };
@@ -2090,42 +2062,8 @@ function renderPresentismo() {
     return;
   }
 
-  // === Agrupar por impacto (semana) ===
-  // Si el usuario activa "Agrupar por estado/impacto", el grupo se calcula mirando TODA la semana:
-  // - Si tuvo al menos un "Presente parcial" (TM/TR o CJ) en cualquier día → grupo "Presente parcial"
-  // - Sino, si tuvo al menos un código != P (y no vacío) → grupo "Ausente"
-  // - Sino → "Presente"
-  const groupEl =
-    document.getElementById("presGroupImpact") ||
-    document.getElementById("presGroupEstado") ||
-    document.getElementById("presGroupImpacto") ||
-    document.querySelector('input[name="presGroupImpact"]') ||
-    document.querySelector('input[name="presGroupEstado"]');
-  const group = !!(groupEl && groupEl.checked);
-
-  const partialSet = new Set(["TM/TR", "CJ"]);
-  const normCode_ = (v) => String(v || "").trim().toUpperCase();
-
-  function impactKeyForRow_(r) {
-    let hasAus = false;
-    let hasPar = false;
-
-    for (const d of days) {
-      const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
-      const code = normCode_(v);
-      if (!code || code === "P") continue;
-
-      if (partialSet.has(code)) {
-        hasPar = true;
-      } else {
-        hasAus = true;
-      }
-    }
-
-    if (hasAus) return { key: 0, label: "Ausente" };
-    if (hasPar) return { key: 1, label: "Presente parcial" };
-    return { key: 2, label: "Presente" };
-  }
+  // Checkbox en UI (Presentismo): "Agrupar por estado / impacto"
+  const group = $("presGroupImpact") ? $("presGroupImpact").checked : false;
 
   const sorted = filtered.slice().sort((a, b) => {
     const ma = colabsById.get(a.id_meli) || {};
@@ -2135,37 +2073,38 @@ function renderPresentismo() {
 
     if (!group) return nameA.localeCompare(nameB);
 
-    const ga = impactKeyForRow_(a).key;
-    const gb = impactKeyForRow_(b).key;
+    // group by WORST impact in the selected week (not "hoy")
+    const ga = worstImpactOfWeek(a.vals, days);
+    const gb = worstImpactOfWeek(b.vals, days);
     if (ga !== gb) return ga - gb;
     return nameA.localeCompare(nameB);
   });
 
   const parts = [];
-  let lastGroup = null;
+  let lastGroupKey = null;
 
   for (const r of sorted) {
     const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
     const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
 
-    if (group) {
-      const g = impactKeyForRow_(r).label;
-      if (g !== lastGroup) {
-        lastGroup = g;
-        parts.push(`<tr><td colspan="${1 + days.length}" style="font-weight:700; padding-top:14px;">${escapeHtml(g)}</td></tr>`);
-      }
+    const gKey = worstImpactOfWeek(r.vals, days);
+    if (group && gKey !== lastGroupKey) {
+      lastGroupKey = gKey;
+      const gLabel = groupLabelFromKey(gKey);
+      const gCls = groupClsFromKey(gKey);
+      parts.push(
+        `<tr><td colspan="${1 + days.length}" class="${gCls}" style="font-weight:700; text-transform:none;">${escapeHtml(gLabel)}</td></tr>`
+      );
     }
 
     const tds = days.map((d) => {
       const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
       const base = d.isFeriado ? "feriado" : "";
-      const code = normCode_(v);
-      const isLic = v && v.trim() !== "P";
-      // Mantengo el comportamiento actual de clases para no tocar lógica/estilos:
-      // - feriado: marca visual
-      // - lic: cualquier código != P
-      const c2 = [base, isLic ? "lic" : ""].filter(Boolean).join(" ");
-      return `<td class="${c2}" title="${escapeHtml(code || "P")}">${escapeHtml(v)}</td>`;
+      const imp = impactFromCode(v);
+      // Importante: "lic" pinta en rojo. Solo aplicarlo a ausentes (bad).
+      const lic = (v && v.trim() !== "P" && imp.cls === "bad") ? "lic" : "";
+      const c2 = [base, imp.cls, lic].filter(Boolean).join(" ");
+      return `<td class="${c2}" title="${escapeHtml(imp.label)}">${escapeHtml(v)}</td>`;
     }).join("");
 
     parts.push(`<tr><td>${escapeHtml(label)}</td>${tds}</tr>`);
@@ -2176,7 +2115,6 @@ function renderPresentismo() {
   const note = $("presLegendNote");
   if (note) note.textContent = group ? "Ordenado por impacto (semana) → nombre" : "Ordenado por nombre";
 }
-
 
 async function onSetLicencia() {
   setErr("");
