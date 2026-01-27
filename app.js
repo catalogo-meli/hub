@@ -2066,7 +2066,7 @@ function renderPresentismo() {
     return true;
   });
 
-  // sort (solo por colaborador por ahora)
+  // sort base (nombre)
   const sp = S.sort.pres || { key: "nombre", dir: 1 };
   filtered.sort((a, b) => {
     const am = colabsById.get(a.id_meli) || { nombre: a.nombre || a.id_meli };
@@ -2090,23 +2090,93 @@ function renderPresentismo() {
     return;
   }
 
-  tbody.innerHTML = filtered
-    .map((r) => {
-      const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
-      const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
-      const tds = days
-        .map((d) => {
-          const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
-          const cls = d.isFeriado ? "feriado" : "";
-          const isLic = v && String(v).trim() !== "P";
-          const c2 = [cls, isLic ? "lic" : ""].filter(Boolean).join(" ");
-          return `<td class="${c2}">${escapeHtml(v)}</td>`;
-        })
-        .join("");
-      return `<tr><td>${escapeHtml(label)}</td>${tds}</tr>`;
-    })
-    .join("");
+  // === Agrupar por impacto (semana) ===
+  // Si el usuario activa "Agrupar por estado/impacto", el grupo se calcula mirando TODA la semana:
+  // - Si tuvo al menos un "Presente parcial" (TM/TR o CJ) en cualquier día → grupo "Presente parcial"
+  // - Sino, si tuvo al menos un código != P (y no vacío) → grupo "Ausente"
+  // - Sino → "Presente"
+  const groupEl =
+    document.getElementById("presGroupImpact") ||
+    document.getElementById("presGroupEstado") ||
+    document.getElementById("presGroupImpacto") ||
+    document.querySelector('input[name="presGroupImpact"]') ||
+    document.querySelector('input[name="presGroupEstado"]');
+  const group = !!(groupEl && groupEl.checked);
+
+  const partialSet = new Set(["TM/TR", "CJ"]);
+  const normCode_ = (v) => String(v || "").trim().toUpperCase();
+
+  function impactKeyForRow_(r) {
+    let hasAus = false;
+    let hasPar = false;
+
+    for (const d of days) {
+      const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
+      const code = normCode_(v);
+      if (!code || code === "P") continue;
+
+      if (partialSet.has(code)) {
+        hasPar = true;
+      } else {
+        hasAus = true;
+      }
+    }
+
+    if (hasAus) return { key: 0, label: "Ausente" };
+    if (hasPar) return { key: 1, label: "Presente parcial" };
+    return { key: 2, label: "Presente" };
+  }
+
+  const sorted = filtered.slice().sort((a, b) => {
+    const ma = colabsById.get(a.id_meli) || {};
+    const mb = colabsById.get(b.id_meli) || {};
+    const nameA = (ma.nombre || a.nombre || "").toString().toLowerCase();
+    const nameB = (mb.nombre || b.nombre || "").toString().toLowerCase();
+
+    if (!group) return nameA.localeCompare(nameB);
+
+    const ga = impactKeyForRow_(a).key;
+    const gb = impactKeyForRow_(b).key;
+    if (ga !== gb) return ga - gb;
+    return nameA.localeCompare(nameB);
+  });
+
+  const parts = [];
+  let lastGroup = null;
+
+  for (const r of sorted) {
+    const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
+    const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
+
+    if (group) {
+      const g = impactKeyForRow_(r).label;
+      if (g !== lastGroup) {
+        lastGroup = g;
+        parts.push(`<tr><td colspan="${1 + days.length}" style="font-weight:700; padding-top:14px;">${escapeHtml(g)}</td></tr>`);
+      }
+    }
+
+    const tds = days.map((d) => {
+      const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
+      const base = d.isFeriado ? "feriado" : "";
+      const code = normCode_(v);
+      const isLic = v && v.trim() !== "P";
+      // Mantengo el comportamiento actual de clases para no tocar lógica/estilos:
+      // - feriado: marca visual
+      // - lic: cualquier código != P
+      const c2 = [base, isLic ? "lic" : ""].filter(Boolean).join(" ");
+      return `<td class="${c2}" title="${escapeHtml(code || "P")}">${escapeHtml(v)}</td>`;
+    }).join("");
+
+    parts.push(`<tr><td>${escapeHtml(label)}</td>${tds}</tr>`);
+  }
+
+  tbody.innerHTML = parts.join("");
+
+  const note = $("presLegendNote");
+  if (note) note.textContent = group ? "Ordenado por impacto (semana) → nombre" : "Ordenado por nombre";
 }
+
 
 async function onSetLicencia() {
   setErr("");
