@@ -2425,6 +2425,15 @@ async function main() {
     renderPresentismo();
   });
 
+  // Agrupar por estado/impacto (no persistir)
+  {
+    const chk = $("presGroupImpact");
+    if (chk) {
+      chk.checked = false;
+      chk.addEventListener("change", () => renderPresentismo());
+    }
+  }
+
   await loadCore();
   mountSlackCompose_();
 }
