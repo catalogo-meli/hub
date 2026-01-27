@@ -556,6 +556,25 @@
       color:#842029;
     }
 
+    /* Presentismo: colores por impacto (ok / warn / bad)
+       - P  => ok (verde)
+       - PP => warn (amarillo)
+       - A  => bad (rojo)
+    */
+    #tblPresWeek td.prescell{border-radius:10px;}
+    #tblPresWeek td.prescell.ok{background:rgba(46,204,113,.14);border:1px solid rgba(46,204,113,.22);}
+    #tblPresWeek td.prescell.warn{background:rgba(241,196,15,.14);border:1px solid rgba(241,196,15,.22);}
+    #tblPresWeek td.prescell.bad{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.22);}
+    [data-theme="light"] #tblPresWeek td.prescell.ok{background:rgba(46,204,113,.10);}
+    [data-theme="light"] #tblPresWeek td.prescell.warn{background:rgba(241,196,15,.10);}
+    [data-theme="light"] #tblPresWeek td.prescell.bad{background:rgba(239,68,68,.08);color:#842029;}
+
+    /* Separador visual para agrupación por estado */
+    #tblPresWeek tr.pres-group-row td{padding-top:14px;padding-bottom:10px;}
+    #tblPresWeek tr.pres-group-row td.ok{border-bottom:4px solid rgba(46,204,113,.35);}
+    #tblPresWeek tr.pres-group-row td.warn{border-bottom:4px solid rgba(241,196,15,.35);}
+    #tblPresWeek tr.pres-group-row td.bad{border-bottom:4px solid rgba(239,68,68,.35);}
+
     th.sortable{cursor:pointer; user-select:none}
     th.sortable:hover{opacity:.9}
     th.sortable .srt{margin-left:6px;opacity:.7;font-size:12px}
@@ -991,7 +1010,7 @@
           <button class="btn primary" id="btnSetLicencia">Guardar</button>
         </div>
 
-        <div class="row" style="align-items:center;gap:10px;margin-top:-2px">
+        <div class="row" style="align-items:center;gap:10px;margin-top:8px">
           <label class="pill" style="cursor:pointer;user-select:none">
             <input type="checkbox" id="presGroupImpact" style="margin:0 8px 0 0;accent-color:var(--pri)" />
             <b>Agrupar por estado</b>

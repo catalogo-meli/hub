@@ -2093,7 +2093,7 @@ function renderPresentismo() {
       const gLabel = groupLabelFromKey(gKey);
       const gCls = groupClsFromKey(gKey);
       parts.push(
-        `<tr><td colspan="${1 + days.length}" class="${gCls}" style="font-weight:700; text-transform:none;">${escapeHtml(gLabel)}</td></tr>`
+        `<tr class="pres-group-row"><td colspan="${1 + days.length}" class="${gCls}" style="font-weight:700; text-transform:none;">${escapeHtml(gLabel)}</td></tr>`
       );
     }
 
@@ -2101,9 +2101,9 @@ function renderPresentismo() {
       const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
       const base = d.isFeriado ? "feriado" : "";
       const imp = impactFromCode(v);
-      // Importante: "lic" pinta en rojo. Solo aplicarlo a ausentes (bad).
-      const lic = (v && v.trim() !== "P" && imp.cls === "bad") ? "lic" : "";
-      const c2 = [base, imp.cls, lic].filter(Boolean).join(" ");
+      // "prescell" asegura estilo consistente en todas las celdas con estado (incluye "P").
+      const prescell = v && v.trim() ? "prescell" : "";
+      const c2 = [base, prescell, imp.cls].filter(Boolean).join(" ");
       return `<td class="${c2}" title="${escapeHtml(imp.label)}">${escapeHtml(v)}</td>`;
     }).join("");
 
