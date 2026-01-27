@@ -2017,6 +2017,43 @@ async function setHabilitacion(idMeli, flujo, habilitado, fijo) {
 }
 
 /* ========= Presentismo ========= */
+
+function presImpactFromCode_(code) {
+  const v = (code || "").toString().trim();
+
+  // vacío -> tratamos como Presente (por cómo se arma la grilla)
+  if (!v) return { impact: "Presente", cls: "pres-ok", label: "P" };
+
+  // Presente
+  if (v === "P") return { impact: "Presente", cls: "pres-ok", label: "P" };
+
+  // Compatibilidad con esquema anterior
+  if (v.startsWith("AUS_") || v === "AUS") return { impact: "Ausente", cls: "pres-bad", label: v };
+  if (v.startsWith("PAR_") || v === "PP") return { impact: "Presente parcial", cls: "pres-warn", label: v };
+
+  // Esquema nuevo (códigos manuales / PF)
+  // PAR (presente parcial)
+  const isPar =
+    v === "TM/TR" ||
+    v === "CJ";
+
+  if (isPar) return { impact: "Presente parcial", cls: "pres-warn", label: v };
+
+  // Todo lo que NO sea P y NO sea PAR lo tratamos como AUSENTE (licencia/ausencia)
+  return { impact: "Ausente", cls: "pres-bad", label: v };
+}
+
+function isPresentForPlanning_(code) {
+  const imp = presImpactFromCode_(code || "");
+  return imp.impact === "Presente" || imp.impact === "Presente parcial";
+}
+
+function presGroupKey_(code) {
+  const i = presImpactFromCode_(code).impact;
+  if (i === "Ausente") return 0;
+  if (i === "Presente parcial") return 1;
+  return 2; // Presente / otros
+}
 function mountPresentismoSelect() {
   const sel = $("presSelectColab");
   if (!sel) return;
@@ -2090,22 +2127,88 @@ function renderPresentismo() {
     return;
   }
 
-  tbody.innerHTML = filtered
-    .map((r) => {
-      const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
-      const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
-      const tds = days
-        .map((d) => {
-          const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
-          const cls = d.isFeriado ? "feriado" : "";
-          const isLic = v && String(v).trim() !== "P";
-          const c2 = [cls, isLic ? "lic" : ""].filter(Boolean).join(" ");
-          return `<td class="${c2}">${escapeHtml(v)}</td>`;
-        })
-        .join("");
-      return `<tr><td>${escapeHtml(label)}</td>${tds}</tr>`;
-    })
-    .join("");
+  const group = $("presGroupImpact") ? $("presGroupImpact").checked : false;
+
+  // ====== NUEVO: agrupar por IMPACTO DE LA SEMANA (peor valor en cualquier día) ======
+  // Construye el set de códigos PAR desde config (si está), y fallback a los que ya usás.
+  const PAR_SET = (() => {
+    const s = new Set();
+    const cfg = S.licencias_pf || S.licenciasPF || S.pfLicencias || S.pfLicenciasCfg || [];
+    if (Array.isArray(cfg) && cfg.length) {
+      cfg.forEach((x) => {
+        const code = String(x.codigo_presentismo || x.codigo || x.code || "").trim().toUpperCase();
+        const impacto = String(x.impacto_hub || x.impacto || "").trim().toLowerCase();
+        if (code && impacto === "presente parcial") s.add(code);
+      });
+    }
+    // fallback mínimo por si no está cargado cfg en front
+    if (!s.size) ["TM/TR", "CJ"].forEach((c) => s.add(c));
+    return s;
+  })();
+
+  // 0=AUS, 1=PAR, 2=P (mientras más bajo, peor)
+  const weekKeyForRow_ = (r) => {
+    let worst = 2;
+    for (const d of days) {
+      const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]).trim().toUpperCase() : "";
+      let k = 2;
+      if (!v || v === "P") k = 2;
+      else if (PAR_SET.has(v)) k = 1;
+      else k = 0; // cualquier otro código ≠ P y ≠ PAR => AUS
+      if (k < worst) worst = k;
+      if (worst === 0) break;
+    }
+    return worst;
+  };
+
+  const groupNameFromKey_ = (k) => (k === 0 ? "Ausente" : (k === 1 ? "Presente parcial" : "Presente"));
+
+  const sorted = filtered.slice().sort((a, b) => {
+    const ma = colabsById.get(a.id_meli) || {};
+    const mb = colabsById.get(b.id_meli) || {};
+    const nameA = (ma.nombre || a.nombre || "").toString().toLowerCase();
+    const nameB = (mb.nombre || b.nombre || "").toString().toLowerCase();
+
+    if (!group) return nameA.localeCompare(nameB);
+
+    const ga = weekKeyForRow_(a);
+    const gb = weekKeyForRow_(b);
+    if (ga !== gb) return ga - gb; // AUS primero, luego PAR, luego P
+    return nameA.localeCompare(nameB);
+  });
+
+  const parts = [];
+  let lastGroup = null;
+
+  for (const r of sorted) {
+    const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
+    const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
+
+    // NUEVO: header por grupo usando impacto semanal
+    const gName = groupNameFromKey_(weekKeyForRow_(r));
+    if (group && gName !== lastGroup) {
+      lastGroup = gName;
+      parts.push(`<tr class="pres-group-row"><td colspan="${1 + days.length}">${escapeHtml(gName)}</td></tr>`);
+    }
+
+    const tds = days.map((d) => {
+      const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
+      const base = d.isFeriado ? "feriado" : "";
+     const imp = presImpactFromCode_(v);
+// El color se define SOLO por impacto (ok / warn / bad)
+const c2 = [base, imp.cls]
+  .filter(Boolean)
+  .join(" ");
+      return `<td class="${c2}" title="${escapeHtml(imp.label)}">${escapeHtml(v)}</td>`;
+    }).join("");
+
+    parts.push(`<tr><td>${escapeHtml(label)}</td>${tds}</tr>`);
+  }
+
+  tbody.innerHTML = parts.join("");
+
+  const note = $("presLegendNote");
+  if (note) note.textContent = group ? "Ordenado por estado → nombre" : "Ordenado por nombre";
 }
 
 async function onSetLicencia() {
