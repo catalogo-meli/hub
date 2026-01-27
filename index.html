@@ -991,6 +991,18 @@
           <button class="btn primary" id="btnSetLicencia">Guardar</button>
         </div>
 
+        <div class="row" style="align-items:center;gap:10px;margin-top:-2px">
+          <label class="pill" style="cursor:pointer;user-select:none">
+            <input type="checkbox" id="presGroupImpact" style="margin:0 8px 0 0;accent-color:var(--pri)" />
+            <b>Agrupar por estado</b>
+          </label>
+          <span class="pill ok" title="Presente"><b>P</b></span>
+          <span class="pill warn" title="Presente parcial (TM/TR, CJ)"><b>PP</b></span>
+          <span class="pill bad" title="Ausente (V, M, E, etc.)"><b>A</b></span>
+          <div class="spacer"></div>
+          <div class="muted" id="presLegendNote" style="font-size:12px"></div>
+        </div>
+
         <div class="hr"></div>
 
         <div style="overflow:auto">
