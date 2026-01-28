@@ -58,6 +58,37 @@ function fmtDateDMY(isoYMD) {
   return `${String(d).padStart(2, "0")}-${String(m).padStart(2, "0")}-${y}`;
 }
 
+// ===== Semana labels (ISO week, Monday-Friday) =====
+function isoWeekMonday_(year, week) {
+  // ISO 8601: week 1 is the week with Jan 4th in it.
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  // getUTCDay: 0=Sun..6=Sat. Convert to Monday-based (1..7)
+  const jan4Dow = jan4.getUTCDay() || 7;
+  // Monday of ISO week 1
+  const week1Mon = new Date(jan4);
+  week1Mon.setUTCDate(jan4.getUTCDate() - (jan4Dow - 1));
+  const mon = new Date(week1Mon);
+  mon.setUTCDate(week1Mon.getUTCDate() + (week - 1) * 7);
+  return mon; // UTC date
+}
+
+function weekRangeLabel_(wCode, baseYear) {
+  // Accepts "W1", "W01", "W5".
+  const m = String(wCode || "").trim().match(/^W\s*(\d{1,2})$/i);
+  if (!m) return String(wCode || "");
+  const week = parseInt(m[1], 10);
+  if (!Number.isFinite(week) || week <= 0) return String(wCode || "");
+  const mon = isoWeekMonday_(baseYear, week);
+  const fri = new Date(mon);
+  fri.setUTCDate(mon.getUTCDate() + 4);
+  const fmt = (d) => {
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}`;
+  };
+  return `${String(wCode).trim()} ${fmt(mon)} - ${fmt(fri)}`;
+}
+
 function fmtDateAny(val) {
   const ts = parseDateAnyToTs_(val);
   if (!Number.isFinite(ts)) return "—";
@@ -263,6 +294,79 @@ function mountMultiSelect(targetId, { title, items, onChange }) {
       onChange?.(new Set(state.selected));
     },
   };
+}
+
+/* ========= SingleSelect (Semana) ========= */
+// Single-select (radio) with the same visual pattern as .ms (Roles/Equipo),
+// but with a defaultLabel when nothing is selected.
+function mountSingleSelect(targetId, { title, items, defaultLabel = "-", onChange }) {
+  const host = $(targetId);
+  if (!host) return null;
+
+  host.className = "ms";
+  host.innerHTML = `
+    <button type="button" class="ms-btn" aria-haspopup="listbox" aria-expanded="false">
+      <span class="ms-label">${escapeHtml(title || "")}</span>
+      <span class="ms-value" data-ms-value>${escapeHtml(defaultLabel)}</span>
+      <span class="ms-caret">▾</span>
+    </button>
+    <div class="ms-panel" role="listbox" tabindex="-1" style="display:none">
+      ${items
+        .map(
+          (it, i) => `
+            <label class="ms-opt">
+              <input type="radio" name="${targetId}_radio" value="${escapeHtml(it.value)}" ${i === 0 ? "" : ""}>
+              <span>${escapeHtml(it.label)}</span>
+            </label>`
+        )
+        .join("")}
+    </div>
+  `;
+
+  const btn = host.querySelector(".ms-btn");
+  const panel = host.querySelector(".ms-panel");
+  const valueEl = host.querySelector("[data-ms-value]");
+  const radios = Array.from(host.querySelectorAll("input[type='radio']"));
+
+  function close() {
+    panel.style.display = "none";
+    btn.setAttribute("aria-expanded", "false");
+  }
+  function open() {
+    panel.style.display = "block";
+    btn.setAttribute("aria-expanded", "true");
+  }
+  function toggle() {
+    if (panel.style.display === "none" || !panel.style.display) open();
+    else close();
+  }
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggle();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!host.contains(e.target)) close();
+  });
+
+  function setValue(next) {
+    const found = items.find((x) => x.value === next);
+    valueEl.textContent = found ? found.label : defaultLabel;
+    radios.forEach((r) => (r.checked = r.value === next));
+  }
+
+  radios.forEach((r) => {
+    r.addEventListener("change", () => {
+      const v = r.value;
+      const found = items.find((x) => x.value === v);
+      valueEl.textContent = found ? found.label : defaultLabel;
+      close();
+      onChange && onChange(v);
+    });
+  });
+
+  return { setValue, close, open };
 }
 
 function mountSearch(inputId, wrapId, clearId, onChange) {
@@ -482,60 +586,41 @@ async function refreshPresentismo() {
 }
 
 function syncPresSemanaSelect_() {
-  const sel = $("presSemana");
-  if (!sel) return;
+  // Reusa el mismo patrón visual de Roles/Equipo (ms), pero en single-select.
+  const host = $("msSemanaPres");
+  if (!host) return;
 
   const opts = (S.presSemanas || []).filter(Boolean);
-  // Mantengo selección si existe; si no, vacío => "hoy" (endpoint por fecha)
-  const current = S.presSemanaSel;
+  const y = new Date().getFullYear();
 
-  const pad2 = (n) => String(n).padStart(2, "0");
-  const fmtDM = (d) => `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
+  const items = opts
+    .map((wRaw) => {
+      const w = String(wRaw || "").trim();
+      if (!w) return null;
+      // Label visible: W1 29/12 - 02/01
+      const label = weekRangeLabel_(w, y);
+      return { value: w, label };
+    })
+    .filter(Boolean);
 
-  const isoWeekOfDate_ = (date) => {
-    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    const day = d.getUTCDay() || 7; // Mon=1..Sun=7
-    d.setUTCDate(d.getUTCDate() + 4 - day);
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    const weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
-    return { year: d.getUTCFullYear(), week: weekNo };
-  };
+  // Si la selección actual no existe en la lista, vuelvo a "Actual" (no mostrar vacío).
+  const current = items.some((it) => it.value === S.presSemanaSel) ? S.presSemanaSel : "";
+  S.presSemanaSel = current;
 
-  const isoWeekMonday_ = (year, week) => {
-    // ISO week 1 is the week with Jan 4th in it
-    const jan4 = new Date(Date.UTC(year, 0, 4));
-    const day = jan4.getUTCDay() || 7;
-    const mondayWeek1 = new Date(jan4);
-    mondayWeek1.setUTCDate(jan4.getUTCDate() - (day - 1));
-    const monday = new Date(mondayWeek1);
-    monday.setUTCDate(mondayWeek1.getUTCDate() + (week - 1) * 7);
-    return monday;
-  };
-
-  const weekLabel_ = (w, baseYear) => {
-    const m = String(w || "").match(/^W(\d{1,2})$/i);
-    if (!m) return String(w || "");
-    const wn = Number(m[1]);
-    const mon = isoWeekMonday_(baseYear, wn);
-    const fri = new Date(mon);
-    fri.setUTCDate(mon.getUTCDate() + 4);
-    return `W${wn} ${fmtDM(new Date(mon))} - ${fmtDM(new Date(fri))}`;
-  };
-
-  // Año base: si ya hay una semana cargada, uso su fecha; si no, hoy.
-  const baseDate = (S.presWeek && S.presWeek.days && S.presWeek.days[0] && S.presWeek.days[0].key)
-    ? new Date(`${S.presWeek.days[0].key}T00:00:00`)
-    : new Date();
-  const { year: baseYear, week: curW } = isoWeekOfDate_(baseDate);
-  const curLabel = weekLabel_(`W${curW}`, baseYear);
-
-  sel.innerHTML = [`<option value="">${escapeHtml(curLabel)}</option>`]
-    .concat(opts.map((w) => `<option value="${escapeAttr(w)}">${escapeHtml(weekLabel_(w, baseYear))}</option>`))
-    .join("");
-
-  // restore selection
-  if (current && opts.includes(current)) sel.value = current;
-  else sel.value = "";
+  // Render
+  mountSingleSelect("msSemanaPres", {
+    title: "Semana",
+    defaultLabel: "Actual",
+    items,
+    onChange: async (val) => {
+      // val == null => "Actual"
+      const next = val ? String(val) : "";
+      if (next === S.presSemanaSel) return;
+      S.presSemanaSel = next;
+      await refreshPresentismo();
+      renderPresentismo();
+    },
+  }).setValue(current || null);
 }
 
 /* ========= Operativa diaria: Flujos autosave ========= */
@@ -2317,14 +2402,7 @@ async function main() {
     toast("Presentismo", "Actualizado");
   });
 
-  $("presSemana")?.addEventListener("change", async (e) => {
-    S.presSemanaSel = String(e?.target?.value || "").trim();
-    setBusy("Presentismo", S.presSemanaSel ? `Cargando ${S.presSemanaSel}...` : "Cargando semana actual...");
-    await refreshPresentismo();
-    renderPresentismo();
-    renderDashboard();
-    clearBusy();
-  });
+  // Semana is rendered as a .ms single-select (handled inside syncPresSemanaSelect_)
 
   $("btnSetLicencia")?.addEventListener("click", onSetLicencia);
 
