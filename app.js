@@ -58,36 +58,51 @@ function fmtDateDMY(isoYMD) {
   return `${String(d).padStart(2, "0")}-${String(m).padStart(2, "0")}-${y}`;
 }
 
-// ===== Semana labels (ISO week, Monday-Friday) =====
-function isoWeekMonday_(year, week) {
-  // ISO 8601: week 1 is the week with Jan 4th in it.
-  const jan4 = new Date(Date.UTC(year, 0, 4));
-  // getUTCDay: 0=Sun..6=Sat. Convert to Monday-based (1..7)
-  const jan4Dow = jan4.getUTCDay() || 7;
-  // Monday of ISO week 1
-  const week1Mon = new Date(jan4);
-  week1Mon.setUTCDate(jan4.getUTCDate() - (jan4Dow - 1));
-  const mon = new Date(week1Mon);
-  mon.setUTCDate(week1Mon.getUTCDate() + (week - 1) * 7);
-  return mon; // UTC date
+function fmtDDMM_(d) {
+  if (!(d instanceof Date) || isNaN(d.getTime())) return "";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}`;
 }
 
-function weekRangeLabel_(wCode, baseYear) {
-  // Accepts "W1", "W01", "W5".
-  const m = String(wCode || "").trim().match(/^W\s*(\d{1,2})$/i);
-  if (!m) return String(wCode || "");
-  const week = parseInt(m[1], 10);
-  if (!Number.isFinite(week) || week <= 0) return String(wCode || "");
-  const mon = isoWeekMonday_(baseYear, week);
-  const fri = new Date(mon);
-  fri.setUTCDate(mon.getUTCDate() + 4);
-  const fmt = (d) => {
-    const dd = String(d.getUTCDate()).padStart(2, "0");
-    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-    return `${dd}/${mm}`;
-  };
-  return `${String(wCode).trim()} ${fmt(mon)} - ${fmt(fri)}`;
+// ISO week (lunes) start date for a given ISO year + week number
+function isoWeekMonday_(isoYear, weekNum) {
+  const jan4 = new Date(isoYear, 0, 4); // always in ISO week 1
+  const day = jan4.getDay() || 7; // 1..7 (Mon..Sun), with Sun=7
+  const mondayWeek1 = new Date(jan4);
+  mondayWeek1.setDate(jan4.getDate() - (day - 1));
+  const monday = new Date(mondayWeek1);
+  monday.setDate(mondayWeek1.getDate() + (weekNum - 1) * 7);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
 }
+
+function presWeekLabelWithRange_(weekKey, anchorYear) {
+  const raw = String(weekKey || "").trim();
+  if (!raw) return raw;
+
+  // Accept "W1" or "2026-W1" / "2026W1"
+  let y = Number(anchorYear) || new Date().getFullYear();
+  let w = null;
+
+  let m = raw.match(/^(\d{4})\s*-\s*W(\d{1,2})$/i) || raw.match(/^(\d{4})\s*W(\d{1,2})$/i);
+  if (m) {
+    y = Number(m[1]);
+    w = Number(m[2]);
+  } else {
+    m = raw.match(/^W(\d{1,2})$/i);
+    if (m) w = Number(m[1]);
+  }
+
+  if (!w || w < 1 || w > 53) return raw;
+
+  const mon = isoWeekMonday_(y, w);
+  const fri = new Date(mon);
+  fri.setDate(mon.getDate() + 4);
+
+  return `W${w} ${fmtDDMM_(mon)} - ${fmtDDMM_(fri)}`;
+}
+
 
 function fmtDateAny(val) {
   const ts = parseDateAnyToTs_(val);
@@ -294,79 +309,6 @@ function mountMultiSelect(targetId, { title, items, onChange }) {
       onChange?.(new Set(state.selected));
     },
   };
-}
-
-/* ========= SingleSelect (Semana) ========= */
-// Single-select (radio) with the same visual pattern as .ms (Roles/Equipo),
-// but with a defaultLabel when nothing is selected.
-function mountSingleSelect(targetId, { title, items, defaultLabel = "-", onChange }) {
-  const host = $(targetId);
-  if (!host) return null;
-
-  host.className = "ms";
-  host.innerHTML = `
-    <button type="button" class="ms-btn" aria-haspopup="listbox" aria-expanded="false">
-      <span class="ms-label">${escapeHtml(title || "")}</span>
-      <span class="ms-value" data-ms-value>${escapeHtml(defaultLabel)}</span>
-      <span class="ms-caret">▾</span>
-    </button>
-    <div class="ms-panel" role="listbox" tabindex="-1" style="display:none">
-      ${items
-        .map(
-          (it, i) => `
-            <label class="ms-opt">
-              <input type="radio" name="${targetId}_radio" value="${escapeHtml(it.value)}" ${i === 0 ? "" : ""}>
-              <span>${escapeHtml(it.label)}</span>
-            </label>`
-        )
-        .join("")}
-    </div>
-  `;
-
-  const btn = host.querySelector(".ms-btn");
-  const panel = host.querySelector(".ms-panel");
-  const valueEl = host.querySelector("[data-ms-value]");
-  const radios = Array.from(host.querySelectorAll("input[type='radio']"));
-
-  function close() {
-    panel.style.display = "none";
-    btn.setAttribute("aria-expanded", "false");
-  }
-  function open() {
-    panel.style.display = "block";
-    btn.setAttribute("aria-expanded", "true");
-  }
-  function toggle() {
-    if (panel.style.display === "none" || !panel.style.display) open();
-    else close();
-  }
-
-  btn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    toggle();
-  });
-
-  document.addEventListener("click", (e) => {
-    if (!host.contains(e.target)) close();
-  });
-
-  function setValue(next) {
-    const found = items.find((x) => x.value === next);
-    valueEl.textContent = found ? found.label : defaultLabel;
-    radios.forEach((r) => (r.checked = r.value === next));
-  }
-
-  radios.forEach((r) => {
-    r.addEventListener("change", () => {
-      const v = r.value;
-      const found = items.find((x) => x.value === v);
-      valueEl.textContent = found ? found.label : defaultLabel;
-      close();
-      onChange && onChange(v);
-    });
-  });
-
-  return { setValue, close, open };
 }
 
 function mountSearch(inputId, wrapId, clearId, onChange) {
@@ -586,42 +528,24 @@ async function refreshPresentismo() {
 }
 
 function syncPresSemanaSelect_() {
-  // Reusa el mismo patrón visual de Roles/Equipo (ms), pero en single-select.
-  const host = $("msSemanaPres");
-  if (!host) return;
+  const sel = $("presSemana");
+  if (!sel) return;
 
-  const opts = (S.presSemanas || []).filter(Boolean);
-  const y = new Date().getFullYear();
+  // anchor year: from current loaded week (if available) to handle year boundaries correctly
+  const anchorYear = (S.presWeek && S.presWeek.days && S.presWeek.days[0] && S.presWeek.days[0].key)
+    ? Number(String(S.presWeek.days[0].key).slice(0, 4))
+    : new Date().getFullYear();
 
-  const items = opts
-    .map((wRaw) => {
-      const w = String(wRaw || "").trim();
-      if (!w) return null;
-      // Label visible: W1 29/12 - 02/01
-      const label = weekRangeLabel_(w, y);
-      return { value: w, label };
-    })
-    .filter(Boolean);
+  const cur = sel.value || "";
+  sel.innerHTML = (S.presetWeeks || []).map((w) => {
+    const val = String(w);
+    const label = presWeekLabelWithRange_(val, anchorYear);
+    return `<option value="${escapeHtml(val)}">${escapeHtml(label)}</option>`;
+  }).join("");
 
-  // Si la selección actual no existe en la lista, vuelvo a "Actual" (no mostrar vacío).
-  const current = items.some((it) => it.value === S.presSemanaSel) ? S.presSemanaSel : "";
-  S.presSemanaSel = current;
-
-  // Render
-  mountSingleSelect("msSemanaPres", {
-    title: "Semana",
-    defaultLabel: "Actual",
-    items,
-    onChange: async (val) => {
-      // val == null => "Actual"
-      const next = val ? String(val) : "";
-      if (next === S.presSemanaSel) return;
-      S.presSemanaSel = next;
-      await refreshPresentismo();
-      renderPresentismo();
-    },
-  }).setValue(current || null);
+  if (cur) sel.value = cur;
 }
+
 
 /* ========= Operativa diaria: Flujos autosave ========= */
 const saveFlujoDebounced = debounce(async (flujo, perfiles, channel_id) => {
@@ -2111,8 +2035,36 @@ function renderPresentismo() {
     return;
   }
 
+  // ---- helpers (local, to avoid global collisions) ----
+  const impactFromCode = (code) => {
+    const v = (code || "").toString().trim();
+    if (!v) return { impact: "Presente", cls: "ok", label: "Sin carga" };
+    if (v === "P") return { impact: "Presente", cls: "ok", label: "Presente" };
+    if (v === "TM/TR" || v === "CJ") return { impact: "Presente parcial", cls: "warn", label: "Presente parcial" };
+    // Todo lo demás es ausencia (licencias)
+    return { impact: "Ausente", cls: "bad", label: "Ausente" };
+  };
+
+  const worstImpactOfWeek = (vals, days) => {
+    // Order: Ausente (0) -> Presente parcial (1) -> Presente (2)
+    let k = 2; // assume ok
+    for (const d of days) {
+      const v = vals && vals[d.key] ? String(vals[d.key]) : "";
+      const imp = impactFromCode(v);
+      if (imp.cls === "bad") return 0;
+      if (imp.cls === "warn") k = Math.min(k, 1);
+    }
+    return k;
+  };
+
+  const groupLabelFromKey = (k) => (k === 0 ? "Ausente" : k === 1 ? "Presente parcial" : "Presente");
+  const groupClsFromKey = (k) => (k === 0 ? "bad" : k === 1 ? "warn" : "ok");
+
   const days = S.presWeek.days; // includes isFeriado
   const rows = S.presWeek.rows;
+
+  // "Hoy" (formato YYYY-MM-DD) para resaltar la columna cuando cae dentro de la semana visible
+  const todayKey = todayYMD();
 
   const colabsById = new Map((S.colabs || []).map((c) => {
     const v = colabRowView(c);
@@ -2150,7 +2102,9 @@ function renderPresentismo() {
   thead.innerHTML = `
     <tr>
       <th class="sortable" data-sort="nombre" style="min-width:240px">Colaborador<span class="srt" data-srt="nombre"></span></th>
-      ${days.map((d) => `<th class="nowrap ${d.isFeriado ? "feriado" : ""}">${fmtDateDMY(d.key)}</th>`).join("")}
+      ${days
+        .map((d) => `<th class="nowrap ${d.isFeriado ? "feriado" : ""} ${d.key === todayKey ? "todaycol" : ""}">${fmtDateDMY(d.key)}</th>`)
+        .join("")}
     </tr>
   `;
 
@@ -2162,22 +2116,59 @@ function renderPresentismo() {
     return;
   }
 
-  tbody.innerHTML = filtered
-    .map((r) => {
-      const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
-      const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
-      const tds = days
-        .map((d) => {
-          const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
-          const cls = d.isFeriado ? "feriado" : "";
-          const isLic = v && String(v).trim() !== "P";
-          const c2 = [cls, isLic ? "lic" : ""].filter(Boolean).join(" ");
-          return `<td class="${c2}">${escapeHtml(v)}</td>`;
-        })
-        .join("");
-      return `<tr><td>${escapeHtml(label)}</td>${tds}</tr>`;
-    })
-    .join("");
+  // Checkbox en UI (Presentismo): "Agrupar por estado / impacto"
+  const group = $("presGroupImpact") ? $("presGroupImpact").checked : false;
+
+  const sorted = filtered.slice().sort((a, b) => {
+    const ma = colabsById.get(a.id_meli) || {};
+    const mb = colabsById.get(b.id_meli) || {};
+    const nameA = (ma.nombre || a.nombre || "").toString().toLowerCase();
+    const nameB = (mb.nombre || b.nombre || "").toString().toLowerCase();
+
+    if (!group) return nameA.localeCompare(nameB);
+
+    // group by WORST impact in the selected week (not "hoy")
+    const ga = worstImpactOfWeek(a.vals, days);
+    const gb = worstImpactOfWeek(b.vals, days);
+    if (ga !== gb) return ga - gb;
+    return nameA.localeCompare(nameB);
+  });
+
+  const parts = [];
+  let lastGroupKey = null;
+
+  for (const r of sorted) {
+    const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
+    const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
+
+    const gKey = worstImpactOfWeek(r.vals, days);
+    if (group && gKey !== lastGroupKey) {
+      lastGroupKey = gKey;
+      const gLabel = groupLabelFromKey(gKey);
+      const gCls = groupClsFromKey(gKey);
+      parts.push(
+        `<tr class="pres-group-row"><td colspan="${1 + days.length}" class="${gCls}" style="font-weight:700; text-transform:none;">${escapeHtml(gLabel)}</td></tr>`
+      );
+    }
+
+    const tds = days.map((d) => {
+      const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
+      const base = d.isFeriado ? "feriado" : "";
+      const todayCls = d.key === todayKey ? "todaycol" : "";
+      const imp = impactFromCode(v);
+      // "prescell" asegura estilo consistente en todas las celdas con estado (incluye "P").
+      const prescell = v && v.trim() ? "prescell" : "";
+      const c2 = [base, todayCls, prescell, imp.cls].filter(Boolean).join(" ");
+      return `<td class="${c2}" title="${escapeHtml(imp.label)}">${escapeHtml(v)}</td>`;
+    }).join("");
+
+    parts.push(`<tr><td>${escapeHtml(label)}</td>${tds}</tr>`);
+  }
+
+  tbody.innerHTML = parts.join("");
+
+  const note = $("presLegendNote");
+  if (note) note.textContent = group ? "Ordenado por impacto (semana) → nombre" : "Ordenado por nombre";
 }
 
 async function onSetLicencia() {
@@ -2402,7 +2393,14 @@ async function main() {
     toast("Presentismo", "Actualizado");
   });
 
-  // Semana is rendered as a .ms single-select (handled inside syncPresSemanaSelect_)
+  $("presSemana")?.addEventListener("change", async (e) => {
+    S.presSemanaSel = String(e?.target?.value || "").trim();
+    setBusy("Presentismo", S.presSemanaSel ? `Cargando ${S.presSemanaSel}...` : "Cargando semana actual...");
+    await refreshPresentismo();
+    renderPresentismo();
+    renderDashboard();
+    clearBusy();
+  });
 
   $("btnSetLicencia")?.addEventListener("click", onSetLicencia);
 
@@ -2481,6 +2479,15 @@ async function main() {
     $("searchPres").value = ""; $("searchPresWrap").classList.remove("has");
     renderPresentismo();
   });
+
+  // Agrupar por estado/impacto (no persistir)
+  {
+    const chk = $("presGroupImpact");
+    if (chk) {
+      chk.checked = false;
+      chk.addEventListener("change", () => renderPresentismo());
+    }
+  }
 
   await loadCore();
   mountSlackCompose_();
