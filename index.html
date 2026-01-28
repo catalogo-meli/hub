@@ -561,10 +561,15 @@
        - PP => warn (amarillo)
        - A  => bad (rojo)
     */
-    #tblPresWeek td.prescell{border-radius:10px;}
-    #tblPresWeek td.prescell.ok{background:rgba(46,204,113,.14);border:1px solid rgba(46,204,113,.22);}
-    #tblPresWeek td.prescell.warn{background:rgba(241,196,15,.14);border:1px solid rgba(241,196,15,.22);}
-    #tblPresWeek td.prescell.bad{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.22);}
+    /* Presentismo: solo color por estado (sin tarjetas/rectángulos) */
+    #tblPresWeek td.prescell{border-radius:0;}
+    #tblPresWeek td.prescell.ok{background:rgba(46,204,113,.14);border:none;}
+    #tblPresWeek td.prescell.warn{background:rgba(241,196,15,.14);border:none;}
+    #tblPresWeek td.prescell.bad{background:rgba(239,68,68,.12);border:none;}
+
+    /* Resaltado de columna "hoy" */
+    #tblPresWeek th.todaycol{box-shadow:inset 0 -2px 0 rgba(96,165,250,.85);}
+    #tblPresWeek td.todaycol{box-shadow:inset 0 0 0 2px rgba(96,165,250,.25);}
     [data-theme="light"] #tblPresWeek td.prescell.ok{background:rgba(46,204,113,.10);}
     [data-theme="light"] #tblPresWeek td.prescell.warn{background:rgba(241,196,15,.10);}
     [data-theme="light"] #tblPresWeek td.prescell.bad{background:rgba(239,68,68,.08);color:#842029;}
@@ -1010,7 +1015,7 @@
           <button class="btn primary" id="btnSetLicencia">Guardar</button>
         </div>
 
-        <div class="row" style="align-items:center;gap:10px;margin-top:8px">
+        <div class="row" style="align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap">
           <label class="pill" style="cursor:pointer;user-select:none">
             <input type="checkbox" id="presGroupImpact" style="margin:0 8px 0 0;accent-color:var(--pri)" />
             <b>Agrupar por estado</b>

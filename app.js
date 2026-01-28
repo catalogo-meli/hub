@@ -2014,6 +2014,9 @@ function renderPresentismo() {
   const days = S.presWeek.days; // includes isFeriado
   const rows = S.presWeek.rows;
 
+  // "Hoy" (formato YYYY-MM-DD) para resaltar la columna cuando cae dentro de la semana visible
+  const todayKey = todayYMD();
+
   const colabsById = new Map((S.colabs || []).map((c) => {
     const v = colabRowView(c);
     return [v.id, v];
@@ -2050,7 +2053,9 @@ function renderPresentismo() {
   thead.innerHTML = `
     <tr>
       <th class="sortable" data-sort="nombre" style="min-width:240px">Colaborador<span class="srt" data-srt="nombre"></span></th>
-      ${days.map((d) => `<th class="nowrap ${d.isFeriado ? "feriado" : ""}">${fmtDateDMY(d.key)}</th>`).join("")}
+      ${days
+        .map((d) => `<th class="nowrap ${d.isFeriado ? "feriado" : ""} ${d.key === todayKey ? "todaycol" : ""}">${fmtDateDMY(d.key)}</th>`)
+        .join("")}
     </tr>
   `;
 
@@ -2100,10 +2105,11 @@ function renderPresentismo() {
     const tds = days.map((d) => {
       const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
       const base = d.isFeriado ? "feriado" : "";
+      const todayCls = d.key === todayKey ? "todaycol" : "";
       const imp = impactFromCode(v);
       // "prescell" asegura estilo consistente en todas las celdas con estado (incluye "P").
       const prescell = v && v.trim() ? "prescell" : "";
-      const c2 = [base, prescell, imp.cls].filter(Boolean).join(" ");
+      const c2 = [base, todayCls, prescell, imp.cls].filter(Boolean).join(" ");
       return `<td class="${c2}" title="${escapeHtml(imp.label)}">${escapeHtml(v)}</td>`;
     }).join("");
 
