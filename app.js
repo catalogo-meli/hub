@@ -537,7 +537,7 @@ function syncPresSemanaSelect_() {
     : new Date().getFullYear();
 
   const cur = sel.value || "";
-  sel.innerHTML = (S.presetWeeks || []).map((w) => {
+  sel.innerHTML = (S.presSemanas || []).map((w) => {
     const val = String(w);
     const label = presWeekLabelWithRange_(val, anchorYear);
     return `<option value="${escapeHtml(val)}">${escapeHtml(label)}</option>`;
