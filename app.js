@@ -58,52 +58,6 @@ function fmtDateDMY(isoYMD) {
   return `${String(d).padStart(2, "0")}-${String(m).padStart(2, "0")}-${y}`;
 }
 
-function fmtDDMM_(d) {
-  if (!(d instanceof Date) || isNaN(d.getTime())) return "";
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${dd}/${mm}`;
-}
-
-// ISO week (lunes) start date for a given ISO year + week number
-function isoWeekMonday_(isoYear, weekNum) {
-  const jan4 = new Date(isoYear, 0, 4); // always in ISO week 1
-  const day = jan4.getDay() || 7; // 1..7 (Mon..Sun), with Sun=7
-  const mondayWeek1 = new Date(jan4);
-  mondayWeek1.setDate(jan4.getDate() - (day - 1));
-  const monday = new Date(mondayWeek1);
-  monday.setDate(mondayWeek1.getDate() + (weekNum - 1) * 7);
-  monday.setHours(0, 0, 0, 0);
-  return monday;
-}
-
-function presWeekLabelWithRange_(weekKey, anchorYear) {
-  const raw = String(weekKey || "").trim();
-  if (!raw) return raw;
-
-  // Accept "W1" or "2026-W1" / "2026W1"
-  let y = Number(anchorYear) || new Date().getFullYear();
-  let w = null;
-
-  let m = raw.match(/^(\d{4})\s*-\s*W(\d{1,2})$/i) || raw.match(/^(\d{4})\s*W(\d{1,2})$/i);
-  if (m) {
-    y = Number(m[1]);
-    w = Number(m[2]);
-  } else {
-    m = raw.match(/^W(\d{1,2})$/i);
-    if (m) w = Number(m[1]);
-  }
-
-  if (!w || w < 1 || w > 53) return raw;
-
-  const mon = isoWeekMonday_(y, w);
-  const fri = new Date(mon);
-  fri.setDate(mon.getDate() + 4);
-
-  return `W${w} ${fmtDDMM_(mon)} - ${fmtDDMM_(fri)}`;
-}
-
-
 function fmtDateAny(val) {
   const ts = parseDateAnyToTs_(val);
   if (!Number.isFinite(ts)) return "—";
@@ -531,21 +485,58 @@ function syncPresSemanaSelect_() {
   const sel = $("presSemana");
   if (!sel) return;
 
-  // anchor year: from current loaded week (if available) to handle year boundaries correctly
-  const anchorYear = (S.presWeek && S.presWeek.days && S.presWeek.days[0] && S.presWeek.days[0].key)
-    ? Number(String(S.presWeek.days[0].key).slice(0, 4))
-    : new Date().getFullYear();
+  const opts = (S.presSemanas || []).filter(Boolean);
+  // Mantengo selección si existe; si no, vacío => "hoy" (endpoint por fecha)
+  const current = S.presSemanaSel;
 
-  const cur = sel.value || "";
-  sel.innerHTML = (S.presetWeeks || []).map((w) => {
-    const val = String(w);
-    const label = presWeekLabelWithRange_(val, anchorYear);
-    return `<option value="${escapeHtml(val)}">${escapeHtml(label)}</option>`;
-  }).join("");
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const fmtDM = (d) => `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
 
-  if (cur) sel.value = cur;
+  const isoWeekOfDate_ = (date) => {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const day = d.getUTCDay() || 7; // Mon=1..Sun=7
+    d.setUTCDate(d.getUTCDate() + 4 - day);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+    return { year: d.getUTCFullYear(), week: weekNo };
+  };
+
+  const isoWeekMonday_ = (year, week) => {
+    // ISO week 1 is the week with Jan 4th in it
+    const jan4 = new Date(Date.UTC(year, 0, 4));
+    const day = jan4.getUTCDay() || 7;
+    const mondayWeek1 = new Date(jan4);
+    mondayWeek1.setUTCDate(jan4.getUTCDate() - (day - 1));
+    const monday = new Date(mondayWeek1);
+    monday.setUTCDate(mondayWeek1.getUTCDate() + (week - 1) * 7);
+    return monday;
+  };
+
+  const weekLabel_ = (w, baseYear) => {
+    const m = String(w || "").match(/^W(\d{1,2})$/i);
+    if (!m) return String(w || "");
+    const wn = Number(m[1]);
+    const mon = isoWeekMonday_(baseYear, wn);
+    const fri = new Date(mon);
+    fri.setUTCDate(mon.getUTCDate() + 4);
+    return `W${wn} ${fmtDM(new Date(mon))} - ${fmtDM(new Date(fri))}`;
+  };
+
+  // Año base: si ya hay una semana cargada, uso su fecha; si no, hoy.
+  const baseDate = (S.presWeek && S.presWeek.days && S.presWeek.days[0] && S.presWeek.days[0].key)
+    ? new Date(`${S.presWeek.days[0].key}T00:00:00`)
+    : new Date();
+  const { year: baseYear, week: curW } = isoWeekOfDate_(baseDate);
+  const curLabel = weekLabel_(`W${curW}`, baseYear);
+
+  sel.innerHTML = [`<option value="">${escapeHtml(curLabel)}</option>`]
+    .concat(opts.map((w) => `<option value="${escapeAttr(w)}">${escapeHtml(weekLabel_(w, baseYear))}</option>`))
+    .join("");
+
+  // restore selection
+  if (current && opts.includes(current)) sel.value = current;
+  else sel.value = "";
 }
-
 
 /* ========= Operativa diaria: Flujos autosave ========= */
 const saveFlujoDebounced = debounce(async (flujo, perfiles, channel_id) => {
@@ -2035,36 +2026,8 @@ function renderPresentismo() {
     return;
   }
 
-  // ---- helpers (local, to avoid global collisions) ----
-  const impactFromCode = (code) => {
-    const v = (code || "").toString().trim();
-    if (!v) return { impact: "Presente", cls: "ok", label: "Sin carga" };
-    if (v === "P") return { impact: "Presente", cls: "ok", label: "Presente" };
-    if (v === "TM/TR" || v === "CJ") return { impact: "Presente parcial", cls: "warn", label: "Presente parcial" };
-    // Todo lo demás es ausencia (licencias)
-    return { impact: "Ausente", cls: "bad", label: "Ausente" };
-  };
-
-  const worstImpactOfWeek = (vals, days) => {
-    // Order: Ausente (0) -> Presente parcial (1) -> Presente (2)
-    let k = 2; // assume ok
-    for (const d of days) {
-      const v = vals && vals[d.key] ? String(vals[d.key]) : "";
-      const imp = impactFromCode(v);
-      if (imp.cls === "bad") return 0;
-      if (imp.cls === "warn") k = Math.min(k, 1);
-    }
-    return k;
-  };
-
-  const groupLabelFromKey = (k) => (k === 0 ? "Ausente" : k === 1 ? "Presente parcial" : "Presente");
-  const groupClsFromKey = (k) => (k === 0 ? "bad" : k === 1 ? "warn" : "ok");
-
   const days = S.presWeek.days; // includes isFeriado
   const rows = S.presWeek.rows;
-
-  // "Hoy" (formato YYYY-MM-DD) para resaltar la columna cuando cae dentro de la semana visible
-  const todayKey = todayYMD();
 
   const colabsById = new Map((S.colabs || []).map((c) => {
     const v = colabRowView(c);
@@ -2102,9 +2065,7 @@ function renderPresentismo() {
   thead.innerHTML = `
     <tr>
       <th class="sortable" data-sort="nombre" style="min-width:240px">Colaborador<span class="srt" data-srt="nombre"></span></th>
-      ${days
-        .map((d) => `<th class="nowrap ${d.isFeriado ? "feriado" : ""} ${d.key === todayKey ? "todaycol" : ""}">${fmtDateDMY(d.key)}</th>`)
-        .join("")}
+      ${days.map((d) => `<th class="nowrap ${d.isFeriado ? "feriado" : ""}">${fmtDateDMY(d.key)}</th>`).join("")}
     </tr>
   `;
 
@@ -2116,59 +2077,22 @@ function renderPresentismo() {
     return;
   }
 
-  // Checkbox en UI (Presentismo): "Agrupar por estado / impacto"
-  const group = $("presGroupImpact") ? $("presGroupImpact").checked : false;
-
-  const sorted = filtered.slice().sort((a, b) => {
-    const ma = colabsById.get(a.id_meli) || {};
-    const mb = colabsById.get(b.id_meli) || {};
-    const nameA = (ma.nombre || a.nombre || "").toString().toLowerCase();
-    const nameB = (mb.nombre || b.nombre || "").toString().toLowerCase();
-
-    if (!group) return nameA.localeCompare(nameB);
-
-    // group by WORST impact in the selected week (not "hoy")
-    const ga = worstImpactOfWeek(a.vals, days);
-    const gb = worstImpactOfWeek(b.vals, days);
-    if (ga !== gb) return ga - gb;
-    return nameA.localeCompare(nameB);
-  });
-
-  const parts = [];
-  let lastGroupKey = null;
-
-  for (const r of sorted) {
-    const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
-    const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
-
-    const gKey = worstImpactOfWeek(r.vals, days);
-    if (group && gKey !== lastGroupKey) {
-      lastGroupKey = gKey;
-      const gLabel = groupLabelFromKey(gKey);
-      const gCls = groupClsFromKey(gKey);
-      parts.push(
-        `<tr class="pres-group-row"><td colspan="${1 + days.length}" class="${gCls}" style="font-weight:700; text-transform:none;">${escapeHtml(gLabel)}</td></tr>`
-      );
-    }
-
-    const tds = days.map((d) => {
-      const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
-      const base = d.isFeriado ? "feriado" : "";
-      const todayCls = d.key === todayKey ? "todaycol" : "";
-      const imp = impactFromCode(v);
-      // "prescell" asegura estilo consistente en todas las celdas con estado (incluye "P").
-      const prescell = v && v.trim() ? "prescell" : "";
-      const c2 = [base, todayCls, prescell, imp.cls].filter(Boolean).join(" ");
-      return `<td class="${c2}" title="${escapeHtml(imp.label)}">${escapeHtml(v)}</td>`;
-    }).join("");
-
-    parts.push(`<tr><td>${escapeHtml(label)}</td>${tds}</tr>`);
-  }
-
-  tbody.innerHTML = parts.join("");
-
-  const note = $("presLegendNote");
-  if (note) note.textContent = group ? "Ordenado por impacto (semana) → nombre" : "Ordenado por nombre";
+  tbody.innerHTML = filtered
+    .map((r) => {
+      const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
+      const label = `${meta.nombre || r.nombre} (${r.id_meli})`;
+      const tds = days
+        .map((d) => {
+          const v = (r.vals && r.vals[d.key]) ? String(r.vals[d.key]) : "";
+          const cls = d.isFeriado ? "feriado" : "";
+          const isLic = v && String(v).trim() !== "P";
+          const c2 = [cls, isLic ? "lic" : ""].filter(Boolean).join(" ");
+          return `<td class="${c2}">${escapeHtml(v)}</td>`;
+        })
+        .join("");
+      return `<tr><td>${escapeHtml(label)}</td>${tds}</tr>`;
+    })
+    .join("");
 }
 
 async function onSetLicencia() {
@@ -2479,15 +2403,6 @@ async function main() {
     $("searchPres").value = ""; $("searchPresWrap").classList.remove("has");
     renderPresentismo();
   });
-
-  // Agrupar por estado/impacto (no persistir)
-  {
-    const chk = $("presGroupImpact");
-    if (chk) {
-      chk.checked = false;
-      chk.addEventListener("change", () => renderPresentismo());
-    }
-  }
 
   await loadCore();
   mountSlackCompose_();
