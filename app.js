@@ -376,7 +376,7 @@ function mountTabs() {
       t.classList.add("active");
 
       const key = t.dataset.tab;
-      ["dashboard", "daily", "colabs", "habil", "pres"].forEach((k) => {
+      ["dashboard", "daily", "colabs", "habil", "pres", "pulso"].forEach((k) => {
         const sec = $(`tab_${k}`);
         if (sec) sec.style.display = k === key ? "" : "none";
       });
@@ -386,6 +386,7 @@ function mountTabs() {
       if (key === "colabs") renderColabs();
       if (key === "habil") renderHabil();
       if (key === "pres") renderPresentismo();
+      if (key === "pulso") renderPulso();
     });
   });
 }
@@ -2497,3 +2498,378 @@ document.addEventListener("DOMContentLoaded", () => {
   main().catch((e) => setErr(`Error: ${e.message || e}`));
 });
 
+
+
+/* === Pulso Operativo === */
+
+const pulsoEls = {
+  btnReload: () => $("btnPulsoReload"),
+  btnClear: () => $("btnPulsoClear"),
+  preset: () => $("pulsoPreset"),
+  from: () => $("pulsoFrom"),
+  to: () => $("pulsoTo"),
+  flujo: () => $("pulsoFlujo"),
+  iniciativa: () => $("pulsoIniciativa"),
+  usuario: () => $("pulsoUsuario"),
+  tl: () => $("pulsoTL"),
+  audit: () => $("pulsoAuditTipo"),
+
+  kActividad: () => $("pulsoKpiActividad"),
+  kActividadSub: () => $("pulsoKpiActividadSub"),
+  kHoldPct: () => $("pulsoKpiHoldPct"),
+  kHoldSub: () => $("pulsoKpiHoldSub"),
+  kIncTop: () => $("pulsoKpiIncTop"),
+  kIncSub: () => $("pulsoKpiIncSub"),
+  kCalidad: () => $("pulsoKpiCalidad"),
+  kCalidadSub: () => $("pulsoKpiCalidadSub"),
+
+  semaforo: () => $("pulsoSemaforo"),
+  semaforoMsg: () => $("pulsoSemaforoMsg"),
+  meta: () => $("pulsoMeta"),
+
+  prodMeta: () => $("pulsoProdMeta"),
+  tblProd: () => $("pulsoTblProd"),
+  statusBars: () => $("pulsoStatusBars"),
+  topInc: () => $("pulsoTopInc"),
+  holdOut: () => $("pulsoHoldOutliers"),
+  tblCalidad: () => $("pulsoTblCalidad"),
+  tblEquipo: () => $("pulsoTblEquipo"),
+
+  err: () => $("pulsoErr"),
+};
+
+function isoYMD_(d){
+  if (!(d instanceof Date) || isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const dd = String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${dd}`;
+}
+function mondayOf_(d){
+  const x = new Date(d);
+  const day = x.getDay() || 7; // 1..7 Mon..Sun
+  x.setDate(x.getDate() - (day - 1));
+  x.setHours(0,0,0,0);
+  return x;
+}
+function fridayOfWeek_(monday){
+  const x = new Date(monday);
+  x.setDate(x.getDate()+4);
+  x.setHours(0,0,0,0);
+  return x;
+}
+function setPresetDates_(preset){
+  const fromEl = pulsoEls.from();
+  const toEl = pulsoEls.to();
+  const today = new Date(); today.setHours(0,0,0,0);
+  if (preset === "today"){
+    fromEl.value = isoYMD_(today);
+    toEl.value = isoYMD_(today);
+  } else if (preset === "w_current"){
+    const mon = mondayOf_(today);
+    const fri = fridayOfWeek_(mon);
+    fromEl.value = isoYMD_(mon);
+    toEl.value = isoYMD_(fri);
+  } else if (preset === "w_prev"){
+    const mon = mondayOf_(today);
+    mon.setDate(mon.getDate()-7);
+    const fri = fridayOfWeek_(mon);
+    fromEl.value = isoYMD_(mon);
+    toEl.value = isoYMD_(fri);
+  }
+}
+
+function fmtPct_(x){
+  if (x === null || x === undefined || Number.isNaN(Number(x))) return "—";
+  return `${(Number(x)*100).toFixed(1)}%`;
+}
+function fmtInt_(n){
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return "—";
+  return Number(n).toLocaleString("es-AR");
+}
+function showPulsoErr_(msg){
+  const el = pulsoEls.err();
+  if (!el) return;
+  el.style.display = "";
+  el.textContent = msg;
+}
+function clearPulsoErr_(){
+  const el = pulsoEls.err();
+  if (!el) return;
+  el.style.display = "none";
+  el.textContent = "";
+}
+
+let pulsoBooted = false;
+let pulsoLastSig = "";
+let pulsoLoading = false;
+
+function pulsoParams_(){
+  const p = {
+    from: pulsoEls.from()?.value || "",
+    to: pulsoEls.to()?.value || "",
+    flujo: pulsoEls.flujo()?.value || "",
+    iniciativa: pulsoEls.iniciativa()?.value || "",
+    usuario: pulsoEls.usuario()?.value || "",
+    tl: pulsoEls.tl()?.value || "",
+    audit: pulsoEls.audit()?.value || "demanda",
+  };
+  return p;
+}
+
+function setSelectOptions_(sel, values, keepValue = true){
+  const el = typeof sel === "string" ? $(sel) : sel;
+  if (!el) return;
+  const cur = el.value;
+  const baseOpt = el.querySelector("option[value='']") ? "" : null;
+  // preserve first option (Todos/Todas)
+  const first = el.querySelector("option[value='']")?.outerHTML || "";
+  el.innerHTML = first + (values || []).map(v => `<option value="${escapeHtml(String(v))}">${escapeHtml(String(v))}</option>`).join("");
+  if (keepValue && cur) el.value = cur;
+}
+
+function renderStatusBars_(map){
+  const root = pulsoEls.statusBars();
+  if (!root) return;
+  const entries = Object.entries(map || {}).sort((a,b)=>b[1]-a[1]);
+  const total = entries.reduce((s, [,v]) => s + (Number(v)||0), 0) || 0;
+  if (!entries.length){
+    root.innerHTML = `<div class="muted">Sin datos</div>`;
+    return;
+  }
+  const rows = entries.map(([k,v])=>{
+    const pct = total ? (Number(v)||0)/total : 0;
+    return `<tr>
+      <td>${escapeHtml(k)}</td>
+      <td style="text-align:right">${fmtInt_(v)}</td>
+      <td style="text-align:right">${fmtPct_(pct)}</td>
+      <td style="min-width:140px">
+        <div style="height:10px;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:rgba(255,255,255,.03)">
+          <div style="height:100%;width:${Math.round(pct*100)}%;background:rgba(59,130,246,.6)"></div>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+  root.innerHTML = `<table class="table">
+    <thead><tr><th>Status</th><th style="text-align:right">Cant.</th><th style="text-align:right">% mix</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td><b>Total</b></td><td style="text-align:right"><b>${fmtInt_(total)}</b></td><td></td><td></td></tr></tfoot>
+  </table>`;
+}
+
+function renderTableProd_(rows){
+  const root = pulsoEls.tblProd();
+  if (!root) return;
+  const r = rows || [];
+  if (!r.length){
+    root.innerHTML = `<div class="muted">Sin datos</div>`;
+    return;
+  }
+  const body = r.map(x=>`<tr>
+    <td>${escapeHtml(x.usuario || "")}</td>
+    <td style="text-align:right">${fmtInt_(x.total)}</td>
+    <td style="text-align:right">${fmtPct_(x.done_pct)}</td>
+    <td style="text-align:right">${fmtPct_(x.hold_pct)}</td>
+    <td>${escapeHtml(x.flujo_top || "")}</td>
+    <td>${escapeHtml(x.iniciativa_top || "")}</td>
+    <td>${escapeHtml(x.incidencia_top || "")}</td>
+  </tr>`).join("");
+  root.innerHTML = `<table class="table">
+    <thead><tr>
+      <th>Colaborador</th>
+      <th style="text-align:right">Registros</th>
+      <th style="text-align:right">% DONE</th>
+      <th style="text-align:right">% HOLD</th>
+      <th>Flujo</th>
+      <th>Iniciativa</th>
+      <th>Incidencia</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table>`;
+}
+
+function renderTopInc_(items){
+  const root = pulsoEls.topInc();
+  if (!root) return;
+  const r = items || [];
+  if (!r.length){ root.innerHTML = `<div class="muted">Sin datos</div>`; return; }
+  const body = r.map(x=>`<tr>
+    <td>${escapeHtml(x.incidencia || "")}</td>
+    <td style="text-align:right">${fmtInt_(x.count)}</td>
+    <td style="text-align:right">${fmtPct_(x.pct_hold)}</td>
+  </tr>`).join("");
+  root.innerHTML = `<table class="table">
+    <thead><tr><th>Incidencia</th><th style="text-align:right">Cant.</th><th style="text-align:right">% sobre HOLD</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table>`;
+}
+
+function renderHoldOutliers_(items){
+  const root = pulsoEls.holdOut();
+  if (!root) return;
+  const r = items || [];
+  if (!r.length){ root.innerHTML = `<div class="muted">Sin outliers detectados</div>`; return; }
+  const body = r.map(x=>`<tr>
+    <td>${escapeHtml(x.usuario || "")}</td>
+    <td style="text-align:right">${fmtInt_(x.hold)}</td>
+    <td style="text-align:right">${fmtInt_(x.total)}</td>
+    <td style="text-align:right">${fmtPct_(x.hold_pct)}</td>
+  </tr>`).join("");
+  root.innerHTML = `<table class="table">
+    <thead><tr><th>Colaborador</th><th style="text-align:right">HOLD</th><th style="text-align:right">Total</th><th style="text-align:right">% HOLD</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table>`;
+}
+
+function renderCalidad_(rows, tipo){
+  const root = pulsoEls.tblCalidad();
+  if (!root) return;
+  const r = rows || [];
+  if (!r.length){ root.innerHTML = `<div class="muted">Sin auditorías para el rango</div>`; return; }
+  const body = r.map(x=>`<tr>
+    <td>${escapeHtml(x.usuario || "")}</td>
+    <td style="text-align:right">${fmtInt_(x.total)}</td>
+    <td style="text-align:right">${fmtPct_(x.estado_final_ok)}</td>
+    <td style="text-align:right">${fmtPct_(x.accion_ok)}</td>
+    <td>${escapeHtml(x.casuistica_top || "")}</td>
+  </tr>`).join("");
+  root.innerHTML = `<table class="table">
+    <thead><tr>
+      <th>Colaborador</th>
+      <th style="text-align:right">Audits</th>
+      <th style="text-align:right">% Estado final OK</th>
+      <th style="text-align:right">% Acción OK</th>
+      <th>Casuística top</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table>`;
+}
+
+function renderEquipo_(rows){
+  const root = pulsoEls.tblEquipo();
+  if (!root) return;
+  const r = rows || [];
+  if (!r.length){ root.innerHTML = `<div class="muted">Sin datos</div>`; return; }
+  const body = r.map(x=>`<tr>
+    <td>${escapeHtml(x.tl || "")}</td>
+    <td style="text-align:right">${fmtInt_(x.colabs)}</td>
+    <td style="text-align:right">${fmtInt_(x.actividad)}</td>
+    <td style="text-align:right">${fmtPct_(x.hold_pct)}</td>
+    <td style="text-align:right">${x.calidad_pct!=null?fmtPct_(x.calidad_pct):"—"}</td>
+  </tr>`).join("");
+  root.innerHTML = `<table class="table">
+    <thead><tr>
+      <th>Team Leader</th>
+      <th style="text-align:right">Colabs</th>
+      <th style="text-align:right">Actividad</th>
+      <th style="text-align:right">% HOLD</th>
+      <th style="text-align:right">Calidad</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table>`;
+}
+
+async function loadPulso_(force = false){
+  if (pulsoLoading) return;
+  const params = pulsoParams_();
+  const sig = JSON.stringify(params);
+  if (!force && sig === pulsoLastSig) return;
+  pulsoLastSig = sig;
+
+  pulsoLoading = true;
+  clearPulsoErr_();
+
+  try{
+    const data = await API.indicadoresPulso(params);
+
+    // optional: populate filters
+    const opt = data?.options || data?.meta?.options || {};
+    if (opt.flujos) setSelectOptions_(pulsoEls.flujo(), opt.flujos);
+    if (opt.iniciativas) setSelectOptions_(pulsoEls.iniciativa(), opt.iniciativas);
+    if (opt.usuarios) setSelectOptions_(pulsoEls.usuario(), opt.usuarios);
+    if (opt.tls) setSelectOptions_(pulsoEls.tl(), opt.tls);
+
+    // KPIs
+    const k = data?.kpis || {};
+    const actividad = k.actividad ?? k.total ?? null;
+    const holdPct = k.hold_pct ?? null;
+
+    pulsoEls.kActividad().textContent = fmtInt_(actividad);
+    pulsoEls.kActividadSub().textContent = k.actividad_delta_pct != null ? `vs prom: ${fmtPct_(k.actividad_delta_pct)}` : "";
+
+    pulsoEls.kHoldPct().textContent = holdPct!=null ? fmtPct_(holdPct) : "—";
+    pulsoEls.kHoldSub().textContent = (k.hold != null && actividad!=null) ? `${fmtInt_(k.hold)} / ${fmtInt_(actividad)}` : "";
+
+    pulsoEls.kIncTop().textContent = k.incidencia_top?.name ? k.incidencia_top.name : "—";
+    pulsoEls.kIncSub().textContent = k.incidencia_top?.pct_hold != null ? `${fmtPct_(k.incidencia_top.pct_hold)} (${fmtInt_(k.incidencia_top.count)})` : "";
+
+    pulsoEls.kCalidad().textContent = k.calidad?.pct != null ? fmtPct_(k.calidad.pct) : "—";
+    pulsoEls.kCalidadSub().textContent = k.calidad?.total != null ? `${fmtInt_(k.calidad.total)} audits · ${escapeHtml((k.calidad.tipo||"").toUpperCase())}` : "";
+
+    // semaforo
+    const s = data?.estado || data?.semaforo || {};
+    const level = s.level || s.estado || "";
+    const badge = pulsoEls.semaforo();
+    badge.className = "badge";
+    if (level === "ok") badge.classList.add("ok");
+    else if (level === "bad") badge.classList.add("bad");
+    badge.textContent = s.label || (level === "ok" ? "🟢 OK" : level === "bad" ? "🔴 Riesgo" : "🟡 Atención");
+    pulsoEls.semaforoMsg().textContent = s.msg || "";
+
+    // meta
+    pulsoEls.meta().textContent = data?.meta?.label || `${params.from} → ${params.to}`;
+
+    // blocks
+    pulsoEls.prodMeta().textContent = data?.productividad?.meta || "";
+    renderTableProd_(data?.productividad?.rows || []);
+    renderStatusBars_(data?.productividad?.by_status || data?.productividad?.status || {});
+    renderTopInc_(data?.friccion?.top_incidencias || []);
+    renderHoldOutliers_(data?.friccion?.hold_outliers || []);
+    renderCalidad_(data?.calidad?.by_usuario || [], params.audit);
+    renderEquipo_(data?.equipo?.by_tl || []);
+
+  } catch (e){
+    showPulsoErr_(String(e?.message || e));
+  } finally {
+    pulsoLoading = false;
+  }
+}
+
+const loadPulsoDebounced_ = debounce(() => loadPulso_(false), 250);
+
+function bootPulso_(){
+  if (pulsoBooted) return;
+  pulsoBooted = true;
+
+  // defaults
+  const presetEl = pulsoEls.preset();
+  if (presetEl) presetEl.value = "today";
+  setPresetDates_("today");
+
+  presetEl?.addEventListener("change", () => {
+    const v = presetEl.value;
+    if (v !== "custom") setPresetDates_(v);
+    loadPulsoDebounced_();
+  });
+
+  [pulsoEls.from(), pulsoEls.to(), pulsoEls.flujo(), pulsoEls.iniciativa(), pulsoEls.usuario(), pulsoEls.tl(), pulsoEls.audit()]
+    .forEach((el) => el?.addEventListener("change", loadPulsoDebounced_));
+
+  pulsoEls.btnReload()?.addEventListener("click", () => loadPulso_(true));
+
+  pulsoEls.btnClear()?.addEventListener("click", () => {
+    pulsoEls.flujo().value = "";
+    pulsoEls.iniciativa().value = "";
+    pulsoEls.usuario().value = "";
+    pulsoEls.tl().value = "";
+    pulsoEls.audit().value = "demanda";
+    pulsoEls.preset().value = "today";
+    setPresetDates_("today");
+    loadPulso_(true);
+  });
+}
+
+function renderPulso(){
+  bootPulso_();
+  loadPulso_(false);
+}

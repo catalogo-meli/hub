@@ -985,23 +985,130 @@
 </div>
 </section>
 <section class="card" id="tab_pulso" style="display:none">
+<div class="row">
+<div>
 <h2>Pulso Operativo</h2>
-<p class="muted">Vista ejecutiva-operativa para detectar riesgos, fricción y desvíos.</p>
-<div class="kpis">
-<div class="kpi"><h3>Actividad</h3><div class="val">—</div></div>
-<div class="kpi"><h3>% HOLD</h3><div class="val">—</div></div>
-<div class="kpi"><h3>Incidencia Top</h3><div class="val">—</div></div>
-<div class="kpi"><h3>Calidad</h3><div class="val">—</div></div>
+<div class="muted">Vista ejecutiva-operativa para detectar riesgos, fricción y desvíos (datos + filtros).</div>
 </div>
-<hr/>
-<h3>Productividad</h3>
-<div class="table"><em>Tabla por colaborador (pendiente de datos)</em></div>
-<h3>Fricción</h3>
-<div class="table"><em>Incidencias y HOLD (pendiente de datos)</em></div>
-<h3>Calidad</h3>
-<div class="table"><em>Auditorías Demanda / Autoopin (pendiente de datos)</em></div>
-<h3>Equipo</h3>
-<div class="table"><em>Distribución por TL (pendiente de datos)</em></div>
+<div class="spacer"></div>
+<button class="btn" id="btnPulsoClear">Limpiar</button>
+<button class="btn" id="btnPulsoReload">Actualizar</button>
+</div>
+<div class="hr"></div>
+<div class="row" style="flex-wrap:wrap">
+<div class="field" style="min-width:170px">
+<div class="label">Preset</div>
+<select class="select" id="pulsoPreset">
+<option value="today">Hoy</option>
+<option value="week">Semana actual</option>
+<option value="prevweek">Semana anterior</option>
+<option value="custom">Rango</option>
+</select>
+</div>
+<div class="field" style="min-width:150px">
+<div class="label">Desde</div>
+<input class="input" id="pulsoFrom" type="date"/>
+</div>
+<div class="field" style="min-width:150px">
+<div class="label">Hasta</div>
+<input class="input" id="pulsoTo" type="date"/>
+</div>
+<div class="field" style="min-width:190px">
+<div class="label">Flujo</div>
+<select class="select" id="pulsoFlujo"><option value="">Todos</option></select>
+</div>
+<div class="field" style="min-width:220px">
+<div class="label">Iniciativa</div>
+<select class="select" id="pulsoIniciativa"><option value="">Todas</option></select>
+</div>
+<div class="field" style="min-width:220px">
+<div class="label">Colaborador</div>
+<select class="select" id="pulsoUsuario"><option value="">Todos</option></select>
+</div>
+<div class="field" style="min-width:220px">
+<div class="label">Team Leader</div>
+<select class="select" id="pulsoTL"><option value="">Todos</option></select>
+</div>
+<div class="field" style="min-width:170px">
+<div class="label">Auditoría</div>
+<select class="select" id="pulsoAuditTipo">
+<option value="demanda">Demanda</option>
+<option value="autoopin">Autoopin</option>
+</select>
+</div>
+</div>
+<div class="hr"></div>
+<div class="err" id="pulsoErr" style="display:none"></div>
+<div class="kpis">
+<div class="kpi">
+<div class="muted">Actividad</div>
+<div class="val" id="pulsoKpiActividad">—</div>
+<div class="sub" id="pulsoKpiActividadSub"></div>
+</div>
+<div class="kpi">
+<div class="muted">% HOLD</div>
+<div class="val" id="pulsoKpiHoldPct">—</div>
+<div class="sub" id="pulsoKpiHoldSub"></div>
+</div>
+<div class="kpi">
+<div class="muted">Incidencia top</div>
+<div class="val" id="pulsoKpiIncTop">—</div>
+<div class="sub" id="pulsoKpiIncSub"></div>
+</div>
+<div class="kpi">
+<div class="muted">Calidad</div>
+<div class="val" id="pulsoKpiCalidad">—</div>
+<div class="sub" id="pulsoKpiCalidadSub"></div>
+</div>
+</div>
+<div class="hr"></div>
+<div class="row">
+<div class="pill" id="pulsoSemaforo"><b>Estado operativo</b></div>
+<div class="spacer"></div>
+<div class="muted" id="pulsoMeta"></div>
+</div>
+<div class="muted" id="pulsoSemaforoMsg" style="margin-top:6px"></div>
+<div class="hr"></div>
+<div class="row">
+<div class="pill"><b>Productividad</b></div>
+<div class="spacer"></div>
+<div class="muted" id="pulsoProdMeta"></div>
+</div>
+<div style="margin-top:12px">
+<div class="muted" style="margin:8px 0">Distribución por status</div>
+<div id="pulsoStatusBars"></div>
+</div>
+<div style="margin-top:12px;overflow:auto">
+<table class="table" id="pulsoTblProd"></table>
+</div>
+<div class="hr"></div>
+<div class="row">
+<div class="pill"><b>Fricción (HOLD + Incidencias)</b></div>
+</div>
+<div class="row" style="gap:16px;flex-wrap:wrap;margin-top:12px">
+<div style="flex:1;min-width:280px">
+<div class="muted" style="margin:6px 0">Top incidencias</div>
+<div id="pulsoTopInc"></div>
+</div>
+<div style="flex:1;min-width:280px">
+<div class="muted" style="margin:6px 0">% HOLD outliers</div>
+<div id="pulsoHoldOutliers"></div>
+</div>
+</div>
+<div class="hr"></div>
+<div class="row">
+<div class="pill"><b>Calidad (Auditorías)</b></div>
+</div>
+<div style="margin-top:12px;overflow:auto">
+<table class="table" id="pulsoTblCalidad"></table>
+</div>
+<div class="hr"></div>
+<div class="row">
+<div class="pill"><b>Equipo</b></div>
+</div>
+<div style="margin-top:12px;overflow:auto">
+<table class="table" id="pulsoTblEquipo"></table>
+</div>
 </section></main>
 <div aria-busy="true" aria-live="polite" class="busy" id="busy">
 <div aria-hidden="true" class="spinner"></div>

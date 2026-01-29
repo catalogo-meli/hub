@@ -65,6 +65,8 @@ export const API = {
   planificacionGenerar: () => post("planificacion.generar", {}),
   planificacionList: () => get("planificacion.list"),
 
+  indicadoresPulso: (params = {}) => get("indicadores.pulso", params),
+
   slackOutboxGenerar: () => post("slack.outbox.generar", {}),
   // Solo GENERAL (sin POR_FLUJO)
   slackOutboxGenerarGeneral: () => post("slack.outbox.generarGeneral", {}),
