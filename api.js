@@ -3,31 +3,46 @@ const BASE = "/.netlify/functions/gas";
 
 async function safeJson(resp) {
   const text = await resp.text();
+  const textLen = text.length;
   try {
-    return JSON.parse(text);
+    return { json: JSON.parse(text), textLen };
   } catch {
-    return { ok: false, error: `Non-JSON response (${resp.status}): ${text.slice(0, 200)}` };
+    return { json: { ok: false, error: `Non-JSON response (${resp.status}): ${text.slice(0, 200)}` }, textLen };
   }
+}
+
+function perfLog_(kind, action, ms, bytes) {
+  try {
+    const entry = { ts: Date.now(), kind, action, ms, bytes };
+    window.__hubPerf = window.__hubPerf || [];
+    window.__hubPerf.push(entry);
+    // Solo consola (no UI)
+    console.debug(`[perf] ${kind} ${action} ${ms.toFixed(0)}ms ${bytes}b`);
+  } catch {}
 }
 
 async function get(action, params = {}) {
   const qs = new URLSearchParams({ action, ...params });
+  const t0 = performance.now();
   const resp = await fetch(`${BASE}?${qs.toString()}`, {
     method: "GET",
     headers: { Accept: "application/json" },
   });
-  const data = await safeJson(resp);
+  const { json: data, textLen } = await safeJson(resp);
+  perfLog_("GET", action, performance.now() - t0, textLen);
   if (!resp.ok || data?.ok === false) throw new Error(data?.error || `GET ${action} failed (${resp.status})`);
   return data.data;
 }
 
 async function post(action, payload = {}) {
+  const t0 = performance.now();
   const resp = await fetch(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ action, ...payload }),
   });
-  const data = await safeJson(resp);
+  const { json: data, textLen } = await safeJson(resp);
+  perfLog_("POST", action, performance.now() - t0, textLen);
   if (!resp.ok || data?.ok === false) throw new Error(data?.error || `POST ${action} failed (${resp.status})`);
   return data.data;
 }
