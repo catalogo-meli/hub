@@ -2535,6 +2535,10 @@ const pulsoEls = {
   tblCalidad: () => $("pulsoTblCalidad"),
   tblEquipo: () => $("pulsoTblEquipo"),
 
+  btnFriccionToggle: () => $("btnPulsoFriccionToggle"),
+  friccionToggleText: () => $("pulsoFriccionToggleText"),
+  friccionDetalle: () => $("pulsoFriccionDetalle"),
+
   err: () => $("pulsoErr"),
 };
 
@@ -2601,6 +2605,9 @@ function clearPulsoErr_(){
 }
 
 let pulsoBooted = false;
+let pulsoFriccionOpen = false;
+let pulsoFriccionCache = { key: null, data: null };
+
 let pulsoLastSig = "";
 let pulsoLoading = false;
 
@@ -2780,7 +2787,27 @@ async function loadPulso_(force = false){
   clearPulsoErr_();
 
   try{
-    const data = await API.indicadoresPulso(params);
+    // Pulso base (v2) + Calidad (endpoint separado) en paralelo. Si v2 falla, fallback al endpoint viejo.
+    const includeOptions = pulsoBooted ? "0" : "1";
+    const pPulsoV2 = API.indicadoresPulsoV2({ ...params, includeOptions });
+    const pCalidad = API.auditoriaCalidad(params);
+
+    let data;
+    try {
+      data = await pPulsoV2;
+      data.__pulsoVersion = "v2";
+    } catch (e) {
+      data = await API.indicadoresPulso(params);
+      data.__pulsoVersion = "v1";
+    }
+
+    let calidad;
+    try {
+      calidad = await pCalidad;
+    } catch (e) {
+      calidad = null;
+    }
+
 
     // optional: populate filters
     const opt = data?.options || data?.meta?.options || {};
@@ -2802,9 +2829,7 @@ async function loadPulso_(force = false){
 
     pulsoEls.kIncTop().textContent = k.incidencia_top?.name ? k.incidencia_top.name : "—";
     pulsoEls.kIncSub().textContent = k.incidencia_top?.pct_hold != null ? `${fmtPct_(k.incidencia_top.pct_hold)} (${fmtInt_(k.incidencia_top.count)})` : "";
-
-    pulsoEls.kCalidad().textContent = k.calidad?.pct != null ? fmtPct_(k.calidad.pct) : "—";
-    pulsoEls.kCalidadSub().textContent = k.calidad?.total != null ? `${fmtInt_(k.calidad.total)} audits · ${escapeHtml((k.calidad.tipo||"").toUpperCase())}` : "";
+    renderPulsoCalidad_(calidad, params);
 
     // semaforo
     const s = data?.estado || data?.semaforo || {};
@@ -2823,10 +2848,20 @@ async function loadPulso_(force = false){
     pulsoEls.prodMeta().textContent = data?.productividad?.meta || "";
     renderTableProd_(data?.productividad?.rows || []);
     renderStatusBars_(data?.productividad?.by_status || data?.productividad?.status || {});
-    renderTopInc_(data?.friccion?.top_incidencias || []);
-    renderHoldOutliers_(data?.friccion?.hold_outliers || []);
-    renderCalidad_(data?.calidad?.by_usuario || [], params.audit);
-    renderEquipo_(data?.equipo?.by_tl || []);
+    // Calidad (tabla) y equipo con calidad (si disponible)
+    if (calidad && Array.isArray(calidad.by_usuario)) {
+      renderCalidad_(calidad.by_usuario, params.audit);
+      const mergedEquipo = mergeEquipoCalidad_(data?.equipo?.by_tl || [], calidad.by_tl || []);
+      renderEquipo_(mergedEquipo);
+    } else {
+      renderCalidad_([], params.audit);
+      renderEquipo_(data?.equipo?.by_tl || []);
+    }
+
+    // Fricción bajo demanda (toggle)
+    pulsoFriccionCache.key = null; // invalida cache si cambian filtros (se recalcula en ensure)
+    updatePulsoFriccionUI_();
+    if (pulsoFriccionOpen) await ensurePulsoFriccionLoaded_();
 
   } catch (e){
     showPulsoErr_(String(e?.message || e));
@@ -2835,10 +2870,118 @@ async function loadPulso_(force = false){
   }
 }
 
+/** ===== Pulso: Calidad separada + Fricción bajo demanda (v2) ===== */
+
+function mergeEquipoCalidad_(equipoRows = [], byTl = []) {
+  const map = Object.create(null);
+  (byTl || []).forEach((x) => {
+    if (!x) return;
+    map[String(x.tl || "").trim()] = x;
+  });
+  return (equipoRows || []).map((r) => {
+    const tl = String(r.tl || "").trim();
+    const c = map[tl];
+    return c ? { ...r, calidad_pct: c.calidad_pct ?? r.calidad_pct ?? null } : r;
+  });
+}
+
+function renderPulsoCalidad_(calidad, params) {
+  const tipo = String(params?.audit || "demanda").trim().toLowerCase();
+  const k = calidad?.kpis || null;
+
+  // defaults
+  let pct = null;
+  let total = null;
+  let sub = "";
+  let badge = "";
+
+  if (!calidad) {
+    pct = null;
+    sub = "Servicio no disponible";
+    badge = `<span class="pill bad">Error</span>`;
+  } else if (k?.reason === "tipo_no_implementado" || (tipo && tipo !== "demanda")) {
+    pct = null;
+    sub = "Tipo de auditoría no implementado";
+    badge = `<span class="pill">Próximamente</span>`;
+  } else if (k && (k.total_audits || 0) > 0 && k.calidad_pct != null) {
+    pct = k.calidad_pct;
+    total = k.total_audits;
+    sub = `${fmtInt_(total)} audits · ${(k.tipo || tipo || "").toUpperCase()}`;
+    badge = `<span class="pill ok">Con muestra</span>`;
+  } else {
+    pct = null;
+    sub = "Sin auditorías en rango";
+    badge = `<span class="pill warn">Sin muestra</span>`;
+  }
+
+  pulsoEls.kCalidad().textContent = pct != null ? fmtPct_(pct) : "—";
+  pulsoEls.kCalidadSub().innerHTML = `${escapeHtml(sub)} ${badge}`;
+}
+
+function pulsoFriccionKey_(params) {
+  return JSON.stringify({
+    from: params?.from,
+    to: params?.to,
+    flujo: params?.flujo,
+    iniciativa: params?.iniciativa,
+    usuario: params?.usuario,
+    tl: params?.tl,
+  });
+}
+
+function updatePulsoFriccionUI_() {
+  const box = pulsoEls.friccionDetalle();
+  const txt = pulsoEls.friccionToggleText();
+  if (!box || !txt) return;
+  box.style.display = pulsoFriccionOpen ? "" : "none";
+  txt.textContent = pulsoFriccionOpen ? "📊 Ocultar detalle" : "📊 Ver detalle";
+}
+
+async function ensurePulsoFriccionLoaded_() {
+  const params = pulsoParams_();
+  const key = pulsoFriccionKey_(params);
+
+  if (pulsoFriccionCache.key === key && pulsoFriccionCache.data) {
+    // ya está
+    const fr = pulsoFriccionCache.data?.friccion || {};
+    renderTopInc_(fr.top_incidencias || []);
+    renderHoldOutliers_(fr.hold_outliers || []);
+    return;
+  }
+
+  // placeholders mientras carga
+  renderTopInc_([]);
+  renderHoldOutliers_([]);
+
+  try {
+    const resp = await API.pulsoFriccion(params);
+    pulsoFriccionCache = { key, data: resp };
+    const fr = resp?.friccion || {};
+    renderTopInc_(fr.top_incidencias || []);
+    renderHoldOutliers_(fr.hold_outliers || []);
+  } catch (e) {
+    // deja UI sin romper Pulso
+    pulsoFriccionCache = { key: null, data: null };
+    renderTopInc_([]);
+    renderHoldOutliers_([]);
+  }
+}
+
+
 const loadPulsoDebounced_ = debounce(() => loadPulso_(false), 250);
 
 function bootPulso_(){
   if (pulsoBooted) return;
+
+  // Fricción bajo demanda (Pulso)
+  const btnF = pulsoEls.btnFriccionToggle();
+  if (btnF) {
+    btnF.addEventListener("click", async () => {
+      pulsoFriccionOpen = !pulsoFriccionOpen;
+      updatePulsoFriccionUI_();
+      if (pulsoFriccionOpen) await ensurePulsoFriccionLoaded_();
+    });
+  }
   pulsoBooted = true;
 
   // defaults

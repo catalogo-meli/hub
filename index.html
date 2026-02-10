@@ -1082,9 +1082,11 @@
 <table class="table" id="pulsoTblProd"></table>
 </div>
 <div class="hr"></div>
-<div class="row">
-<div class="pill"><b>Fricción (HOLD + Incidencias)</b></div>
+<div class="row" style="align-items:center;justify-content:space-between;gap:12px">
+  <div class="pill"><b>Fricción (HOLD + Incidencias)</b></div>
+  <button class="btn ghost" id="btnPulsoFriccionToggle" type="button"><span id="pulsoFriccionToggleText">📊 Ver detalle</span></button>
 </div>
+<div id="pulsoFriccionDetalle" style="display:none">
 <div class="row" style="gap:16px;flex-wrap:wrap;margin-top:12px">
 <div style="flex:1;min-width:280px">
 <div class="muted" style="margin:6px 0">Top incidencias</div>
@@ -1093,6 +1095,7 @@
 <div style="flex:1;min-width:280px">
 <div class="muted" style="margin:6px 0">% HOLD outliers</div>
 <div id="pulsoHoldOutliers"></div>
+</div>
 </div>
 </div>
 <div class="hr"></div>
