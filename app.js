@@ -548,18 +548,50 @@ function syncPresSemanaSelect_() {
 }
 
 
-/* ========= Operativa diaria: Flujos autosave ========= */
+/* ========= Operativa diaria: Flujos autosave (OPTIMIZADO) ========= */
+// ✅ OPTIMIZACIÓN: Validación robusta + prevención de doble submit
+let saveFlujoInProgress = false;
+
 const saveFlujoDebounced = debounce(async (flujo, perfiles, channel_id) => {
+  // ✅ Prevenir doble submit
+  if (saveFlujoInProgress) {
+    console.log("⚠️ Guardado ya en progreso, ignorando llamada duplicada");
+    return;
+  }
+
+  saveFlujoInProgress = true;
   setErr("");
+  
   try {
     $("dailyStatus").textContent = "Guardando...";
+    
+    // ✅ Guardar y validar respuesta
     await API.flujosUpsert(flujo, perfiles, channel_id || "");
-    S.flujos = await API.flujosList();
+    
+    // ✅ Recargar lista completa para confirmar guardado
+    const flujos = await API.flujosList();
+    
+    // ✅ Validar que el flujo se guardó correctamente
+    const savedFlujo = flujos.find(f => f.flujo === flujo);
+    if (!savedFlujo) {
+      throw new Error("Flujo no encontrado después de guardar");
+    }
+    
+    if (Number(savedFlujo.perfiles_requeridos || 0) !== Number(perfiles)) {
+      throw new Error(`Guardado no confirmado. Esperado: ${perfiles}, Obtenido: ${savedFlujo.perfiles_requeridos}`);
+    }
+    
+    // ✅ Actualizar estado con datos confirmados
+    S.flujos = flujos;
     renderFlujos();
-    toast("Guardado", flujo);
+    toast("✓ Guardado", flujo);
+    
   } catch (e) {
-    setErr(`Flujos: ${e.message || e}`);
+    setErr(`Error al guardar ${flujo}: ${e.message || e}`);
+    console.error("Error en saveFlujo:", e);
+    // ✅ NO actualizar UI si falló
   } finally {
+    saveFlujoInProgress = false;
     $("dailyStatus").textContent = "Listo";
   }
 }, 420);
