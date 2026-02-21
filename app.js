@@ -2917,6 +2917,9 @@ function mergeEquipoCalidad_(equipoRows = [], byTl = []) {
   });
 }
 
+/**
+ * ✅ OPTIMIZADO: Render de calidad con diagnóstico detallado de errores
+ */
 function renderPulsoCalidad_(calidad, params) {
   const tipo = String(params?.audit || "demanda").trim().toLowerCase();
   const k = calidad?.kpis || null;
@@ -2927,22 +2930,37 @@ function renderPulsoCalidad_(calidad, params) {
   let sub = "";
   let badge = "";
 
+  // ✅ Diagnóstico detallado por tipo de error
   if (!calidad) {
+    console.error("❌ Calidad: objeto calidad es null/undefined");
     pct = null;
-    sub = "Servicio no disponible";
+    sub = "Error de conexión";
+    badge = `<span class="pill bad">Error red</span>`;
+  } else if (k?.reason === "error_servidor" || k?.reason === "error_calculando_calidad") {
+    console.error("❌ Calidad: error en servidor", k?.error_detail || "sin detalle");
+    pct = null;
+    sub = "Error en servidor: " + (k?.error_detail || "revisar logs");
     badge = `<span class="pill bad">Error</span>`;
   } else if (k?.reason === "tipo_no_implementado" || (tipo && tipo !== "demanda")) {
+    console.log("⚠️ Calidad: tipo no implementado", tipo);
     pct = null;
     sub = "Tipo de auditoría no implementado";
     badge = `<span class="pill">Próximamente</span>`;
   } else if (k && (k.total_audits || 0) > 0 && k.calidad_pct != null) {
+    console.log("✅ Calidad: datos OK", k.total_audits, "auditorías");
     pct = k.calidad_pct;
     total = k.total_audits;
     sub = `${fmtInt_(total)} audits · ${(k.tipo || tipo || "").toUpperCase()}`;
     badge = `<span class="pill ok">Con muestra</span>`;
-  } else {
+  } else if (k?.reason === "sin_auditorias_en_rango") {
+    console.log("ℹ️ Calidad: sin auditorías en el rango seleccionado");
     pct = null;
     sub = "Sin auditorías en rango";
+    badge = `<span class="pill warn">Sin muestra</span>`;
+  } else {
+    console.warn("⚠️ Calidad: caso no manejado", k);
+    pct = null;
+    sub = "Sin datos disponibles";
     badge = `<span class="pill warn">Sin muestra</span>`;
   }
 
