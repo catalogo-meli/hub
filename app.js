@@ -2448,7 +2448,7 @@ function renderDashboard() {
   kpi.innerHTML = `
     <div class="dash-status pill ${statusCls}" style="width:100%;margin-bottom:14px;padding:12px 16px;font-size:14px;border-radius:12px;display:flex;align-items:center;gap:10px">
       <span style="font-size:18px">${statusEmoji}</span>
-      <span><b>${statusLabel}</b> — ${pres} de ${total} presentes hoy · ${flujosActivos} flujo${flujosActivos !== 1 ? "s" : ""} activo${flujosActivos !== 1 ? "s" : ""}${slackPendientes > 0 ? ` · <span style="color:var(--warn)">${slackPendientes} mensaje pendiente${slackPendientes !== 1 ? "s" : ""} Slack</span>` : ""}</span>
+      <span><b>${statusLabel}</b> — ${pres} de ${total} presentes hoy · ${flujosActivos} flujo${flujosActivos !== 1 ? "s" : ""} activo${flujosActivos !== 1 ? "s" : ""}${slackPendientes > 0 ? ` · <span style="color:var(--warn)">${slackPendientes} msg pendiente${slackPendientes !== 1 ? "s" : ""} Slack</span>` : ""}</span>
     </div>
     <div class="kpi"><div class="v">${total}</div><div class="l">En nómina</div></div>
     <div class="kpi"><div class="v">${pres}</div><div class="l">Presentes hoy</div></div>
