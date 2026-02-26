@@ -389,6 +389,9 @@ const S = {
     pres: { key: "nombre", dir: 1 },
     dashRoles: { key: "rol", dir: 1 },
   },
+
+  // Dirty flags: qué secciones necesitan re-render al activar tab
+  _dirty: new Set(),
 };
 
 /* ========= Theme ========= */
@@ -542,9 +545,12 @@ async function loadCore() {
     S.canales = canales || [];
     S.flujos = flujos || [];
 
-    await refreshPlanAndOutbox();
-    await refreshHabil();
-    await refreshPresentismo();
+    // PERF: las tres cargas secundarias son independientes entre sí → paralelas
+    await Promise.all([
+      refreshPlanAndOutbox(),
+      refreshHabil(),
+      refreshPresentismo(),
+    ]);
     mountPresentismoSelect();
 
     renderDashboard();
@@ -969,7 +975,13 @@ function renderPlan() {
 
   const plan = (S.plan || []).filter((r) => r?.flujo);
   if (!plan.length) {
-    host.innerHTML = `<div class="muted">Sin planificación cargada.</div>`;
+    host.innerHTML = emptyState_(
+      "Sin planificación generada para hoy.",
+      "📋",
+      "Generar planificación",
+      "emptyStateBtnGenerar"
+    );
+    host.querySelector("#emptyStateBtnGenerar")?.addEventListener("click", onGenerarPlanificacionYOutbox_);
     return;
   }
 
@@ -1171,6 +1183,21 @@ async function generarMensajePorFlujo_(flujo, btn = null) {
 }
 
 /* ========= Slack Outbox: autosave ========= */
+/* ========= Outbox: patch optimista ========= */
+// Actualiza el estado de una fila en S.outbox de forma inmediata (sin roundtrip)
+// y dispara un re-fetch silencioso en background para sincronizar.
+function patchOutbox_(row, changes) {
+  const idx = (S.outbox || []).findIndex((x) => Number(x.row) === Number(row));
+  if (idx >= 0) {
+    Object.assign(S.outbox[idx], changes);
+  }
+  renderOutbox();
+  // Sync silencioso en background (no bloquea UI)
+  API.slackOutboxList()
+    .then((d) => { S.outbox = d || []; S._dirty.add("outbox"); renderOutbox(); })
+    .catch(() => {});
+}
+
 function channelOptionsHtml(selectedId = "") {
   const opts = [`<option value="">—</option>`].concat(
     (S.canales || []).map((c) => {
@@ -1225,7 +1252,7 @@ function renderOutbox() {
     // si no hay timestamp, lo mostramos igual pero al final; es mejor ver algo que nada
     if (!dt) return true;
     return dt >= cutoff;
-  });
+  }).slice(0, 50); // limitar a 50 más recientes para evitar renders pesados
 
   const formatEstado = (estado) => {
     const s = String(estado || "");
@@ -1358,9 +1385,12 @@ function renderOutbox() {
         try {
           if (!confirm("Eliminar este mensaje?")) return;
           await API.slackOutboxDelete(row);
-          S.outbox = await API.slackOutboxList();
+          // Patch optimista: eliminar localmente sin esperar re-fetch
+          S.outbox = (S.outbox || []).filter((x) => Number(x.row) !== Number(row));
           renderOutbox();
           toast("Outbox", "Eliminado");
+          // Sync background
+          API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
         } catch (e) {
           setErr(`Eliminar: ${e.message || e}`);
         }
@@ -1382,8 +1412,8 @@ function renderOutbox() {
           const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
           await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
           await API.slackOutboxProgramar(row, v);
-          S.outbox = await API.slackOutboxList();
-          renderOutbox();
+          // Patch optimista: marcar como PROGRAMADO localmente
+          patchOutbox_(row, { estado: `PROGRAMADO ${v}`, channel_id: sel.value, canal, mensaje: txt.value });
           toast("Outbox", "Programado");
         } catch (e) {
           setErr(`Programar: ${e.message || e}`);
@@ -1751,10 +1781,10 @@ function mountSlackCompose_() {
 
       const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
       await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
-      S.outbox = await API.slackOutboxList();
-      renderOutbox();
       clearCompose();
       toast("Outbox", "Borrador guardado");
+      // Sync en background
+      API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
     } catch (e) {
       setErr(`Borrador: ${e.message || e}`);
     }
@@ -1770,16 +1800,17 @@ function mountSlackCompose_() {
       const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
       // 1) append
       await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
+      // fetch una sola vez para obtener la fila creada
       S.outbox = await API.slackOutboxList();
       const newest = (S.outbox || []).slice().sort((a, b) => (b.row || 0) - (a.row || 0))[0];
       if (!newest?.row) throw new Error("No se pudo obtener la fila creada.");
 
       // 2) send
       await API.slackSendRow(newest.row);
-      S.outbox = await API.slackOutboxList();
-      renderOutbox();
       clearCompose();
       toast("Slack", "Enviado");
+      // Sync background
+      API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
     } catch (e) {
       setErr(`Enviar: ${e.message || e}`);
     }
@@ -1797,16 +1828,17 @@ function mountSlackCompose_() {
       const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
       // 1) crear fila como borrador
       await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
+      // fetch una sola vez para obtener la fila creada
       S.outbox = await API.slackOutboxList();
       const newest = (S.outbox || []).slice().sort((a,b)=>(b.row||0)-(a.row||0))[0];
       if (!newest?.row) throw new Error("No se pudo obtener la fila creada.");
 
       // 2) programar
       await API.slackOutboxProgramar(newest.row, v);
-      S.outbox = await API.slackOutboxList();
-      renderOutbox();
       clearCompose();
       toast("Outbox", "Mensaje programado");
+      // Sync background
+      API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
     } catch (e) {
       setErr(`Programar: ${e.message || e}`);
     }
@@ -1919,8 +1951,9 @@ async function onOutboxSend(row) {
   try {
     setBusy("Slack", "Enviando mensaje...");
     await API.slackSendRow(row);
-    S.outbox = await API.slackOutboxList();
-    renderOutbox();
+    // Patch optimista: marcar como ENVIADO localmente
+    const stamp = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    patchOutbox_(row, { estado: `ENVIADO ✅ ${stamp}` });
     toast("Slack", "Enviado");
   } catch (e) {
     setErr(`Slack: ${e.message || e}`);
@@ -2401,8 +2434,19 @@ function renderDashboard() {
   const pres = S.presStats?.presentes ?? 0;
   const analistasHoy = countAnalistasDisponiblesHoy_();
   const flujosActivos = (S.flujos || []).filter((f) => Number(f.perfiles_requeridos ?? f.cantidad ?? 0) >= 1).length;
+  const slackPendientes = (S.outbox || []).filter((r) => !String(r.estado || "").toUpperCase().includes("ENVIADO") && !String(r.estado || "").toUpperCase().includes("PROGRAMADO")).length;
+
+  // Semáforo de estado del equipo
+  const pct = total > 0 ? pres / total : 0;
+  const statusCls = pct >= 0.85 ? "ok" : pct >= 0.65 ? "warn" : "bad";
+  const statusLabel = pct >= 0.85 ? "Equipo operativo" : pct >= 0.65 ? "Capacidad reducida" : "Atención requerida";
+  const statusEmoji = pct >= 0.85 ? "🟢" : pct >= 0.65 ? "🟡" : "🔴";
 
   kpi.innerHTML = `
+    <div class="dash-status pill ${statusCls}" style="width:100%;margin-bottom:14px;padding:12px 16px;font-size:14px;border-radius:12px;display:flex;align-items:center;gap:10px">
+      <span style="font-size:18px">${statusEmoji}</span>
+      <span><b>${statusLabel}</b> — ${pres} de ${total} presentes hoy · ${flujosActivos} flujo${flujosActivos !== 1 ? "s" : ""} activo${flujosActivos !== 1 ? "s" : ""}${slackPendientes > 0 ? ` · <span style="color:var(--warn)">${slackPendientes} msg pendiente${slackPendientes !== 1 ? "s" : ""} Slack</span>` : ""}</span>
+    </div>
     <div class="kpi"><div class="v">${total}</div><div class="l">En nómina</div></div>
     <div class="kpi"><div class="v">${pres}</div><div class="l">Presentes hoy</div></div>
     <div class="kpi"><div class="v">${analistasHoy}</div><div class="l">Analistas disponibles</div></div>
@@ -2434,6 +2478,19 @@ async function onGenerarPlanificacionYOutbox_() {
     $("dailyStatus").textContent = "Listo";
     clearBusy();
   }
+}
+
+/* ========= Empty state helper ========= */
+function emptyState_(message, icon = "📭", actionLabel = null, actionId = null) {
+  const btn = actionLabel && actionId
+    ? `<button class="btn primary" id="${escapeAttr(actionId)}" style="margin-top:12px">${escapeHtml(actionLabel)}</button>`
+    : "";
+  return `
+    <div style="text-align:center;padding:40px 20px;color:var(--muted)">
+      <div style="font-size:36px;margin-bottom:10px">${icon}</div>
+      <div style="font-size:14px">${escapeHtml(message)}</div>
+      ${btn}
+    </div>`;
 }
 
 /* ========= Wire UI ========= */
@@ -3145,6 +3202,17 @@ const loadPulsoDebounced_ = debounce(() => loadPulso_(false), 250);
 
 function bootPulso_(){
   if (pulsoBooted) return;
+
+  // Filtros avanzados colapsables
+  const btnFiltros = $("btnPulsoFiltrosToggle");
+  const panelFiltros = $("pulsoFiltrosAvanzados");
+  if (btnFiltros && panelFiltros) {
+    btnFiltros.addEventListener("click", () => {
+      const open = panelFiltros.style.display !== "none";
+      panelFiltros.style.display = open ? "none" : "";
+      btnFiltros.textContent = open ? "＋ Filtros avanzados" : "－ Ocultar filtros";
+    });
+  }
 
   // Fricción bajo demanda (Pulso)
   const btnF = pulsoEls.btnFriccionToggle();

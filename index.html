@@ -636,6 +636,36 @@
       .tab{padding:7px 6px;font-size:11px}
       .brand h1{font-size:22px}
     }
+
+    /* === DASHBOARD STATUS BAR === */
+    .dash-status{
+      transition: background .3s, border-color .3s;
+      flex-wrap:wrap;
+    }
+    /* KPIs grid — permite que la barra de estado ocupe fila completa */
+    .kpis{
+      display:flex;
+      flex-wrap:wrap;
+      gap:12px;
+      align-items:flex-start;
+    }
+    .kpis .dash-status{
+      flex:1 1 100%;
+      margin-bottom:4px;
+    }
+
+    /* === SUB-NAV PILLS (Operativa diaria) === */
+    a.pill{
+      transition: background .15s, border-color .15s;
+    }
+    a.pill:hover{
+      background:rgba(59,130,246,.14);
+      border-color:rgba(59,130,246,.28);
+      color:var(--txt);
+    }
+    [data-theme="light"] a.pill:hover{
+      background:rgba(59,130,246,.10);
+    }
   </style>
 </head>
 <body>
@@ -697,7 +727,15 @@
 <div class="spacer"></div>
 <button class="btn primary" id="btnGenerarPlan">Generar planificación</button>
 </div>
+<!-- Sub-nav para navegación rápida dentro del tab -->
+<div class="row" style="gap:6px;margin-top:4px;flex-wrap:wrap">
+<a class="pill" href="#daily-flujos" style="cursor:pointer;text-decoration:none;font-size:12px">Flujos</a>
+<a class="pill" href="#daily-plan" style="cursor:pointer;text-decoration:none;font-size:12px">Planificación</a>
+<a class="pill" href="#daily-slack" style="cursor:pointer;text-decoration:none;font-size:12px">Mensajes Slack</a>
+<a class="pill" href="#daily-outbox" style="cursor:pointer;text-decoration:none;font-size:12px">Outbox</a>
+</div>
 <div class="hr"></div>
+<div id="daily-flujos"></div>
 <div class="row">
 <div class="pill"><b>Perfiles requeridos</b></div>
 <div class="spacer"></div>
@@ -747,7 +785,7 @@
 <div class="flow-grid" id="dailyDrafts" style="margin-top:10px;display:none;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:10px"></div>
 </div>
 <div class="hr"></div>
-<h2 style="margin-top:0">Planificación</h2>
+<h2 id="daily-plan" style="margin-top:0">Planificación</h2>
 <div class="muted">Asignación por flujo</div>
 <div class="plan-controls" id="planControls">
 <div class="search" style="max-width:420px">
@@ -761,7 +799,7 @@
 </div>
 <div class="flow-grid" id="planGrid" style="margin-top:12px"></div>
 <div class="hr"></div>
-<h2 style="margin-top:0">Mensajes de Slack</h2>
+<h2 id="daily-slack" style="margin-top:0">Mensajes de Slack</h2>
 <div class="muted">Gestión de comunicación</div>
 <!-- Compose (siempre disponible) -->
 <div class="flow-col" id="slackCompose" style="margin-top:12px">
@@ -823,7 +861,7 @@
 </div>
 <div class="hr"></div>
 <div class="row">
-<div class="pill"><b>Borradores</b></div>
+<div class="pill" id="daily-outbox"><b>Borradores</b></div>
 </div>
 <div style="margin-top:12px;overflow:auto">
 <table class="table" id="tblDrafts">
@@ -990,19 +1028,19 @@
 <div class="muted" style="font-size:12px;margin-bottom:6px">Tipo</div>
 <select id="presTipo">
 <option value="AI">V - Vacaciones</option>
-<option value="E">M - Licencia médica</option>
-<option value="M">E - Día de estudio</option>
-<option value="MM">TP - Trámites prematriomniales</option>
-<option value="V">N - Nacimiento</option>
-<option value="V">MUD - Mudanza</option>
-<option value="V">MAT - Maternidad</option>
-<option value="V">MATR - Matrimonio</option>
-<option value="V">DUELO - Fallecimiento familiar</option>
-<option value="V">CF - Cuidado de familiar</option>
-<option value="V">DS - Donación de sangre</option>
-<option value="V">TM/TR - Turno médico o trámite rápido</option>
-<option value="V">CJ - Citación judicial</option>
-<option value="V">MHM - Enfermedad hijo/a menor 12 años</option>
+<option value="M">M - Licencia médica</option>
+<option value="E">E - Día de estudio</option>
+<option value="TP">TP - Trámites prematrimoniales</option>
+<option value="N">N - Nacimiento</option>
+<option value="MUD">MUD - Mudanza</option>
+<option value="MAT">MAT - Maternidad</option>
+<option value="MATR">MATR - Matrimonio</option>
+<option value="DUELO">DUELO - Fallecimiento familiar</option>
+<option value="CF">CF - Cuidado de familiar</option>
+<option value="DS">DS - Donación de sangre</option>
+<option value="TM/TR">TM/TR - Turno médico o trámite rápido</option>
+<option value="CJ">CJ - Citación judicial</option>
+<option value="MHM">MHM - Enfermedad hijo/a menor 12 años</option>
 </select>
 </div>
 <div style="max-width:220px">
@@ -1063,6 +1101,11 @@
 <div class="label">Hasta</div>
 <input class="input" id="pulsoTo" type="date"/>
 </div>
+<button class="btn ghost" id="btnPulsoFiltrosToggle" type="button" style="align-self:flex-end;margin-bottom:2px">＋ Filtros avanzados</button>
+</div>
+<!-- Filtros avanzados: colapsados por defecto -->
+<div id="pulsoFiltrosAvanzados" style="display:none">
+<div class="row" style="flex-wrap:wrap;margin-top:6px">
 <div class="field" style="min-width:190px">
 <div class="label">Flujo</div>
 <select class="select" id="pulsoFlujo"><option value="">Todos</option></select>
@@ -1085,6 +1128,7 @@
 <option value="demanda">Demanda</option>
 <option value="autoopin">Autoopin</option>
 </select>
+</div>
 </div>
 </div>
 <div class="hr"></div>
