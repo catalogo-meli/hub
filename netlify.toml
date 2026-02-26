@@ -14,3 +14,20 @@
 # Scheduled function real (cron). Dejá slack_scheduler.js como endpoint manual.
 [functions."slack_cron"]
   schedule = "*/1 * * * *"
+
+# Cache-Control para assets estáticos y API
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=300, stale-while-revalidate=60"
+
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate"
+    Pragma = "no-cache"

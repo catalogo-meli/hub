@@ -12,6 +12,40 @@ const EQUIPOS_PRESET = [
 
 const $ = (id) => document.getElementById(id);
 
+/***********************
+ * CACHE CLIENTE (TTL)
+ * Evita re-fetches innecesarios al navegar entre tabs
+ ***********************/
+const CACHE = {
+  _store: {},
+  set(key, data, ttlMs = 60_000) {
+    this._store[key] = { data, exp: Date.now() + ttlMs };
+  },
+  get(key) {
+    const e = this._store[key];
+    if (!e || Date.now() > e.exp) return null;
+    return e.data;
+  },
+  invalidate(key) { delete this._store[key]; },
+  invalidateAll() { this._store = {}; },
+};
+
+/***********************
+ * SKELETON LOADING
+ ***********************/
+function showTableSkeleton(tableId, rows = 5) {
+  const el = document.getElementById(tableId);
+  if (!el) return;
+  // Detecta columnas del thead si existe, fallback a 4
+  const cols = el.querySelector("thead tr")?.children?.length || 4;
+  const tbody = el.querySelector("tbody") || el;
+  const target = el.tagName === "TABLE" ? (el.querySelector("tbody") || el) : el;
+  target.innerHTML = Array.from({ length: rows }, () =>
+    `<tr>${Array.from({ length: cols }, () =>
+      `<td><div class="skeleton"></div></td>`).join("")}</tr>`
+  ).join("");
+}
+
 function toast(t1, t2 = "") {
   const box = $("toast");
   if (!box) return;
@@ -370,25 +404,70 @@ function mountTabs() {
   const tabs = $("tabs");
   if (!tabs) return;
 
-  tabs.querySelectorAll(".tab").forEach((t) => {
-    t.addEventListener("click", () => {
-      tabs.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
-      t.classList.add("active");
+  // Tracks which tabs have been loaded at least once (lazy load)
+  const loaded = new Set(["dashboard", "daily"]); // estos cargan en loadCore
 
-      const key = t.dataset.tab;
-      ["dashboard", "daily", "colabs", "habil", "pres", "pulso"].forEach((k) => {
-        const sec = $(`tab_${k}`);
-        if (sec) sec.style.display = k === key ? "" : "none";
-      });
+  function activateTab(key) {
+    tabs.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+    const activeTab = tabs.querySelector(`[data-tab="${key}"]`);
+    if (activeTab) activeTab.classList.add("active");
 
-      if (key === "dashboard") renderDashboard();
-      if (key === "daily") { renderFlujos(); renderPlan(); renderOutbox(); }
-      if (key === "colabs") renderColabs();
-      if (key === "habil") renderHabil();
-      if (key === "pres") renderPresentismo();
-      if (key === "pulso") renderPulso();
+    ["dashboard", "daily", "colabs", "habil", "pres", "pulso"].forEach((k) => {
+      const sec = $(`tab_${k}`);
+      if (sec) sec.style.display = k === key ? "" : "none";
     });
+
+    // Render inmediato con datos ya cargados
+    if (key === "dashboard") renderDashboard();
+    if (key === "daily") { renderFlujos(); renderPlan(); renderOutbox(); }
+    if (key === "colabs") renderColabs();
+    if (key === "habil") renderHabil();
+    if (key === "pres") renderPresentismo();
+    if (key === "pulso") renderPulso();
+
+    // Lazy load: carga datos del backend solo la primera vez que se visita el tab
+    if (!loaded.has(key)) {
+      loaded.add(key);
+      lazyLoadTab_(key);
+    }
+  }
+
+  tabs.querySelectorAll(".tab").forEach((t) => {
+    t.addEventListener("click", () => activateTab(t.dataset.tab));
   });
+}
+
+async function lazyLoadTab_(name) {
+  setBusy("Cargando", name + "...");
+  try {
+    if (name === "colabs") {
+      if (!CACHE.get("colabs")) {
+        S.colabs = await API.colaboradoresList();
+        CACHE.set("colabs", S.colabs, 90_000);
+      }
+      renderColabs();
+      renderDashboard();
+    }
+    if (name === "habil") {
+      CACHE.invalidate("habil");
+      await refreshHabil();
+      renderHabil();
+    }
+    if (name === "pres") {
+      CACHE.invalidate("pres_week");
+      CACHE.invalidate("pres_stats");
+      CACHE.invalidate("pres_semanas");
+      await refreshPresentismo();
+      mountPresentismoSelect();
+      renderPresentismo();
+      renderDashboard();
+    }
+    // pulso tiene su propio boot/load
+  } catch (e) {
+    setErr(`Error cargando ${name}: ${e.message || e}`);
+  } finally {
+    clearBusy();
+  }
 }
 
 /* ========= Helpers: data mapping ========= */
@@ -444,11 +523,21 @@ async function loadCore() {
   setErr("");
   try {
     setBusy("Cargando", "Sincronizando datos...");
-    const [colabs, canales, flujos] = await Promise.all([
-      API.colaboradoresList(),
-      API.canalesList(),
-      API.flujosList(),
-    ]);
+
+    // Mostrar skeletons mientras carga
+    showTableSkeleton("tblColabs", 6);
+    showTableSkeleton("tblHabil", 6);
+    showTableSkeleton("tblPresWeek", 5);
+
+    // Usa cache si está fresco (TTL: 90s para datos semi-estáticos)
+    const fetchColabs  = CACHE.get("colabs")  ? Promise.resolve(CACHE.get("colabs"))
+      : API.colaboradoresList().then(d => { CACHE.set("colabs", d, 90_000); return d; });
+    const fetchCanales = CACHE.get("canales") ? Promise.resolve(CACHE.get("canales"))
+      : API.canalesList().then(d => { CACHE.set("canales", d, 90_000); return d; });
+    const fetchFlujos  = CACHE.get("flujos")  ? Promise.resolve(CACHE.get("flujos"))
+      : API.flujosList().then(d => { CACHE.set("flujos", d, 60_000); return d; });
+
+    const [colabs, canales, flujos] = await Promise.all([fetchColabs, fetchCanales, fetchFlujos]);
     S.colabs = colabs || [];
     S.canales = canales || [];
     S.flujos = flujos || [];
@@ -2398,25 +2487,35 @@ async function main() {
     }
   });
 
-  // Reload buttons
+  // Reload buttons — invalidan cache antes de re-fetch
   $("btnReloadDash")?.addEventListener("click", async () => {
+    CACHE.invalidate("plan");
+    CACHE.invalidate("outbox");
+    CACHE.invalidate("pres_week");
+    CACHE.invalidate("pres_stats");
     await refreshPlanAndOutbox();
     await refreshPresentismo();
     renderDashboard();
     toast("Dashboard", "Actualizado");
   });
   $("btnReloadColabs")?.addEventListener("click", async () => {
+    CACHE.invalidate("colabs");
     S.colabs = await API.colaboradoresList();
+    CACHE.set("colabs", S.colabs, 90_000);
     renderColabs();
     renderDashboard();
     toast("Colaboradores", "Actualizado");
   });
   $("btnReloadHabil")?.addEventListener("click", async () => {
+    CACHE.invalidate("habil");
     await refreshHabil();
     renderHabil();
     toast("Habilitaciones", "Actualizado");
   });
   $("btnReloadPres")?.addEventListener("click", async () => {
+    CACHE.invalidate("pres_week");
+    CACHE.invalidate("pres_stats");
+    CACHE.invalidate("pres_semanas");
     setBusy("Presentismo", "Actualizando...");
     await refreshPresentismo();
     mountPresentismoSelect();
@@ -2426,13 +2525,20 @@ async function main() {
     toast("Presentismo", "Actualizado");
   });
 
-  $("presSemana")?.addEventListener("change", async (e) => {
-    S.presSemanaSel = String(e?.target?.value || "").trim();
+  // Debounce en cambio de semana para evitar requests duplicados por scroll rápido
+  const presRefreshDebounced_ = debounce(async () => {
     setBusy("Presentismo", S.presSemanaSel ? `Cargando ${S.presSemanaSel}...` : "Cargando semana actual...");
+    CACHE.invalidate("pres_week");
+    CACHE.invalidate("pres_stats");
     await refreshPresentismo();
     renderPresentismo();
     renderDashboard();
     clearBusy();
+  }, 350);
+
+  $("presSemana")?.addEventListener("change", (e) => {
+    S.presSemanaSel = String(e?.target?.value || "").trim();
+    presRefreshDebounced_();
   });
 
   $("btnSetLicencia")?.addEventListener("click", onSetLicencia);
@@ -2527,7 +2633,24 @@ async function main() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  main().catch((e) => setErr(`Error: ${e.message || e}`));
+  main().catch((e) => {
+    setErr(`Error al cargar: ${e.message || e}`);
+    // Botón de retry inline en la barra de error
+    const errEl = $("errBar");
+    if (errEl && !errEl.querySelector(".btn-retry")) {
+      const btn = document.createElement("button");
+      btn.textContent = "↺ Reintentar";
+      btn.className = "btn btn-retry";
+      btn.style.cssText = "margin-left:12px;padding:4px 10px;font-size:13px;vertical-align:middle";
+      btn.onclick = () => {
+        errEl.classList.remove("show");
+        errEl.querySelector(".btn-retry")?.remove();
+        CACHE.invalidateAll();
+        main().catch((e2) => setErr(`Error: ${e2.message || e2}`));
+      };
+      errEl.appendChild(btn);
+    }
+  });
 });
 
 

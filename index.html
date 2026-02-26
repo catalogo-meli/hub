@@ -586,6 +586,56 @@
     th.sortable .srt{margin-left:6px;opacity:.7;font-size:12px}
     .selbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
     .selbar .btn{padding:9px 12px}
+
+    /* === SKELETON LOADING === */
+    .skeleton{
+      background:linear-gradient(
+        90deg,
+        rgba(255,255,255,.04) 25%,
+        rgba(255,255,255,.09) 50%,
+        rgba(255,255,255,.04) 75%
+      );
+      background-size:200% 100%;
+      animation:shimmer 1.4s infinite;
+      border-radius:6px;
+      height:22px;
+      display:block;
+    }
+    [data-theme="light"] .skeleton{
+      background:linear-gradient(
+        90deg,
+        rgba(0,0,0,.05) 25%,
+        rgba(0,0,0,.10) 50%,
+        rgba(0,0,0,.05) 75%
+      );
+      background-size:200% 100%;
+    }
+    @keyframes shimmer{
+      0%{background-position:200% 0}
+      100%{background-position:-200% 0}
+    }
+    tbody .skeleton{margin:2px 0}
+
+    /* === RESPONSIVE MOBILE === */
+    @media(max-width:600px){
+      .tabs{gap:4px;padding:6px;border-radius:14px}
+      .tab{padding:8px 9px;font-size:12px;flex:1 1 auto;text-align:center;min-width:0;border-radius:10px}
+      .brand h1{font-size:28px;letter-spacing:-.3px}
+      .brand p{font-size:12px}
+      .top-actions{gap:6px}
+      .wrap{padding:14px 10px 60px}
+      .card{padding:12px}
+      .card h2{font-size:16px}
+      .row{gap:7px}
+      .btn{padding:8px 11px;font-size:13px}
+      .slack-compose-grid{grid-template-columns:1fr!important}
+      .table td,.table th{padding:7px 8px;font-size:12px}
+      .pill{font-size:11px;padding:5px 8px}
+    }
+    @media(max-width:400px){
+      .tab{padding:7px 6px;font-size:11px}
+      .brand h1{font-size:22px}
+    }
   </style>
 </head>
 <body>

@@ -12,16 +12,68 @@ exports.handler = async (event) => {
 
     const method = event.httpMethod || "GET";
 
-    if (method === "GET") {
-      const qs = event.queryStringParameters || {};
-      const url = new URL(GAS_URL);
-      Object.entries(qs).forEach(([k, v]) => url.searchParams.set(k, v));
-      url.searchParams.set("token", API_TOKEN);
+    
+if (method === "GET") {
+  const qs = event.queryStringParameters || {};
+  const url = new URL(GAS_URL);
+  Object.entries(qs).forEach(([k, v]) => {
+    if (v === undefined || v === null) return;
+    url.searchParams.set(k, String(v));
+  });
+  // Siempre forzamos token desde Netlify (no dependemos de que el cliente lo envíe)
+  url.searchParams.set("token", API_TOKEN);
 
-      const resp = await fetch(url.toString(), { method: "GET" });
-      const text = await resp.text();
-      return { statusCode: resp.status, headers: cors(), body: text };
+  // En este HUB preferimos SIEMPRE devolver JSON (aunque haya error),
+  // porque un status 502 hace que el navegador muestre una pantalla genérica
+  // y perdemos el detalle operativo del fallo.
+
+  // Timeout defensivo (Netlify Functions tiene límites; mejor fallar rápido con info).
+  const controller = new AbortController();
+  const timeoutMs = 12000;
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const resp = await fetch(url.toString(), {
+      method: "GET",
+      headers: { "Accept": "application/json,text/plain,*/*" },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    const text = await resp.text();
+    clearTimeout(t);
+
+    // Si Apps Script respondió HTML (errores/redirects raros), envolvemos en JSON para no romper el front.
+    const isJson = (() => {
+      try { JSON.parse(text); return true; } catch { return false; }
+    })();
+
+    if (!resp.ok) {
+      return json(200, {
+        ok: false,
+        http_status: resp.status,
+        error: `GAS error (${resp.status})`,
+        url: url.toString(),
+        body: isJson ? JSON.parse(text) : text.slice(0, 800),
+      });
     }
+
+    // Si es JSON, devolvemos tal cual (mantiene contrato ok_/err_)
+    if (isJson) return { statusCode: 200, headers: { ...cors(), "Content-Type": "application/json" }, body: text };
+
+    // Si no es JSON, devolvemos envoltorio JSON (evita "Non-JSON response")
+    return json(200, { ok: false, error: "Non-JSON response from GAS", url: url.toString(), body: text.slice(0, 800) });
+  } catch (err) {
+    clearTimeout(t);
+    const isAbort = String(err?.name || "").toLowerCase().includes("abort");
+    return json(200, {
+      ok: false,
+      http_status: 502,
+      error: isAbort ? `Upstream timeout (${timeoutMs}ms)` : "Upstream fetch failed",
+      detail: String(err?.message || err),
+      url: url.toString(),
+    });
+  }
+}
 
     if (method === "POST") {
       const body = event.body ? JSON.parse(event.body) : {};
@@ -137,6 +189,9 @@ function cors() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
+    // Evita que Netlify CDN cachee respuestas de la API (fix Presentismo stale data)
+    "Cache-Control": "no-store, no-cache, must-revalidate",
+    "Pragma": "no-cache",
   };
 }
 function json(statusCode, obj) {
