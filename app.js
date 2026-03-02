@@ -535,34 +535,29 @@ async function loadCore() {
     showTableSkeleton("tblHabil", 6);
     showTableSkeleton("tblPresWeek", 5);
 
-    // Usa cache si está fresco (TTL: 90s para datos semi-estáticos)
+    // Usa cache si está fresco
+    // TTL extendidos: colabs/canales cambian muy poco (1x semana), flujos cambian poco (1x día)
     const fetchColabs  = CACHE.get("colabs")  ? Promise.resolve(CACHE.get("colabs"))
-      : API.colaboradoresList().then(d => { CACHE.set("colabs", d, 90_000); return d; });
+      : API.colaboradoresList().then(d => { CACHE.set("colabs", d, 5 * 60_000); return d; });
     const fetchCanales = CACHE.get("canales") ? Promise.resolve(CACHE.get("canales"))
-      : API.canalesList().then(d => { CACHE.set("canales", d, 90_000); return d; });
+      : API.canalesList().then(d => { CACHE.set("canales", d, 10 * 60_000); return d; });
     const fetchFlujos  = CACHE.get("flujos")  ? Promise.resolve(CACHE.get("flujos"))
-      : API.flujosList().then(d => { CACHE.set("flujos", d, 60_000); return d; });
+      : API.flujosList().then(d => { CACHE.set("flujos", d, 2 * 60_000); return d; });
 
     const [colabs, canales, flujos] = await Promise.all([fetchColabs, fetchCanales, fetchFlujos]);
     S.colabs = colabs || [];
     S.canales = canales || [];
     S.flujos = flujos || [];
 
-    // PERF: las tres cargas secundarias son independientes entre sí → paralelas
-    await Promise.all([
-      refreshPlanAndOutbox(),
-      refreshHabil(),
-      refreshPresentismo(),
-    ]);
-    mountPresentismoSelect();
+    // PERF: Solo cargamos plan+outbox en el arranque (necesarios para dashboard+daily).
+    // Habilitaciones y Presentismo cargan lazy la primera vez que se entra al tab.
+    // Esto elimina ~4s de carga inicial sin perder funcionalidad.
+    await refreshPlanAndOutbox();
 
     renderDashboard();
     renderFlujos();
     renderPlan();
     renderOutbox();
-    renderColabs();
-    renderHabil();
-    renderPresentismo();
 
     toast("Listo", "Datos cargados");
   } catch (e) {
@@ -592,33 +587,40 @@ function todayYMD() {
 }
 
 async function refreshPresentismo() {
+  // PERF FIX: lanzar semanas + week + stats TODO en paralelo (antes: semanas bloqueaba week/stats → +2-3s).
+  // Usamos allSettled para que un fallo en semanas no rompa la carga de la semana actual.
   try {
-    // 1) Semanas disponibles (dinámico)
-    try {
-      const semanas = await API.presentismoSemanas();
-      S.presSemanas = Array.isArray(semanas) ? semanas : [];
+    const d = todayYMD();
+
+    // Determinar qué endpoints de semana pedir según selección actual
+    const weekReq  = S.presSemanaSel ? API.presentismoWeekBySemana(S.presSemanaSel)  : API.presentismoWeek(d);
+    const statsReq = S.presSemanaSel ? API.presentismoStatsBySemana(S.presSemanaSel) : API.presentismoStats(d);
+
+    const [semanasResult, weekResult, statsResult] = await Promise.allSettled([
+      API.presentismoSemanas(),
+      weekReq,
+      statsReq,
+    ]);
+
+    // Semanas: no bloquea la vista si falla
+    if (semanasResult.status === "fulfilled") {
+      S.presSemanas = Array.isArray(semanasResult.value) ? semanasResult.value : [];
       syncPresSemanaSelect_();
-    } catch {
-      // no bloqueo la vista si el endpoint no está
+    } else {
       S.presSemanas = S.presSemanas || [];
     }
 
-    // 2) Semana seleccionada
-    if (S.presSemanaSel) {
-      const [week, stats] = await Promise.all([
-        API.presentismoWeekBySemana(S.presSemanaSel),
-        API.presentismoStatsBySemana(S.presSemanaSel),
-      ]);
-      S.presWeek = week;
-      S.presStats = stats;
-      return;
+    // Semana actual
+    if (weekResult.status === "fulfilled") {
+      S.presWeek = weekResult.value;
+    } else {
+      setErr(`Presentismo: ${weekResult.reason?.message || weekResult.reason}`);
+      S.presWeek = null;
     }
 
-    // default: semana de "hoy"
-    const d = todayYMD();
-    const [week, stats] = await Promise.all([API.presentismoWeek(d), API.presentismoStats(d)]);
-    S.presWeek = week;
-    S.presStats = stats;
+    // Stats
+    S.presStats = statsResult.status === "fulfilled" ? statsResult.value : null;
+
   } catch (e) {
     setErr(`Presentismo: ${e.message || e}`);
     S.presWeek = null;
