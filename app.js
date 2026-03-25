@@ -2558,14 +2558,14 @@ function buildMensajePlanificacion_() {
   msg += `Hoy tenemos *${totalActivos} colaboradores activos*
 `;
   for (const f of flujosSorted) {
-    msg += `*${porFlujo[f]}* en ${f}
+    msg += `• *${porFlujo[f]}* en ${f}
 `;
   }
   if (notaLineas.length) {
     msg += `Nota:
 `;
     for (const linea of notaLineas) {
-      msg += `${linea}
+      msg += `• ${linea}
 `;
     }
   }
