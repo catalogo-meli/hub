@@ -649,9 +649,7 @@ async function loadCore() {
     S.canales = canales || [];
     S.flujos = flujos || [];
 
-    // PERF: Solo cargamos plan+outbox en el arranque (necesarios para dashboard+daily).
-    // Habilitaciones y Presentismo cargan lazy la primera vez que se entra al tab.
-    // Esto elimina ~4s de carga inicial sin perder funcionalidad.
+    // Cargamos plan+outbox en el arranque (bloqueante: necesarios para el render inicial).
     await refreshPlanAndOutbox();
 
     renderDashboard();
@@ -665,6 +663,16 @@ async function loadCore() {
   } finally {
     clearBusy();
   }
+
+  // Presentismo y Habilitaciones en background: no bloquean el arranque,
+  // pero los datos quedan listos para la píldora, el dashboard y los tabs.
+  Promise.all([
+    refreshPresentismo().then(() => {
+      mountPresentismoSelect();
+      renderDashboard(); // actualiza la píldora presentes/asignados
+    }),
+    refreshHabil(),     // carga S.habil para que el tab esté listo al primer click
+  ]).catch(() => {});   // silencioso: si falla, el lazy load al entrar al tab lo resuelve
 }
 
 async function refreshPlanAndOutbox() {
