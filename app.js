@@ -483,7 +483,7 @@ const S = {
   presSemanaSel: "",
 
   fColabs: { roles: new Set(), equipos: new Set(), q: "" },
-  fHabil: { roles: new Set(), equipos: new Set(), q: "", flujo: "" },
+  fHabil: { roles: new Set(), equipos: new Set(), q: "", flujos: new Set() },
   fPres: { roles: new Set(), equipos: new Set(), q: "" },
 
   // Selección + sorters
@@ -2158,8 +2158,8 @@ function renderHabil() {
 
   const flujos = (S.habil.flujos || []).slice().sort((a, b) => a.localeCompare(b));
 
-  // El msHabilFlujoFilter se monta en wireUI con mountMultiSelect (single-value).
-  // Solo actualizamos su lista de items si cambió (evita re-montar innecesariamente).
+  // Actualizar items del filtro de flujo con los flujos reales disponibles.
+  // updateItems solo re-renderiza si la lista cambió (evita trabajo innecesario).
   if (_habilFlujoMs && typeof _habilFlujoMs.updateItems === "function") {
     _habilFlujoMs.updateItems(flujos);
   }
@@ -2191,7 +2191,7 @@ function renderHabil() {
     const rb = roleBucket(r._meta.rol);
     if (S.fHabil.roles.size > 0 && !S.fHabil.roles.has(rb)) return false;
     if (S.fHabil.equipos.size > 0 && !S.fHabil.equipos.has(r._meta.equipo)) return false;
-    if (S.fHabil.flujo && !r[`H_${S.fHabil.flujo}`]) return false;
+    if (S.fHabil.flujos.size > 0 && ![...S.fHabil.flujos].some(f => r[`H_${f}`])) return false;
     const q = norm(S.fHabil.q);
     if (q) {
       const hay =
@@ -2558,19 +2558,33 @@ function renderDashboard() {
   const colabs = (S.colabs || []).map(colabRowView).filter((x) => x.id);
   const total = colabs.length;
 
-  // Distribución por rol 100% data-driven (sin roles hardcodeados)
-  const normRole = (r) => {
-    const s = String(r || "").trim();
-    return s || "Sin rol";
-  };
+  const normRole = (r) => String(r || "").trim() || "Sin rol";
   const counts = new Map();
-  for (const c of colabs) {
-    const r = normRole(c.rol);
-    counts.set(r, (counts.get(r) || 0) + 1);
-  }
+  for (const c of colabs) counts.set(normRole(c.rol), (counts.get(normRole(c.rol)) || 0) + 1);
 
-  // presentes hoy por rol (cruza presWeek + colaboradores)
+  // Mapa canónico: código Presentismo → { label, cls }
+  const LICENCIA_DISPLAY = {
+    "V":     { label: "Vacaciones",          cls: "bad"  },
+    "M":     { label: "Licencia médica",     cls: "bad"  },
+    "E":     { label: "Estudio",             cls: "bad"  },
+    "TP":    { label: "Trám. prematrim.",    cls: "bad"  },
+    "N":     { label: "Nacimiento",          cls: "bad"  },
+    "MUD":   { label: "Mudanza",             cls: "bad"  },
+    "MAT":   { label: "Maternidad",          cls: "bad"  },
+    "MATR":  { label: "Matrimonio",          cls: "bad"  },
+    "DUELO": { label: "Duelo familiar",      cls: "bad"  },
+    "CF":    { label: "Cuidado familiar",    cls: "bad"  },
+    "DS":    { label: "Donación de sangre",  cls: "bad"  },
+    "MHM":   { label: "Enf. hijo menor",     cls: "bad"  },
+    "TM/TR": { label: "Turno médico",        cls: "warn" },
+    "CJ":    { label: "Cit. judicial",       cls: "warn" },
+  };
+
+  // presentes por rol + recolección de ausentes/parciales con nombre y rol
   const presentesPorRol = new Map();
+  // ausentesPorCodigo: { codigo → [{ nombre, rolCorto }] }
+  const ausentesPorCodigo = {};
+
   if (S.presWeek?.rows?.length) {
     const today = todayYMD();
     const colabsById = new Map((S.colabs || []).map((c) => {
@@ -2579,34 +2593,40 @@ function renderDashboard() {
     }));
     for (const r of S.presWeek.rows) {
       const vday = String(r.vals?.[today] || "").trim();
-      // Cuenta P (Presente) y códigos de Presente parcial (TM/TR, CJ, etc.)
       const imp = presImpactFromCode_(vday);
-      if (imp.cls === "bad") continue; // Ausente: no cuenta
       const meta = colabsById.get(r.id_meli);
       const role = normRole(meta?.rol || "");
-      presentesPorRol.set(role, (presentesPorRol.get(role) || 0) + 1);
+
+      if (imp.cls !== "bad") {
+        // presente o parcial: suma al conteo por rol
+        presentesPorRol.set(role, (presentesPorRol.get(role) || 0) + 1);
+      }
+
+      // Cards de ausencias: incluir ausentes (bad) Y parciales (warn = TM/TR, CJ)
+      if ((imp.cls === "bad" || imp.cls === "warn") && vday && LICENCIA_DISPLAY[vday]) {
+        const bucket = roleBucket(meta?.rol || "");
+        const rolCorto = bucket === "Analista PM" ? "PM"
+          : bucket === "Analista KV" ? "KV"
+          : bucket === "Analista QA" ? "QA"
+          : bucket === "Líderes" ? "TL" : bucket;
+        if (!ausentesPorCodigo[vday]) ausentesPorCodigo[vday] = [];
+        ausentesPorCodigo[vday].push({
+          nombre: meta?.nombre || r.id_meli || r.nombre || "",
+          rolCorto,
+        });
+      }
     }
   }
 
-  // tabla base (oculta roles con 0 en nómina)
+  // tabla de roles
   let rowsRoles = Array.from(counts.keys())
-    .map((rol) => ({
-      rol,
-      nomina: counts.get(rol) || 0,
-      presentes: presentesPorRol.get(rol) || 0,
-    }))
+    .map((rol) => ({ rol, nomina: counts.get(rol) || 0, presentes: presentesPorRol.get(rol) || 0 }))
     .filter((r) => r.nomina > 0);
-
-  // sort
-  // Orden estable por defecto: nómina DESC (si no se tocó el sort manual)
   const ss = S.sort?.dashRoles || { key: "nomina", dir: -1 };
-  const key = ss.key || "rol";
-  const dir = ss.dir || 1;
   rowsRoles.sort((a, b) => {
-    const va = a[key];
-    const vb = b[key];
-    if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
-    return String(va).localeCompare(String(vb)) * dir;
+    const va = a[ss.key || "rol"], vb = b[ss.key || "rol"];
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * (ss.dir || 1);
+    return String(va).localeCompare(String(vb)) * (ss.dir || 1);
   });
 
   const pres = S.presStats?.presentes ?? 0;
@@ -2614,21 +2634,45 @@ function renderDashboard() {
   const flujosActivos = (S.flujos || []).filter((f) => Number(f.perfiles_requeridos ?? f.cantidad ?? 0) >= 1).length;
   const slackPendientes = (S.outbox || []).filter((r) => !String(r.estado || "").toUpperCase().includes("ENVIADO") && !String(r.estado || "").toUpperCase().includes("PROGRAMADO")).length;
 
-  // Semáforo de estado del equipo
   const pct = total > 0 ? pres / total : 0;
   const statusCls = pct >= 0.85 ? "ok" : pct >= 0.65 ? "warn" : "bad";
   const statusLabel = pct >= 0.85 ? "Equipo operativo" : pct >= 0.65 ? "Capacidad reducida" : "Atención requerida";
   const statusEmoji = pct >= 0.85 ? "🟢" : pct >= 0.65 ? "🟡" : "🔴";
 
+  // Cards de ausencias/parciales: una por tipo, solo si hay al menos 1 persona
+  const absenceCards = Object.entries(ausentesPorCodigo)
+    .sort(([a], [b]) => {
+      // Ausentes (bad) primero, parciales (warn) después
+      const ca = LICENCIA_DISPLAY[a]?.cls === "bad" ? 0 : 1;
+      const cb = LICENCIA_DISPLAY[b]?.cls === "bad" ? 0 : 1;
+      return ca - cb || a.localeCompare(b);
+    })
+    .map(([codigo, personas]) => {
+      const { label, cls } = LICENCIA_DISPLAY[codigo] || { label: codigo, cls: "bad" };
+      const n = personas.length;
+      const titulo = `${n} ${n === 1 ? "analista" : "analistas"} · ${label}`;
+      // Lista de personas: "Nombre (ROL)"
+      const lista = personas
+        .sort((a, b) => a.nombre.localeCompare(b.nombre))
+        .map(p => `<div style="font-size:11px;margin-top:3px;opacity:0.85">${escapeHtml(p.nombre || "—")} <span class="muted">(${escapeHtml(p.rolCorto)})</span></div>`)
+        .join("");
+      return `<div class="kpi kpi-absence ${cls}" style="min-width:140px;text-align:left;padding:10px 12px">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">${escapeHtml(titulo)}</div>
+        ${lista}
+      </div>`;
+    })
+    .join("");
+
   kpi.innerHTML = `
     <div class="dash-status pill ${statusCls}" style="width:100%;margin-bottom:14px;padding:12px 16px;font-size:14px;border-radius:12px;display:flex;align-items:center;gap:10px">
       <span style="font-size:18px">${statusEmoji}</span>
-      <span><b>${statusLabel}</b> — ${pres} de ${total} presentes hoy · ${flujosActivos} flujo${flujosActivos !== 1 ? "s" : ""} activo${flujosActivos !== 1 ? "s" : ""}${slackPendientes > 0 ? ` · <span style="color:var(--warn)">${slackPendientes} msg pendiente${slackPendientes !== 1 ? "s" : ""} Slack</span>` : ""}</span>
+      <span><b>${statusLabel}</b> — ${pres} de ${total} presentes hoy · ${flujosActivos} flujo${flujosActivos !== 1 ? "s" : ""} activo${flujosActivos !== 1 ? "s" : ""}${slackPendientes > 0 ? ` · <span style="color:var(--warn)">${slackPendientes} mensaje${slackPendientes !== 1 ? "s" : ""} pendiente${slackPendientes !== 1 ? "s" : ""} Slack</span>` : ""}</span>
     </div>
     <div class="kpi"><div class="v">${total}</div><div class="l">En nómina</div></div>
     <div class="kpi"><div class="v">${pres}</div><div class="l">Presentes hoy</div></div>
     <div class="kpi"><div class="v">${analistasHoy}</div><div class="l">Analistas disponibles</div></div>
     <div class="kpi"><div class="v">${flujosActivos}</div><div class="l">Flujos activos</div></div>
+    ${absenceCards ? `<div style="width:100%;margin-top:10px;display:flex;flex-wrap:wrap;gap:8px">${absenceCards}</div>` : ""}
   `;
 
   tb.innerHTML = rowsRoles.map((r) => `<tr><td>${escapeHtml(r.rol)}</td><td class="right">${r.nomina}</td><td class="right">${r.presentes}</td></tr>`).join("");
@@ -2909,12 +2953,12 @@ async function main() {
   const msRolesHab = mountMultiSelect("msRolesHabil", { title: "Roles", items: rolesListHab, onChange: (set) => { S.fHabil.roles = set; renderHabil(); }});
   const msEquipHab = mountMultiSelect("msEquiposHabil", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fHabil.equipos = set; renderHabil(); }});
 
-  // Filtro de flujo: mismo componente que Roles/Equipo.
-  // Funciona como single-select: al seleccionar uno limpia los demás.
-  _habilFlujoMs = mountMultiSelectSingle("msHabilFlujoFilter", {
+  // Filtro de flujo: mismo componente multi-select que Roles/Equipo.
+  // Selección múltiple con OR: muestra colaboradores habilitados en CUALQUIERA de los flujos elegidos.
+  _habilFlujoMs = mountMultiSelect("msHabilFlujoFilter", {
     title: "Flujo",
     items: [],   // se puebla en renderHabil() con los flujos reales
-    onChange: (val) => { S.fHabil.flujo = val; renderHabil(); },
+    onChange: (set) => { S.fHabil.flujos = set; renderHabil(); },
   });
 
   // Select de flujo en la barra masiva (multi: puede aplicar a varios flujos a la vez)
@@ -3059,7 +3103,7 @@ async function main() {
   });
 
   $("btnClearHabil")?.addEventListener("click", () => {
-    S.fHabil = { roles: new Set(), equipos: new Set(), q: "", flujo: "" };
+    S.fHabil = { roles: new Set(), equipos: new Set(), q: "", flujos: new Set() };
     S._habilSel.clear();
     msRolesHab?.clear(); msEquipHab?.clear();
     _habilFlujoMs?.clear();
