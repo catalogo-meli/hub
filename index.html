@@ -434,14 +434,6 @@ a.pill:hover {
   letter-spacing: .08em;
 }
 
-/* Pulso KPIs: .muted + .val + .sub */
-.kpi .muted { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
-.kpi .val   { font-family: var(--mono); font-size: 26px; font-weight: 500; letter-spacing: -1px; color: var(--text-1); margin-top: 5px; line-height: 1.05; }
-.kpi .sub   { font-size: 11px; color: var(--text-2); margin-top: 4px; }
-
-@media (max-width: 900px) { .kpi { min-width: calc(50% - 6px); } }
-@media (max-width: 520px)  { .kpi { min-width: 100%; } }
-
 /* ── DASHBOARD STATUS BAR ────────────────────────────────────── */
 .dash-status {
   transition: background .25s, border-color .25s;
@@ -1035,7 +1027,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="tab" data-tab="colabs">Colaboradores</div>
 <div class="tab" data-tab="habil">Habilitaciones</div>
 <div class="tab" data-tab="pres">Presentismo</div>
-<div class="tab" data-tab="pulso">Pulso Operativo</div></nav>
+</nav>
 <main class="grid" style="margin-top:16px">
 <!-- Dashboard -->
 <section class="card" id="tab_dashboard">
@@ -1421,141 +1413,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 </table>
 </div>
 </section>
-<section class="card" id="tab_pulso" style="display:none">
-<div class="row">
-<div>
-<h2>Pulso Operativo</h2>
-<div class="muted">Vista ejecutiva-operativa para detectar riesgos, fricción y desvíos (datos + filtros).</div>
-</div>
-<div class="spacer"></div>
-<button class="btn" id="btnPulsoClear">Limpiar</button>
-<button class="btn" id="btnPulsoReload">Actualizar</button>
-</div>
-<div class="hr"></div>
-<div class="row" style="flex-wrap:wrap">
-<div class="field" style="min-width:170px">
-<div class="label">Preset</div>
-<select class="select" id="pulsoPreset">
-<option value="today">Hoy</option>
-<option value="week">Semana actual</option>
-<option value="prevweek">Semana anterior</option>
-<option value="custom">Rango</option>
-</select>
-</div>
-<div class="field" style="min-width:150px">
-<div class="label">Desde</div>
-<input class="input" id="pulsoFrom" type="date"/>
-</div>
-<div class="field" style="min-width:150px">
-<div class="label">Hasta</div>
-<input class="input" id="pulsoTo" type="date"/>
-</div>
-<button class="btn ghost" id="btnPulsoFiltrosToggle" type="button" style="align-self:flex-end;margin-bottom:2px">＋ Filtros avanzados</button>
-</div>
-<!-- Filtros avanzados: colapsados por defecto -->
-<div id="pulsoFiltrosAvanzados" style="display:none">
-<div class="row" style="flex-wrap:wrap;margin-top:6px">
-<div class="field" style="min-width:190px">
-<div class="label">Flujo</div>
-<select class="select" id="pulsoFlujo"><option value="">Todos</option></select>
-</div>
-<div class="field" style="min-width:220px">
-<div class="label">Iniciativa</div>
-<select class="select" id="pulsoIniciativa"><option value="">Todas</option></select>
-</div>
-<div class="field" style="min-width:220px">
-<div class="label">Colaborador</div>
-<select class="select" id="pulsoUsuario"><option value="">Todos</option></select>
-</div>
-<div class="field" style="min-width:220px">
-<div class="label">Team Leader</div>
-<select class="select" id="pulsoTL"><option value="">Todos</option></select>
-</div>
-<div class="field" style="min-width:170px">
-<div class="label">Auditoría</div>
-<select class="select" id="pulsoAuditTipo">
-<option value="demanda">Demanda</option>
-<option value="autoopin">Autoopin</option>
-</select>
-</div>
-</div>
-</div>
-<div class="hr"></div>
-<div class="err" id="pulsoErr" style="display:none"></div>
-<div class="kpis">
-<div class="kpi">
-<div class="muted">Actividad</div>
-<div class="val" id="pulsoKpiActividad">—</div>
-<div class="sub" id="pulsoKpiActividadSub"></div>
-</div>
-<div class="kpi">
-<div class="muted">% HOLD</div>
-<div class="val" id="pulsoKpiHoldPct">—</div>
-<div class="sub" id="pulsoKpiHoldSub"></div>
-</div>
-<div class="kpi">
-<div class="muted">Incidencia top</div>
-<div class="val" id="pulsoKpiIncTop">—</div>
-<div class="sub" id="pulsoKpiIncSub"></div>
-</div>
-<div class="kpi">
-<div class="muted">Calidad</div>
-<div class="val" id="pulsoKpiCalidad">—</div>
-<div class="sub" id="pulsoKpiCalidadSub"></div>
-</div>
-</div>
-<div class="hr"></div>
-<div class="row">
-<div class="pill" id="pulsoSemaforo"><b>Estado operativo</b></div>
-<div class="spacer"></div>
-<div class="muted" id="pulsoMeta"></div>
-</div>
-<div class="muted" id="pulsoSemaforoMsg" style="margin-top:6px"></div>
-<div class="hr"></div>
-<div class="row">
-<div class="pill"><b>Productividad</b></div>
-<div class="spacer"></div>
-<div class="muted" id="pulsoProdMeta"></div>
-</div>
-<div style="margin-top:12px">
-<div class="muted" style="margin:8px 0">Distribución por status</div>
-<div id="pulsoStatusBars"></div>
-</div>
-<div style="margin-top:12px;overflow:auto">
-<table class="table" id="pulsoTblProd"></table>
-</div>
-<div class="hr"></div>
-<div class="row" style="align-items:center;justify-content:space-between;gap:12px">
-  <div class="pill"><b>Fricción (HOLD + Incidencias)</b></div>
-  <button class="btn ghost" id="btnPulsoFriccionToggle" type="button"><span id="pulsoFriccionToggleText">📊 Ver detalle</span></button>
-</div>
-<div id="pulsoFriccionDetalle" style="display:none">
-<div class="row" style="gap:16px;flex-wrap:wrap;margin-top:12px">
-<div style="flex:1;min-width:280px">
-<div class="muted" style="margin:6px 0">Top incidencias</div>
-<div id="pulsoTopInc"></div>
-</div>
-<div style="flex:1;min-width:280px">
-<div class="muted" style="margin:6px 0">% HOLD outliers</div>
-<div id="pulsoHoldOutliers"></div>
-</div>
-</div>
-</div>
-<div class="hr"></div>
-<div class="row">
-<div class="pill"><b>Calidad (Auditorías)</b></div>
-</div>
-<div style="margin-top:12px;overflow:auto">
-<table class="table" id="pulsoTblCalidad"></table>
-</div>
-<div class="hr"></div>
-<div class="row">
-<div class="pill"><b>Equipo</b></div>
-</div>
-<div style="margin-top:12px;overflow:auto">
-<table class="table" id="pulsoTblEquipo"></table>
-</div>
-</section></main>
+</main>
 <div aria-busy="true" aria-live="polite" class="busy" id="busy">
 <div aria-hidden="true" class="spinner"></div>
 <div>

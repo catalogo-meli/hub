@@ -80,10 +80,6 @@ export const API = {
   planificacionGenerar: () => post("planificacion.generar", {}),
   planificacionList: () => get("planificacion.list"),
 
-  indicadoresPulso: (params = {}) => get("indicadores.pulso", params),
-  indicadoresPulsoV2: (params = {}) => get("indicadores.pulso.v2", params),
-  pulsoFriccion: (params = {}) => get("indicadores.pulso.friccion", params),
-  auditoriaCalidad: (params = {}) => get("auditoria.calidad", params),
 
   slackOutboxGenerar: () => post("slack.outbox.generar", {}),
   // Solo GENERAL (sin POR_FLUJO)
