@@ -381,7 +381,7 @@ const S = {
   presSemanaSel: "",
 
   fColabs: { roles: new Set(), equipos: new Set(), q: "" },
-  fHabil: { roles: new Set(), equipos: new Set(), q: "" },
+  fHabil: { roles: new Set(), equipos: new Set(), q: "", flujo: "" },
   fPres: { roles: new Set(), equipos: new Set(), q: "" },
 
   // Selección + sorters
@@ -395,6 +395,7 @@ const S = {
 
   // Dirty flags: qué secciones necesitan re-render al activar tab
   _dirty: new Set(),
+  sentCollapsed: true,  // Enviados colapsado por defecto
 };
 
 /* ========= Theme ========= */
@@ -448,7 +449,7 @@ async function lazyLoadTab_(name) {
     if (name === "colabs") {
       if (!CACHE.get("colabs")) {
         S.colabs = await API.colaboradoresList();
-        CACHE.set("colabs", S.colabs, 90_000);
+        CACHE.set("colabs", S.colabs, 5 * 60_000);
       }
       renderColabs();
       renderDashboard();
@@ -461,7 +462,6 @@ async function lazyLoadTab_(name) {
     if (name === "pres") {
       CACHE.invalidate("pres_week");
       CACHE.invalidate("pres_stats");
-      CACHE.invalidate("pres_semanas");
       await refreshPresentismo();
       mountPresentismoSelect();
       renderPresentismo();
@@ -584,40 +584,20 @@ function todayYMD() {
 }
 
 async function refreshPresentismo() {
-  // PERF FIX: lanzar semanas + week + stats TODO en paralelo (antes: semanas bloqueaba week/stats → +2-3s).
-  // Usamos allSettled para que un fallo en semanas no rompa la carga de la semana actual.
+  // Siempre carga la semana en curso. Lanza week + stats en paralelo.
   try {
     const d = todayYMD();
-
-    // Determinar qué endpoints de semana pedir según selección actual
-    const weekReq  = S.presSemanaSel ? API.presentismoWeekBySemana(S.presSemanaSel)  : API.presentismoWeek(d);
-    const statsReq = S.presSemanaSel ? API.presentismoStatsBySemana(S.presSemanaSel) : API.presentismoStats(d);
-
-    const [semanasResult, weekResult, statsResult] = await Promise.allSettled([
-      API.presentismoSemanas(),
-      weekReq,
-      statsReq,
+    const [weekResult, statsResult] = await Promise.allSettled([
+      API.presentismoWeek(d),
+      API.presentismoStats(d),
     ]);
-
-    // Semanas: no bloquea la vista si falla
-    if (semanasResult.status === "fulfilled") {
-      S.presSemanas = Array.isArray(semanasResult.value) ? semanasResult.value : [];
-      syncPresSemanaSelect_();
-    } else {
-      S.presSemanas = S.presSemanas || [];
-    }
-
-    // Semana actual
     if (weekResult.status === "fulfilled") {
       S.presWeek = weekResult.value;
     } else {
       setErr(`Presentismo: ${weekResult.reason?.message || weekResult.reason}`);
       S.presWeek = null;
     }
-
-    // Stats
     S.presStats = statsResult.status === "fulfilled" ? statsResult.value : null;
-
   } catch (e) {
     setErr(`Presentismo: ${e.message || e}`);
     S.presWeek = null;
@@ -625,73 +605,73 @@ async function refreshPresentismo() {
   }
 }
 
-function syncPresSemanaSelect_() {
-  const sel = $("presSemana");
-  if (!sel) return;
-
-  // anchor year: from current loaded week (if available) to handle year boundaries correctly
-  const anchorYear = (S.presWeek && S.presWeek.days && S.presWeek.days[0] && S.presWeek.days[0].key)
-    ? Number(String(S.presWeek.days[0].key).slice(0, 4))
-    : new Date().getFullYear();
-
-  const cur = sel.value || "";
-  sel.innerHTML = (S.presSemanas || []).map((w) => {
-    const val = String(w);
-    const label = presWeekLabelWithRange_(val, anchorYear);
-    return `<option value="${escapeHtml(val)}">${escapeHtml(label)}</option>`;
-  }).join("");
-
-  if (cur) sel.value = cur;
-}
 
 
 /* ========= Operativa diaria: Flujos autosave (OPTIMIZADO) ========= */
-// ✅ OPTIMIZACIÓN: Validación robusta + prevención de doble submit
-let saveFlujoInProgress = false;
+// Guardado optimista: actualiza S.flujos localmente SIN re-render del DOM,
+// luego persiste en background. El TL puede seguir escribiendo sin perder el foco.
+const _flujoSaveQueue = new Map();
 
-const saveFlujoDebounced = debounce(async (flujo, perfiles, channel_id) => {
-  // ✅ Prevenir doble submit
-  if (saveFlujoInProgress) {
-    console.log("⚠️ Guardado ya en progreso, ignorando llamada duplicada");
-    return;
+function saveFlujoOptimistic(flujo, perfiles, channel_id) {
+  // 1) Actualizar cache local inmediatamente (sin tocar DOM)
+  const idx = (S.flujos || []).findIndex(f => String(f.flujo) === String(flujo));
+  if (idx >= 0) {
+    S.flujos[idx].perfiles_requeridos = perfiles;
+    if (channel_id !== undefined) S.flujos[idx].channel_id = channel_id;
   }
+  // Actualizar solo la píldora de estado (liviano, no re-renderiza la tabla)
+  _updateDailyStatusPill_();
 
-  saveFlujoInProgress = true;
-  setErr("");
-  
-  try {
-    $("dailyStatus").textContent = "Guardando...";
-    
-    // ✅ Guardar y validar respuesta
-    await API.flujosUpsert(flujo, perfiles, channel_id || "");
-    
-    // ✅ Recargar lista completa para confirmar guardado
-    const flujos = await API.flujosList();
-    
-    // ✅ Validar que el flujo se guardó correctamente
-    const savedFlujo = flujos.find(f => f.flujo === flujo);
-    if (!savedFlujo) {
-      throw new Error("Flujo no encontrado después de guardar");
+  // 2) Cancelar timer previo del mismo flujo y programar guardado real
+  const prev = _flujoSaveQueue.get(flujo);
+  if (prev?.timer) clearTimeout(prev.timer);
+
+  const timer = setTimeout(async () => {
+    _flujoSaveQueue.delete(flujo);
+    const el = $("dailyStatus");
+    if (el) el.textContent = "Guardando...";
+    setErr("");
+    try {
+      await API.flujosUpsert(flujo, perfiles, channel_id || "");
+      if (el) el.textContent = "✓ Guardado";
+      setTimeout(() => { if (el && el.textContent === "✓ Guardado") el.textContent = "Listo"; }, 1500);
+    } catch (e) {
+      setErr(`Error al guardar ${flujo}: ${e.message || e}`);
+      if (el) el.textContent = "Error";
+      // Revertir valor local al fallar
+      const flujos = await API.flujosList().catch(() => null);
+      if (flujos) { S.flujos = flujos; renderFlujos(); }
     }
-    
-    if (Number(savedFlujo.perfiles_requeridos || 0) !== Number(perfiles)) {
-      throw new Error(`Guardado no confirmado. Esperado: ${perfiles}, Obtenido: ${savedFlujo.perfiles_requeridos}`);
-    }
-    
-    // ✅ Actualizar estado con datos confirmados
-    S.flujos = flujos;
-    renderFlujos();
-    toast("✓ Guardado", flujo);
-    
-  } catch (e) {
-    setErr(`Error al guardar ${flujo}: ${e.message || e}`);
-    console.error("Error en saveFlujo:", e);
-    // ✅ NO actualizar UI si falló
-  } finally {
-    saveFlujoInProgress = false;
-    $("dailyStatus").textContent = "Listo";
+  }, 600);
+
+  _flujoSaveQueue.set(flujo, { perfiles, channel_id, timer });
+}
+
+// Alias para compatibilidad con código que llama saveFlujoDebounced
+const saveFlujoDebounced = (flujo, perfiles, channel_id) => saveFlujoOptimistic(flujo, perfiles, channel_id);
+
+function _updateDailyStatusPill_() {
+  const alertEl = $("dailyAssignAlert");
+  if (!alertEl) return;
+  const rows = (S.flujos || []);
+  const disponibles = countAnalistasDisponiblesHoy_();
+  const requeridos = rows.reduce((acc, f) => acc + (Number(f.perfiles_requeridos ?? f.cantidad ?? 0) || 0), 0);
+  const diff = disponibles - requeridos;
+  let cls = "", msg = "";
+  if (diff > 0) {
+    cls = "warn";
+    msg = `Hay ${diff} perfil${diff > 1 ? "es" : ""} sin asignar · ${disponibles} presentes / ${requeridos} asignados`;
+  } else if (diff < 0) {
+    const faltan = Math.abs(diff);
+    cls = "bad";
+    msg = `${faltan > 1 ? "Faltan" : "Falta"} ${faltan} perfil${faltan > 1 ? "es" : ""} · ${disponibles} presentes / ${requeridos} asignados`;
+  } else {
+    cls = "ok";
+    msg = `Equipo completo · ${disponibles} presentes / ${requeridos} asignados`;
   }
-}, 420);
+  alertEl.className = `pill ${cls}`;
+  alertEl.innerHTML = escapeHtml(msg);
+}
 
 function resolveChannelByIdOrName_(val) {
   const raw = String(val || "").trim();
@@ -919,31 +899,8 @@ function renderFlujos() {
 
   updateDailyGenerateDisabled_();
 
-  // Alerta: perfiles disponibles vs requeridos (basado en presentes hoy)
-  const alertEl = $("dailyAssignAlert");
-  if (alertEl) {
-    const disponibles = countAnalistasDisponiblesHoy_();
-    const requeridos = rows.reduce((acc, f) => acc + (Number(f.perfiles_requeridos ?? f.cantidad ?? 0) || 0), 0);
-    const diff = disponibles - requeridos;
-
-let cls = "";
-let msg = "";
-
-if (diff > 0) {
-  cls = "warn";
-  msg = `Hay ${diff} perfil${diff > 1 ? "es" : ""} sin asignar · ${disponibles} presentes / ${requeridos} asignados`;
-} else if (diff < 0) {
-  const faltan = Math.abs(diff);
-  cls = "bad";
-  msg = `${faltan > 1 ? "Faltan" : "Falta"} ${faltan} perfil${faltan > 1 ? "es" : ""} · ${disponibles} presentes / ${requeridos} asignados`;
-} else {
-  cls = "ok";
-  msg = `Equipo completo · ${disponibles} presentes / ${requeridos} asignados`;
-}
-    
-    alertEl.className = `pill ${cls}`;
-    alertEl.innerHTML = escapeHtml(msg);
-  }
+  // Actualizar píldora de estado (centralizado en _updateDailyStatusPill_)
+  _updateDailyStatusPill_();
 
 }
 
@@ -1355,9 +1312,34 @@ function renderOutbox() {
     `;
   };
 
-  tbSent.innerHTML = sent.length
-    ? sent.map(sentRowHtml).join("")
-    : `<tr><td colspan="4" class="muted">Sin mensajes enviados en las últimas 2 semanas.</td></tr>`;
+  // Sección enviados colapsable
+  const sentSection = $("sentSection");
+  const sentToggleBtn = $("btnToggleSent");
+  if (sentSection) sentSection.style.display = S.sentCollapsed ? "none" : "";
+  if (sentToggleBtn) {
+    sentToggleBtn.textContent = S.sentCollapsed ? "▶ Mostrar" : "▼ Ocultar";
+    if (!sentToggleBtn._bound) {
+      sentToggleBtn._bound = true;
+      sentToggleBtn.addEventListener("click", () => {
+        S.sentCollapsed = !S.sentCollapsed;
+        sentToggleBtn.textContent = S.sentCollapsed ? "▶ Mostrar" : "▼ Ocultar";
+        if (sentSection) sentSection.style.display = S.sentCollapsed ? "none" : "";
+        if (!S.sentCollapsed) {
+          tbSent.innerHTML = sent.length
+            ? sent.map(sentRowHtml).join("")
+            : `<tr><td colspan="4" class="muted">Sin mensajes enviados en las últimas 2 semanas.</td></tr>`;
+        }
+      });
+    }
+  }
+
+  if (!S.sentCollapsed) {
+    tbSent.innerHTML = sent.length
+      ? sent.map(sentRowHtml).join("")
+      : `<tr><td colspan="4" class="muted">Sin mensajes enviados en las últimas 2 semanas.</td></tr>`;
+  } else {
+    tbSent.innerHTML = "";
+  }
 
   if (btnRefreshSent && !btnRefreshSent._bound) {
     btnRefreshSent._bound = true;
@@ -2061,6 +2043,15 @@ function renderHabil() {
   }
 
   const flujos = (S.habil.flujos || []).slice().sort((a, b) => a.localeCompare(b));
+
+  // Poblar select de filtro por flujo con los flujos reales
+  const habilFlujoSel = $("habilFlujoFilter");
+  if (habilFlujoSel) {
+    habilFlujoSel.innerHTML = `<option value="">Todos los flujos</option>` +
+      flujos.map(f => `<option value="${escapeAttr(f)}">${escapeHtml(f)}</option>`).join("");
+    if (S.fHabil.flujo) habilFlujoSel.value = S.fHabil.flujo;
+  }
+
   head.innerHTML = `
     <tr>
       <th style="min-width:220px">Colaborador</th>
@@ -2084,6 +2075,7 @@ function renderHabil() {
     const rb = roleBucket(r._meta.rol);
     if (S.fHabil.roles.size > 0 && !S.fHabil.roles.has(rb)) return false;
     if (S.fHabil.equipos.size > 0 && !S.fHabil.equipos.has(r._meta.equipo)) return false;
+    if (S.fHabil.flujo && !r[`H_${S.fHabil.flujo}`]) return false;
 
     const q = norm(S.fHabil.q);
     if (q) {
@@ -2159,13 +2151,20 @@ function renderHabil() {
 
 async function setHabilitacion(idMeli, flujo, habilitado, fijo) {
   setErr("");
+  // Optimistic update: modificar S.habil local sin recargar la lista completa
+  if (S.habil?.rows) {
+    const r = S.habil.rows.find(x => (x.id_meli || x.ID_MELI || x.Id_Meli) === idMeli);
+    if (r) { r[`H_${flujo}`] = !!habilitado; r[`F_${flujo}`] = !!fijo; }
+  }
   try {
     await API.habilitacionesSet(idMeli, flujo, !!habilitado, !!fijo);
-    S.habil = await API.habilitacionesList();
-    renderHabil();
-    toast("Habilitaciones", "Actualizado");
+    CACHE.invalidate("habil");
+    toast("Habilitaciones", "✓");
   } catch (e) {
     setErr(`Habilitaciones: ${e.message || e}`);
+    // Revertir: recargar desde el servidor
+    S.habil = await API.habilitacionesList().catch(() => S.habil);
+    renderHabil();
   }
 }
 
@@ -2548,14 +2547,31 @@ async function main() {
     const name = $("newFlujoName")?.value?.trim() || "";
     if (!name) return setErr("Flujos: escribí el nombre del flujo.");
 
+    if ((S.flujos || []).some(f => String(f.flujo).trim().toLowerCase() === name.toLowerCase())) {
+      return setErr(`Flujos: ya existe un flujo con el nombre "${name}".`);
+    }
+
     try {
       $("dailyStatus").textContent = "Guardando...";
-      // Perfiles requeridos por defecto = 0 (reduce fricción)
       await API.flujosUpsert(name, 0, "");
       S.flujos = await API.flujosList();
       renderFlujos();
       toast("Flujo agregado", name);
       $("newFlujoName").value = "";
+      // Scroll al nuevo flujo y foco en input de perfiles
+      requestAnimationFrame(() => {
+        const tb = $("tblFlujos")?.querySelector("tbody");
+        if (!tb) return;
+        const newRow = Array.from(tb.querySelectorAll("tr")).find(tr => {
+          const b = tr.querySelector("td b");
+          return b && b.textContent.trim() === name;
+        });
+        if (newRow) {
+          newRow.scrollIntoView({ behavior: "smooth", block: "center" });
+          const inp = newRow.querySelector("[data-req]");
+          if (inp) { inp.focus(); inp.select(); }
+        }
+      });
     } catch (e) {
       setErr(`Flujos: ${e.message || e}`);
     } finally {
@@ -2577,7 +2593,7 @@ async function main() {
   $("btnReloadColabs")?.addEventListener("click", async () => {
     CACHE.invalidate("colabs");
     S.colabs = await API.colaboradoresList();
-    CACHE.set("colabs", S.colabs, 90_000);
+    CACHE.set("colabs", S.colabs, 5 * 60_000);
     renderColabs();
     renderDashboard();
     toast("Colaboradores", "Actualizado");
@@ -2591,7 +2607,6 @@ async function main() {
   $("btnReloadPres")?.addEventListener("click", async () => {
     CACHE.invalidate("pres_week");
     CACHE.invalidate("pres_stats");
-    CACHE.invalidate("pres_semanas");
     setBusy("Presentismo", "Actualizando...");
     await refreshPresentismo();
     mountPresentismoSelect();
@@ -2599,22 +2614,6 @@ async function main() {
     renderDashboard();
     clearBusy();
     toast("Presentismo", "Actualizado");
-  });
-
-  // Debounce en cambio de semana para evitar requests duplicados por scroll rápido
-  const presRefreshDebounced_ = debounce(async () => {
-    setBusy("Presentismo", S.presSemanaSel ? `Cargando ${S.presSemanaSel}...` : "Cargando semana actual...");
-    CACHE.invalidate("pres_week");
-    CACHE.invalidate("pres_stats");
-    await refreshPresentismo();
-    renderPresentismo();
-    renderDashboard();
-    clearBusy();
-  }, 350);
-
-  $("presSemana")?.addEventListener("change", (e) => {
-    S.presSemanaSel = String(e?.target?.value || "").trim();
-    presRefreshDebounced_();
   });
 
   $("btnSetLicencia")?.addEventListener("click", onSetLicencia);
@@ -2634,6 +2633,11 @@ async function main() {
 
   mountSearch("searchColabs", "searchColabsWrap", "clearSearchColabs", (q) => { S.fColabs.q = q; renderColabs(); });
   mountSearch("searchHabil", "searchHabilWrap", "clearSearchHabil", (q) => { S.fHabil.q = q; renderHabil(); });
+
+  $("habilFlujoFilter")?.addEventListener("change", (e) => {
+    S.fHabil.flujo = String(e?.target?.value || "").trim();
+    renderHabil();
+  });
   mountSearch("searchPres", "searchPresWrap", "clearSearchPres", (q) => { S.fPres.q = q; renderPresentismo(); });
 
   $("btnClearColabs")?.addEventListener("click", () => {
@@ -2683,9 +2687,10 @@ async function main() {
   });
 
   $("btnClearHabil")?.addEventListener("click", () => {
-    S.fHabil = { roles: new Set(), equipos: new Set(), q: "" };
+    S.fHabil = { roles: new Set(), equipos: new Set(), q: "", flujo: "" };
     msRolesHab?.clear(); msEquipHab?.clear();
     $("searchHabil").value = ""; $("searchHabilWrap").classList.remove("has");
+    const hfs = $("habilFlujoFilter"); if (hfs) hfs.value = "";
     renderHabil();
   });
   $("btnClearPres")?.addEventListener("click", () => {

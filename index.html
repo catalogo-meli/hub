@@ -1238,10 +1238,13 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 </div>
 <div class="hr"></div>
 <div class="row" style="align-items:center;justify-content:space-between">
+<div style="display:flex;align-items:center;gap:10px">
 <div class="pill"><b>Enviados</b> <span class="muted" style="font-weight:400">(últimas 2 semanas)</span></div>
+<button class="btn ghost" id="btnToggleSent" type="button" style="font-size:12px;padding:3px 10px">▶ Mostrar</button>
+</div>
 <button class="btn ghost" id="btnRefreshSent" type="button">Refrescar</button>
 </div>
-<div style="margin-top:12px;overflow:auto">
+<div id="sentSection" style="display:none;margin-top:12px;overflow:auto">
 <table class="table" id="tblSent">
 <thead>
 <tr>
@@ -1319,6 +1322,10 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="row">
 <div class="ms" id="msRolesHabil"></div>
 <div class="ms" id="msEquiposHabil"></div>
+<div style="min-width:180px">
+<div class="muted" style="font-size:12px;margin-bottom:6px">Flujo</div>
+<select class="select" id="habilFlujoFilter"><option value="">Todos los flujos</option></select>
+</div>
 <div class="search" id="searchHabilWrap">
 <input class="input" id="searchHabil" placeholder="Buscar..."/>
 <div class="x" id="clearSearchHabil">×</div>
@@ -1349,10 +1356,6 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="row">
 <div class="ms" id="msRolesPres"></div>
 <div class="ms" id="msEquiposPres"></div>
-<div style="min-width:160px">
-<div class="muted" style="font-size:12px;margin-bottom:6px">Semana</div>
-<select id="presSemana"></select>
-</div>
 <div class="search" id="searchPresWrap">
 <input class="input" id="searchPres" placeholder="Buscar..."/>
 <div class="x" id="clearSearchPres">×</div>
