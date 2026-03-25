@@ -29,7 +29,7 @@ if (method === "GET") {
 
   // Timeout defensivo (Netlify Functions tiene límites; mejor fallar rápido con info).
   const controller = new AbortController();
-  const timeoutMs = 12000;
+  const timeoutMs = 55000; // Netlify Functions tiene límite de 60s; GAS puede tardar hasta ~20s en cold start
   const t = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
