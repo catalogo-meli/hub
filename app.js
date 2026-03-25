@@ -345,6 +345,108 @@ function mountMultiSelect(targetId, { title, items, onChange }) {
       renderList(); renderValue();
       onChange?.(new Set(state.selected));
     },
+    updateItems: (newItems) => {
+      if (JSON.stringify(items) === JSON.stringify(newItems)) return;
+      items.length = 0;
+      newItems.forEach(it => items.push(it));
+      // Limpiar selecciones que ya no existen
+      for (const v of [...state.selected]) {
+        if (!items.includes(v)) state.selected.delete(v);
+      }
+      renderList(); renderValue();
+    },
+    _state: state,  // para lectura externa (acciones masivas)
+  };
+}
+
+/**
+ * Single-select con el mismo estilo visual de mountMultiSelect.
+ * onChange recibe el valor seleccionado (string) o "" si se limpió.
+ * Expone updateItems(newItems) para repoblar sin re-montar.
+ */
+function mountMultiSelectSingle(targetId, { title, items, onChange }) {
+  const host = $(targetId);
+  if (!host) return null;
+
+  host.className = "ms";
+  host.innerHTML = `
+    <div class="ms-btn">
+      <div>
+        <div class="label">${title}</div>
+        <div class="value" data-ms-value>Todos</div>
+      </div>
+      <div class="muted">▾</div>
+    </div>
+    <div class="ms-panel">
+      <div data-ms-list></div>
+      <div class="ms-actions">
+        <button class="btn ghost" type="button" data-ms-clear>Limpiar</button>
+      </div>
+    </div>
+  `;
+
+  const state = { selected: "", items: items.slice() };
+  const btn  = host.querySelector(".ms-btn");
+  const panel = host.querySelector(".ms-panel");
+  const list  = host.querySelector("[data-ms-list]");
+  const value = host.querySelector("[data-ms-value]");
+  const bClear = host.querySelector("[data-ms-clear]");
+
+  function renderList() {
+    list.innerHTML = state.items.map((it) =>
+      `<label class="ms-item">
+        <input type="checkbox" value="${String(it).replace(/"/g, "&quot;")}" ${state.selected === String(it) ? "checked" : ""} />
+        <div>${it}</div>
+      </label>`
+    ).join("");
+
+    list.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        // Single: seleccionar este deselecciona los demás
+        state.selected = cb.checked ? cb.value : "";
+        renderList();
+        renderValue();
+        onChange?.(state.selected);
+      });
+    });
+  }
+
+  function renderValue() {
+    value.textContent = state.selected ? state.selected : "Todos";
+  }
+
+  function close() { host.classList.remove("open"); }
+  btn.addEventListener("click", (e) => { e.stopPropagation(); host.classList.toggle("open"); });
+  document.addEventListener("click", () => close());
+  panel.addEventListener("click", (e) => e.stopPropagation());
+
+  bClear.addEventListener("click", () => {
+    state.selected = "";
+    renderList(); renderValue();
+    onChange?.("");
+  });
+
+  renderList();
+  renderValue();
+
+  return {
+    clear: () => {
+      state.selected = "";
+      renderList(); renderValue();
+      onChange?.("");
+    },
+    updateItems: (newItems) => {
+      if (JSON.stringify(state.items) === JSON.stringify(newItems)) return; // sin cambios
+      state.items = newItems.slice();
+      // Si el valor seleccionado ya no existe, limpiar
+      if (state.selected && !state.items.includes(state.selected)) {
+        state.selected = "";
+        onChange?.("");
+      }
+      renderList();
+      renderValue();
+    },
+    _state: state,  // expuesto para lectura en acciones masivas
   };
 }
 
@@ -396,6 +498,7 @@ const S = {
   // Dirty flags: qué secciones necesitan re-render al activar tab
   _dirty: new Set(),
   sentCollapsed: true,  // Enviados colapsado por defecto
+  _habilSel: new Set(),  // IDs seleccionados para acción masiva
 };
 
 /* ========= Theme ========= */
@@ -2030,7 +2133,10 @@ function renderColabs() {
   });
 }
 
-/* ========= Habilitaciones (igual) ========= */
+// Instancia del mountMultiSelect del filtro de flujo en Habilitaciones
+let _habilFlujoMs = null;
+
+/* ========= Habilitaciones ========= */
 function renderHabil() {
   const head = $("tblHabilHead");
   const body = $("tblHabilBody");
@@ -2044,16 +2150,18 @@ function renderHabil() {
 
   const flujos = (S.habil.flujos || []).slice().sort((a, b) => a.localeCompare(b));
 
-  // Poblar select de filtro por flujo con los flujos reales
-  const habilFlujoSel = $("habilFlujoFilter");
-  if (habilFlujoSel) {
-    habilFlujoSel.innerHTML = `<option value="">Todos los flujos</option>` +
-      flujos.map(f => `<option value="${escapeAttr(f)}">${escapeHtml(f)}</option>`).join("");
-    if (S.fHabil.flujo) habilFlujoSel.value = S.fHabil.flujo;
+  // El msHabilFlujoFilter se monta en wireUI con mountMultiSelect (single-value).
+  // Solo actualizamos su lista de items si cambió (evita re-montar innecesariamente).
+  if (_habilFlujoMs && typeof _habilFlujoMs.updateItems === "function") {
+    _habilFlujoMs.updateItems(flujos);
   }
 
+  // Header: select-all + colaborador + columnas de flujos
   head.innerHTML = `
     <tr>
+      <th style="width:32px;padding:4px 8px">
+        <input type="checkbox" id="habilSelectAll" title="Seleccionar todos" />
+      </th>
       <th style="min-width:220px">Colaborador</th>
       ${flujos.map((f) => `<th class="nowrap">${escapeHtml(f)}<div class="muted" style="font-size:11px;margin-top:2px">H / F</div></th>`).join("")}
     </tr>
@@ -2076,7 +2184,6 @@ function renderHabil() {
     if (S.fHabil.roles.size > 0 && !S.fHabil.roles.has(rb)) return false;
     if (S.fHabil.equipos.size > 0 && !S.fHabil.equipos.has(r._meta.equipo)) return false;
     if (S.fHabil.flujo && !r[`H_${S.fHabil.flujo}`]) return false;
-
     const q = norm(S.fHabil.q);
     if (q) {
       const hay =
@@ -2090,20 +2197,23 @@ function renderHabil() {
   });
 
   if (!filtered.length) {
-    body.innerHTML = `<tr><td colspan="${1 + flujos.length}" class="muted">Sin resultados.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="${2 + flujos.length}" class="muted">Sin resultados.</td></tr>`;
+    _syncHabilBulkBar_();
     return;
   }
+
+  // Conservar selección entre re-renders
+  const prevSel = S._habilSel || new Set();
 
   body.innerHTML = filtered
     .map((r) => {
       const id = r.id_meli;
       const label = `${r._meta.nombre || id} (${id})`;
+      const sel = prevSel.has(id);
       const cells = flujos
         .map((f) => {
-          const keyH = `H_${f}`;
-          const keyF = `F_${f}`;
-          const hab = !!r[keyH];
-          const fijo = !!r[keyF];
+          const hab = !!r[`H_${f}`];
+          const fijo = !!r[`F_${f}`];
           return `
             <td class="nowrap">
               <label class="row" style="gap:10px;margin:0">
@@ -2117,10 +2227,44 @@ function renderHabil() {
         })
         .join("");
 
-      return `<tr><td>${escapeHtml(label)}</td>${cells}</tr>`;
+      return `<tr data-habil-id="${escapeAttr(id)}" ${sel ? 'class="habil-selected"' : ""}>
+        <td style="width:32px;padding:4px 8px">
+          <input type="checkbox" class="habil-sel-cb" data-sel-id="${escapeAttr(id)}" ${sel ? "checked" : ""} />
+        </td>
+        <td>${escapeHtml(label)}</td>${cells}</tr>`;
     })
     .join("");
 
+  // ── Select-all ──────────────────────────────────────────────
+  const saChk = $("habilSelectAll");
+  if (saChk) {
+    saChk.checked = filtered.length > 0 && filtered.every(r => prevSel.has(r.id_meli));
+    saChk.indeterminate = !saChk.checked && filtered.some(r => prevSel.has(r.id_meli));
+    saChk.addEventListener("change", () => {
+      if (saChk.checked) filtered.forEach(r => S._habilSel.add(r.id_meli));
+      else filtered.forEach(r => S._habilSel.delete(r.id_meli));
+      renderHabil();
+    });
+  }
+
+  // ── Checkboxes de selección de fila ────────────────────────
+  body.querySelectorAll(".habil-sel-cb").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const id = cb.getAttribute("data-sel-id");
+      if (cb.checked) S._habilSel.add(id);
+      else S._habilSel.delete(id);
+      const tr = cb.closest("tr");
+      if (tr) tr.classList.toggle("habil-selected", cb.checked);
+      _syncHabilBulkBar_();
+      // Actualizar estado del select-all
+      if (saChk) {
+        saChk.checked = filtered.every(r => S._habilSel.has(r.id_meli));
+        saChk.indeterminate = !saChk.checked && filtered.some(r => S._habilSel.has(r.id_meli));
+      }
+    });
+  });
+
+  // ── Listeners de H y F individuales ────────────────────────
   body.querySelectorAll("input[data-h]").forEach((cb) => {
     cb.addEventListener("change", async () => {
       const idMeli = cb.getAttribute("data-id");
@@ -2129,7 +2273,6 @@ function renderHabil() {
       const fijoCb = body.querySelector(`input[data-f][data-id="${cssEsc(idMeli)}"][data-flujo="${cssEsc(flujo)}"]`);
       const fijo = fijoCb ? fijoCb.checked : false;
       if (!habilitado && fijoCb) fijoCb.checked = false;
-
       await setHabilitacion(idMeli, flujo, habilitado, habilitado ? fijo : false);
     });
   });
@@ -2139,14 +2282,23 @@ function renderHabil() {
       const idMeli = cb.getAttribute("data-id");
       const flujo = cb.getAttribute("data-flujo");
       const fijo = cb.checked;
-
       const habCb = body.querySelector(`input[data-h][data-id="${cssEsc(idMeli)}"][data-flujo="${cssEsc(flujo)}"]`);
       const habilitado = habCb ? habCb.checked : false;
-
       if (fijo && habCb && !habilitado) habCb.checked = true;
       await setHabilitacion(idMeli, flujo, fijo ? true : habilitado, fijo);
     });
   });
+
+  _syncHabilBulkBar_();
+}
+
+// Actualiza la barra de acciones masivas según S._habilSel
+function _syncHabilBulkBar_() {
+  const bar = $("habilBulkBar");
+  const countEl = $("habilBulkCount");
+  const n = (S._habilSel || new Set()).size;
+  if (bar) bar.style.display = n > 0 ? "" : "none";
+  if (countEl) countEl.innerHTML = `<b>${n} seleccionado${n !== 1 ? "s" : ""}</b>`;
 }
 
 async function setHabilitacion(idMeli, flujo, habilitado, fijo) {
@@ -2749,16 +2901,107 @@ async function main() {
   const msRolesHab = mountMultiSelect("msRolesHabil", { title: "Roles", items: rolesListHab, onChange: (set) => { S.fHabil.roles = set; renderHabil(); }});
   const msEquipHab = mountMultiSelect("msEquiposHabil", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fHabil.equipos = set; renderHabil(); }});
 
+  // Filtro de flujo: mismo componente que Roles/Equipo.
+  // Funciona como single-select: al seleccionar uno limpia los demás.
+  _habilFlujoMs = mountMultiSelectSingle("msHabilFlujoFilter", {
+    title: "Flujo",
+    items: [],   // se puebla en renderHabil() con los flujos reales
+    onChange: (val) => { S.fHabil.flujo = val; renderHabil(); },
+  });
+
+  // Select de flujo en la barra masiva (multi: puede aplicar a varios flujos a la vez)
+  let _habilBulkFlujoMs = mountMultiSelect("msHabilBulkFlujo", {
+    title: "Flujos a aplicar",
+    items: [],   // se puebla al abrir habilitaciones
+    onChange: () => {},  // no filtra, solo acumula selección para la acción
+  });
+
+  // Poblar el ms de la barra masiva cuando S.habil tenga datos
+  const _syncBulkFlujoItems_ = () => {
+    const flujos = (S.habil?.flujos || []).slice().sort((a, b) => a.localeCompare(b));
+    if (_habilBulkFlujoMs && typeof _habilBulkFlujoMs.updateItems === "function") {
+      _habilBulkFlujoMs.updateItems(flujos);
+    }
+  };
+
+  // ── Barra de acciones masivas: botones ──────────────────────────────────
+  async function _applyBulkHabil_(habilitado, fijo, soloFijo) {
+    const sel = Array.from(S._habilSel || []);
+    if (!sel.length) { setErr("Seleccioná al menos un colaborador."); return; }
+
+    // Flujos seleccionados en el ms de la barra
+    const flujosSel = _habilBulkFlujoMs
+      ? Array.from(_habilBulkFlujoMs._state?.selected || [])
+      : [];
+    if (!flujosSel.length) { setErr("Elegí al menos un flujo en la barra."); return; }
+
+    setBusy("Habilitaciones", `Aplicando a ${sel.length} colaboradores...`);
+    setErr("");
+
+    try {
+      // Optimistic update local
+      for (const idMeli of sel) {
+        const r = (S.habil?.rows || []).find(x => (x.id_meli || x.ID_MELI || x.Id_Meli) === idMeli);
+        if (!r) continue;
+        for (const f of flujosSel) {
+          if (soloFijo) {
+            // Solo modifica F, H queda como está (si desmarca F, H no cambia)
+            r[`F_${f}`] = fijo;
+          } else {
+            r[`H_${f}`] = habilitado;
+            if (!habilitado) r[`F_${f}`] = false;  // deshabilitar limpia fijo
+          }
+        }
+      }
+      renderHabil();
+
+      // Llamadas al backend en paralelo
+      const calls = [];
+      for (const idMeli of sel) {
+        const r = (S.habil?.rows || []).find(x => (x.id_meli || x.ID_MELI || x.Id_Meli) === idMeli);
+        if (!r) continue;
+        for (const f of flujosSel) {
+          const hVal = !!r[`H_${f}`];
+          const fVal = !!r[`F_${f}`];
+          calls.push(API.habilitacionesSet(idMeli, f, hVal, fVal));
+        }
+      }
+      await Promise.all(calls);
+      CACHE.invalidate("habil");
+      toast("Habilitaciones", `✓ Aplicado a ${sel.length} colaboradores en ${flujosSel.length} flujo${flujosSel.length > 1 ? "s" : ""}`);
+    } catch (e) {
+      setErr(`Habilitaciones: ${e.message || e}`);
+      S.habil = await API.habilitacionesList().catch(() => S.habil);
+      renderHabil();
+    } finally {
+      clearBusy();
+    }
+  }
+
+  $("btnHabilBulkH1")?.addEventListener("click", () => _applyBulkHabil_(true, false, false));
+  $("btnHabilBulkH0")?.addEventListener("click", () => _applyBulkHabil_(false, false, false));
+  $("btnHabilBulkF1")?.addEventListener("click", () => _applyBulkHabil_(true, true, true));
+  $("btnHabilBulkF0")?.addEventListener("click", () => _applyBulkHabil_(false, false, true));
+
+  $("btnHabilBulkClearSel")?.addEventListener("click", () => {
+    S._habilSel.clear();
+    renderHabil();
+  });
+
+  // Poblar ms flujo barra cuando se carga habilitaciones
+  const _origRefreshHabil = refreshHabil;
+  refreshHabil = async function() {
+    await _origRefreshHabil.apply(this, arguments);
+    _syncBulkFlujoItems_();
+  };
+
   const msRolesPres = mountMultiSelect("msRolesPres", { title: "Roles", items: rolesList, onChange: (set) => { S.fPres.roles = set; renderPresentismo(); }});
   const msEquipPres = mountMultiSelect("msEquiposPres", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fPres.equipos = set; renderPresentismo(); }});
 
   mountSearch("searchColabs", "searchColabsWrap", "clearSearchColabs", (q) => { S.fColabs.q = q; renderColabs(); });
   mountSearch("searchHabil", "searchHabilWrap", "clearSearchHabil", (q) => { S.fHabil.q = q; renderHabil(); });
 
-  $("habilFlujoFilter")?.addEventListener("change", (e) => {
-    S.fHabil.flujo = String(e?.target?.value || "").trim();
-    renderHabil();
-  });
+
   mountSearch("searchPres", "searchPresWrap", "clearSearchPres", (q) => { S.fPres.q = q; renderPresentismo(); });
 
   $("btnClearColabs")?.addEventListener("click", () => {
@@ -2809,9 +3052,10 @@ async function main() {
 
   $("btnClearHabil")?.addEventListener("click", () => {
     S.fHabil = { roles: new Set(), equipos: new Set(), q: "", flujo: "" };
+    S._habilSel.clear();
     msRolesHab?.clear(); msEquipHab?.clear();
+    _habilFlujoMs?.clear();
     $("searchHabil").value = ""; $("searchHabilWrap").classList.remove("has");
-    const hfs = $("habilFlujoFilter"); if (hfs) hfs.value = "";
     renderHabil();
   });
   $("btnClearPres")?.addEventListener("click", () => {
@@ -2833,6 +3077,19 @@ async function main() {
   await loadCore();
   mountSlackCompose_();
 }
+
+
+/* Inyectar estilos para habilitaciones masivas (una sola vez) */
+(function() {
+  if ($("_habilStyles")) return;
+  const s = document.createElement("style");
+  s.id = "_habilStyles";
+  s.textContent = `
+    tr.habil-selected td { background: rgba(var(--pri-rgb, 99,102,241), 0.08); }
+    #habilBulkBar { transition: opacity 0.15s; }
+  `;
+  document.head.appendChild(s);
+})();
 
 document.addEventListener("DOMContentLoaded", () => {
   main().catch((e) => {

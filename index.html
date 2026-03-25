@@ -1321,15 +1321,25 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="row">
 <div class="ms" id="msRolesHabil"></div>
 <div class="ms" id="msEquiposHabil"></div>
-<div style="min-width:180px">
-<div class="muted" style="font-size:12px;margin-bottom:6px">Flujo</div>
-<select class="select" id="habilFlujoFilter"><option value="">Todos los flujos</option></select>
-</div>
+<div class="ms" id="msHabilFlujoFilter"></div>
 <div class="search" id="searchHabilWrap">
 <input class="input" id="searchHabil" placeholder="Buscar..."/>
 <div class="x" id="clearSearchHabil">×</div>
 </div>
 <button class="btn ghost" id="btnClearHabil">Limpiar</button>
+</div>
+<!-- Barra de acciones masivas: visible solo cuando hay seleccionados -->
+<div id="habilBulkBar" style="display:none;margin-top:10px;padding:10px 14px;background:var(--card2,#1e2130);border-radius:10px;border:1px solid var(--border)">
+<div class="row" style="flex-wrap:wrap;gap:10px;align-items:center">
+<div class="pill ok" id="habilBulkCount" style="font-size:13px"><b>0 seleccionados</b></div>
+<div class="ms" id="msHabilBulkFlujo" style="min-width:160px"></div>
+<button class="btn primary" id="btnHabilBulkH1" type="button">Habilitar H</button>
+<button class="btn" id="btnHabilBulkH0" type="button">Deshabilitar H</button>
+<button class="btn primary" id="btnHabilBulkF1" type="button">Marcar Fijo</button>
+<button class="btn" id="btnHabilBulkF0" type="button">Desmarcar Fijo</button>
+<div class="spacer"></div>
+<button class="btn ghost" id="btnHabilBulkClearSel" type="button">Deseleccionar todo</button>
+</div>
 </div>
 <div class="row" style="margin-top:10px">
 <div class="pill"><b>Referencia</b> H = Habilitado | F = Fijo</div>
