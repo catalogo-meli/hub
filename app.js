@@ -2476,6 +2476,126 @@ function renderDashboard() {
 
 
 /* ========= Generar planificación (también genera outbox) ========= */
+
+/* ========= Copiar mensaje planificación ========= */
+
+function buildMensajePlanificacion_() {
+  const plan = (S.plan || []).filter((r) => r?.flujo && r?.id_meli && r.id_meli !== "SIN PERFILES DISPONIBLES");
+  if (!plan.length) return null;
+
+  // Día de la semana en español
+  const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  const hoy = new Date();
+  const diaNombre = DIAS[hoy.getDay()];
+
+  // Total de colaboradores activos hoy (presentes + parciales, excluyendo líderes)
+  const totalActivos = countAnalistasDisponiblesHoy_();
+
+  // Asignados por flujo (de S.plan)
+  const porFlujo = {};
+  for (const r of plan) {
+    const f = String(r.flujo || "").trim();
+    if (!f) continue;
+    porFlujo[f] = (porFlujo[f] || 0) + 1;
+  }
+  const flujosSorted = Object.keys(porFlujo).sort((a, b) => a.localeCompare(b));
+
+  // Ausentes hoy con su tipo de licencia y rol
+  // Cruza S.presWeek (valores de hoy) con S.colabs (para el rol)
+  const today = todayYMD();
+  const ausentesInfo = [];
+  if (S.presWeek?.rows?.length) {
+    const colabsById = new Map((S.colabs || []).map((c) => {
+      const v = colabRowView(c);
+      return [v.id, v];
+    }));
+    for (const r of S.presWeek.rows) {
+      const v = String(r.vals?.[today] || "").trim();
+      const imp = presImpactFromCode_(v);
+      if (imp.cls !== "bad") continue; // solo ausentes reales
+      if (!v) continue; // sin carga no cuenta como ausente
+
+      const meta = colabsById.get(r.id_meli);
+      const bucket = roleBucket(meta?.rol || "");
+      if (bucket === "Líderes") continue; // excluir líderes
+
+      ausentesInfo.push({ codigo: v, rol: bucket });
+    }
+  }
+
+  // Agrupar ausentes por código de licencia
+  // Mapeo de código → etiqueta legible
+  const LICENCIA_LABEL = {
+    "V": "vacaciones", "M": "licencia médica", "E": "estudio",
+    "TP": "trámites prematrimoniales", "N": "nacimiento", "MUD": "mudanza",
+    "MAT": "maternidad", "MATR": "matrimonio", "DUELO": "fallecimiento familiar",
+    "CF": "cuidado de familiar", "DS": "donación de sangre",
+    "TM/TR": "turno médico", "CJ": "citación judicial", "MHM": "enf. hijo menor",
+  };
+
+  // Agrupar por tipo de licencia y rol
+  const ausentesPorTipo = {};
+  for (const { codigo, rol } of ausentesInfo) {
+    const label = LICENCIA_LABEL[codigo] || codigo;
+    const rolCorto = rol === "Analista PM" ? "PM" : rol === "Analista KV" ? "KV" : rol === "Analista QA" ? "QA" : rol;
+    const key = `${label}|${rolCorto}`;
+    ausentesPorTipo[key] = (ausentesPorTipo[key] || 0) + 1;
+  }
+
+  // Construir líneas de notas de ausentes
+  const notaLineas = Object.entries(ausentesPorTipo).map(([key, count]) => {
+    const [label, rol] = key.split("|");
+    const txt = count === 1
+      ? `*1* colab de ${label} (${rol})`
+      : `*${count}* colabs de ${label} (${rol})`;
+    return txt;
+  });
+
+  // Armar el mensaje completo
+  // Las * * son para Slack bold
+  let msg = `Hola equipo, buen ${diaNombre}!
+`;
+  msg += `Hoy tenemos *${totalActivos} colaboradores activos*
+`;
+  for (const f of flujosSorted) {
+    msg += `*${porFlujo[f]}* en ${f}
+`;
+  }
+  if (notaLineas.length) {
+    msg += `Nota:
+`;
+    for (const linea of notaLineas) {
+      msg += `${linea}
+`;
+    }
+  }
+
+  return msg.trim();
+}
+
+async function onCopiarMensajePlan_() {
+  const msg = buildMensajePlanificacion_();
+  if (!msg) {
+    setErr("Primero generá la planificación del día.");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(msg);
+    toast("✓ Copiado", "Mensaje listo para pegar en Slack", "ok");
+  } catch (e) {
+    // Fallback para entornos sin clipboard API
+    const ta = document.createElement("textarea");
+    ta.value = msg;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    toast("✓ Copiado", "Mensaje listo para pegar en Slack", "ok");
+  }
+}
+
 async function onGenerarPlanificacionYOutbox_() {
   setErr("");
   try {
@@ -2542,6 +2662,7 @@ async function main() {
 
   // Operativa
   $("btnGenerarPlan")?.addEventListener("click", onGenerarPlanificacionYOutbox_);
+  $("btnCopiarPlan")?.addEventListener("click", onCopiarMensajePlan_);
 
   $("btnAddFlujo")?.addEventListener("click", async () => {
     const name = $("newFlujoName")?.value?.trim() || "";
