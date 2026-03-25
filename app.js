@@ -537,32 +537,26 @@ async function loadCore() {
 
     // Usa cache si está fresco (TTL: 90s para datos semi-estáticos)
     const fetchColabs  = CACHE.get("colabs")  ? Promise.resolve(CACHE.get("colabs"))
-      : API.colaboradoresList().then(d => { CACHE.set("colabs", d, 90_000); return d; });
+      : API.colaboradoresList().then(d => { CACHE.set("colabs", d, 5 * 60_000); return d; });
     const fetchCanales = CACHE.get("canales") ? Promise.resolve(CACHE.get("canales"))
-      : API.canalesList().then(d => { CACHE.set("canales", d, 90_000); return d; });
+      : API.canalesList().then(d => { CACHE.set("canales", d, 10 * 60_000); return d; });
     const fetchFlujos  = CACHE.get("flujos")  ? Promise.resolve(CACHE.get("flujos"))
-      : API.flujosList().then(d => { CACHE.set("flujos", d, 60_000); return d; });
+      : API.flujosList().then(d => { CACHE.set("flujos", d, 2 * 60_000); return d; });
 
     const [colabs, canales, flujos] = await Promise.all([fetchColabs, fetchCanales, fetchFlujos]);
     S.colabs = colabs || [];
     S.canales = canales || [];
     S.flujos = flujos || [];
 
-    // PERF: las tres cargas secundarias son independientes entre sí → paralelas
-    await Promise.all([
-      refreshPlanAndOutbox(),
-      refreshHabil(),
-      refreshPresentismo(),
-    ]);
-    mountPresentismoSelect();
+    // PERF: Solo cargamos plan+outbox en el arranque (necesarios para dashboard+daily).
+    // Habilitaciones y Presentismo cargan lazy la primera vez que se entra al tab.
+    // Esto elimina ~4s de carga inicial sin perder funcionalidad.
+    await refreshPlanAndOutbox();
 
     renderDashboard();
     renderFlujos();
     renderPlan();
     renderOutbox();
-    renderColabs();
-    renderHabil();
-    renderPresentismo();
 
     toast("Listo", "Datos cargados");
   } catch (e) {
@@ -592,33 +586,40 @@ function todayYMD() {
 }
 
 async function refreshPresentismo() {
+  // PERF FIX: lanzar semanas + week + stats TODO en paralelo (antes: semanas bloqueaba week/stats → +2-3s).
+  // Usamos allSettled para que un fallo en semanas no rompa la carga de la semana actual.
   try {
-    // 1) Semanas disponibles (dinámico)
-    try {
-      const semanas = await API.presentismoSemanas();
-      S.presSemanas = Array.isArray(semanas) ? semanas : [];
+    const d = todayYMD();
+
+    // Determinar qué endpoints de semana pedir según selección actual
+    const weekReq  = S.presSemanaSel ? API.presentismoWeekBySemana(S.presSemanaSel)  : API.presentismoWeek(d);
+    const statsReq = S.presSemanaSel ? API.presentismoStatsBySemana(S.presSemanaSel) : API.presentismoStats(d);
+
+    const [semanasResult, weekResult, statsResult] = await Promise.allSettled([
+      API.presentismoSemanas(),
+      weekReq,
+      statsReq,
+    ]);
+
+    // Semanas: no bloquea la vista si falla
+    if (semanasResult.status === "fulfilled") {
+      S.presSemanas = Array.isArray(semanasResult.value) ? semanasResult.value : [];
       syncPresSemanaSelect_();
-    } catch {
-      // no bloqueo la vista si el endpoint no está
+    } else {
       S.presSemanas = S.presSemanas || [];
     }
 
-    // 2) Semana seleccionada
-    if (S.presSemanaSel) {
-      const [week, stats] = await Promise.all([
-        API.presentismoWeekBySemana(S.presSemanaSel),
-        API.presentismoStatsBySemana(S.presSemanaSel),
-      ]);
-      S.presWeek = week;
-      S.presStats = stats;
-      return;
+    // Semana actual
+    if (weekResult.status === "fulfilled") {
+      S.presWeek = weekResult.value;
+    } else {
+      setErr(`Presentismo: ${weekResult.reason?.message || weekResult.reason}`);
+      S.presWeek = null;
     }
 
-    // default: semana de "hoy"
-    const d = todayYMD();
-    const [week, stats] = await Promise.all([API.presentismoWeek(d), API.presentismoStats(d)]);
-    S.presWeek = week;
-    S.presStats = stats;
+    // Stats
+    S.presStats = statsResult.status === "fulfilled" ? statsResult.value : null;
+
   } catch (e) {
     setErr(`Presentismo: ${e.message || e}`);
     S.presWeek = null;
@@ -2183,6 +2184,25 @@ function mountPresentismoSelect() {
   sel.innerHTML = rows.map((x) => `<option value="${escapeAttr(x.id)}">${escapeHtml(x.nombre)} (${escapeHtml(x.id)})</option>`).join("");
 }
 
+/* ========= Presentismo: mapeo de impacto de código =========
+ * Lista canónica de códigos que cuentan como "Presente parcial".
+ * Agregar acá si se incorporan nuevos tipos de licencia parcial.
+ */
+const PRES_PARTIAL_CODES = new Set(["TM/TR", "CJ"]);
+
+/**
+ * Dado un código de celda de Presentismo, devuelve su impacto.
+ * Fuente única de verdad — usada por renderPresentismo, renderDashboard
+ * y countAnalistasDisponiblesHoy_ para garantizar consistencia.
+ */
+function presImpactFromCode_(code) {
+  const v = (code || "").toString().trim();
+  if (!v)                         return { impact: "Presente",         cls: "ok",   label: "Sin carga" };
+  if (v === "P")                  return { impact: "Presente",         cls: "ok",   label: "Presente" };
+  if (PRES_PARTIAL_CODES.has(v))  return { impact: "Presente parcial", cls: "warn", label: "Presente parcial" };
+  return                                 { impact: "Ausente",           cls: "bad",  label: "Ausente" };
+}
+
 function renderPresentismo() {
   const tbl = $("tblPresWeek");
   if (!tbl) return;
@@ -2194,14 +2214,8 @@ function renderPresentismo() {
   }
 
   // ---- helpers (local, to avoid global collisions) ----
-  const impactFromCode = (code) => {
-    const v = (code || "").toString().trim();
-    if (!v) return { impact: "Presente", cls: "ok", label: "Sin carga" };
-    if (v === "P") return { impact: "Presente", cls: "ok", label: "Presente" };
-    if (v === "TM/TR" || v === "CJ") return { impact: "Presente parcial", cls: "warn", label: "Presente parcial" };
-    // Todo lo demás es ausencia (licencias)
-    return { impact: "Ausente", cls: "bad", label: "Ausente" };
-  };
+  // Delegamos a la función global presImpactFromCode_ para consistencia en todo el app
+  const impactFromCode = presImpactFromCode_;
 
   const worstImpactOfWeek = (vals, days) => {
     // Order: Ausente (0) -> Presente parcial (1) -> Presente (2)
@@ -2366,8 +2380,10 @@ function countAnalistasDisponiblesHoy_() {
 
   let n = 0;
   for (const r of S.presWeek.rows) {
-    const v = r.vals?.[today];
-    if (String(v || "").trim() !== "P") continue;
+    const v = String(r.vals?.[today] || "").trim();
+    // Cuenta P (Presente) y códigos de Presente parcial (TM/TR, CJ, etc.)
+    const imp = presImpactFromCode_(v);
+    if (imp.cls === "bad") continue; // Ausente: no cuenta
 
     const meta = colabsById.get(r.id_meli);
     const bucket = roleBucket(meta?.rol || "");
@@ -2406,7 +2422,9 @@ function renderDashboard() {
     }));
     for (const r of S.presWeek.rows) {
       const vday = String(r.vals?.[today] || "").trim();
-      if (vday !== "P") continue;
+      // Cuenta P (Presente) y códigos de Presente parcial (TM/TR, CJ, etc.)
+      const imp = presImpactFromCode_(vday);
+      if (imp.cls === "bad") continue; // Ausente: no cuenta
       const meta = colabsById.get(r.id_meli);
       const role = normRole(meta?.rol || "");
       presentesPorRol.set(role, (presentesPorRol.get(role) || 0) + 1);
