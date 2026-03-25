@@ -631,26 +631,34 @@ async function loadCore() {
   try {
     setBusy("Cargando", "Sincronizando datos...");
 
-    // Mostrar skeletons mientras carga
     showTableSkeleton("tblColabs", 6);
     showTableSkeleton("tblHabil", 6);
     showTableSkeleton("tblPresWeek", 5);
 
-    // Usa cache si está fresco (TTL: 90s para datos semi-estáticos)
-    const fetchColabs  = CACHE.get("colabs")  ? Promise.resolve(CACHE.get("colabs"))
-      : API.colaboradoresList().then(d => { CACHE.set("colabs", d, 5 * 60_000); return d; });
-    const fetchCanales = CACHE.get("canales") ? Promise.resolve(CACHE.get("canales"))
-      : API.canalesList().then(d => { CACHE.set("canales", d, 10 * 60_000); return d; });
-    const fetchFlujos  = CACHE.get("flujos")  ? Promise.resolve(CACHE.get("flujos"))
-      : API.flujosList().then(d => { CACHE.set("flujos", d, 2 * 60_000); return d; });
+    // ── PERF: un solo request a GAS en lugar de 5 requests separados ──
+    // hub.init devuelve colabs+canales+flujos+plan+outbox en una sola ejecución.
+    // Si algún dato está en cache de cliente, lo usamos directamente sin ir a GAS.
+    const allCached = CACHE.get("colabs") && CACHE.get("canales") && CACHE.get("flujos");
 
-    const [colabs, canales, flujos] = await Promise.all([fetchColabs, fetchCanales, fetchFlujos]);
-    S.colabs = colabs || [];
-    S.canales = canales || [];
-    S.flujos = flujos || [];
-
-    // Cargamos plan+outbox en el arranque (bloqueante: necesarios para el render inicial).
-    await refreshPlanAndOutbox();
+    if (allCached) {
+      // Cache fresco: usar datos locales sin tocar GAS
+      S.colabs  = CACHE.get("colabs");
+      S.canales = CACHE.get("canales");
+      S.flujos  = CACHE.get("flujos");
+      await refreshPlanAndOutbox();
+    } else {
+      // Cold: un solo request que trae todo
+      const init = await API.hubInit();
+      S.colabs  = init.colabs  || [];
+      S.canales = init.canales || [];
+      S.flujos  = init.flujos  || [];
+      S.plan    = init.plan    || [];
+      S.outbox  = init.outbox  || [];
+      // Poblar cache de cliente
+      CACHE.set("colabs",  S.colabs,  5 * 60_000);
+      CACHE.set("canales", S.canales, 10 * 60_000);
+      CACHE.set("flujos",  S.flujos,  2 * 60_000);
+    }
 
     renderDashboard();
     renderFlujos();
@@ -664,15 +672,14 @@ async function loadCore() {
     clearBusy();
   }
 
-  // Presentismo y Habilitaciones en background: no bloquean el arranque,
-  // pero los datos quedan listos para la píldora, el dashboard y los tabs.
+  // Presentismo y Habilitaciones en background (no bloquean arranque)
   Promise.all([
     refreshPresentismo().then(() => {
       mountPresentismoSelect();
-      renderDashboard(); // actualiza la píldora presentes/asignados
+      renderDashboard();
     }),
-    refreshHabil(),     // carga S.habil para que el tab esté listo al primer click
-  ]).catch(() => {});   // silencioso: si falla, el lazy load al entrar al tab lo resuelve
+    refreshHabil(),
+  ]).catch(() => {});
 }
 
 async function refreshPlanAndOutbox() {

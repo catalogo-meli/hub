@@ -65,6 +65,7 @@ function assertDatetimeLocal_(v) {
 export const API = {
   health: () => get("health"),
 
+  hubInit: () => get("hub.init"),
   colaboradoresList: () => get("colaboradores.list"),
   canalesList: () => get("canales.list"),
 
