@@ -2616,9 +2616,11 @@ function renderHabil() {
       ${flujos.map((f) => `
         <th class="nowrap" style="text-align:center;font-size:11px;text-transform:uppercase;letter-spacing:.05em">
           ${escapeHtml(f)}
-          <div style="display:flex;gap:6px;justify-content:center;margin-top:4px;opacity:.5;font-size:10px">
-            <span title="Habilitado">●</span>
-            <span title="Fijo">📌</span>
+          <div style="display:flex;gap:6px;justify-content:center;margin-top:5px">
+            <span style="font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--ok-txt);opacity:.8"
+              title="Habilitado — indica si la persona puede operar este flujo">HAB.</span>
+            <span style="font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--pri);opacity:.8"
+              title="Fijo — la asignación no varía día a día">FIJO</span>
           </div>
         </th>`).join("")}
     </tr>
