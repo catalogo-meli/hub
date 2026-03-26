@@ -3003,7 +3003,7 @@ function renderAgenda() {
     return `
       <tr data-agenda-row="${r.row}">
         <td style="text-align:center;padding:4px 6px">
-          <select class="input" data-ag-prio style="padding:2px 4px;font-size:13px;min-width:36px">${prioOpts}</select>
+          <select class="input" data-ag-prio style="padding:2px 4px;font-size:16px;text-align:center;border:none;background:transparent;cursor:pointer;width:48px">${prioOpts}</select>
         </td>
         <td class="nowrap">
           <input class="input" data-ag-fecha type="date" value="${escapeAttr(_fechaToISO_(r.fecha))}" style="font-size:12px;padding:4px 6px;min-width:130px"/>
@@ -3023,17 +3023,18 @@ function renderAgenda() {
         <td class="nowrap">
           <select class="input" data-ag-tiempo style="font-size:12px;padding:4px 6px">${tiempoOpts}</select>
         </td>
-        <td class="nowrap" style="white-space:nowrap">
-          <div style="display:flex;gap:4px;align-items:center">
-            <button class="btn ghost" data-ag-save="${r.row}" style="font-size:11px;padding:3px 8px" title="Guardar cambios">💾</button>
-            <select class="input" data-ag-estado style="font-size:11px;padding:2px 4px;min-width:100px">
+        <td style="padding:4px 8px">
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <select class="input" data-ag-estado style="font-size:11px;padding:3px 6px;width:100%">
               ${AGENDA_ESTADOS.map(e => {
-                // Normalizar "Pendiente" legacy → "Para hacer"
                 const estadoNorm = (!r.estado || r.estado === "Pendiente") ? "Para hacer" : r.estado;
                 return `<option value="${e}" ${estadoNorm === e ? "selected" : ""}>${e}</option>`;
               }).join("")}
             </select>
-            <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
+            <div style="display:flex;gap:4px">
+              <button class="btn ghost" data-ag-save="${r.row}" style="font-size:11px;padding:3px 8px;flex:1" title="Guardar">💾 Guardar</button>
+              <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
+            </div>
           </div>
         </td>
       </tr>`;
@@ -3064,18 +3065,26 @@ function renderAgenda() {
       </tr>`;
   };
 
+  const colgroup = `<colgroup>
+    <col style="width:60px"/>
+    <col style="width:140px"/>
+    <col style="width:160px"/>
+    <col/>
+    <col style="width:110px"/>
+    <col style="width:210px"/>
+  </colgroup>`;
   const thead = `
     <thead><tr>
-      <th style="width:50px">Prio</th>
-      <th class="nowrap">Fecha</th>
+      <th style="text-align:center">Prio</th>
+      <th>Fecha</th>
       <th>Owner</th>
       <th>Tema / Descripción</th>
-      <th class="nowrap">Tiempo</th>
-      <th style="width:90px"></th>
+      <th>Tiempo</th>
+      <th></th>
     </tr></thead>`;
 
   const pendientesHtml = pendientes.length
-    ? `<div style="overflow:visible"><table class="table" style="margin-top:8px">${thead}<tbody>${pendientes.map(r => rowHtmlEditable(r)).join("")}</tbody></table></div>`
+    ? `<div style="overflow-x:auto"><table class="table" style="margin-top:8px;table-layout:fixed;width:100%">${colgroup}${thead}<tbody>${pendientes.map(r => rowHtmlEditable(r)).join("")}</tbody></table></div>`
     : `<div class="muted" style="margin-top:12px;padding:12px">Sin pendientes. ¡Todo al día! 🎉</div>`;
 
   const histBtnLabel = S.agendaHistCollapsed ? `▶ Ver historial (${historial.length})` : `▼ Ocultar historial`;
@@ -3174,7 +3183,26 @@ function renderAgenda() {
       syncVal();
     });
 
-    btn2?.addEventListener("click", (e) => { e.stopPropagation(); host2.classList.toggle("open"); });
+    // Posicionar el panel con position:fixed para escapar del overflow de la tabla
+    const positionPanel = () => {
+      const rect = btn2.getBoundingClientRect();
+      panel2.style.position = "fixed";
+      panel2.style.left = rect.left + "px";
+      panel2.style.top = (rect.bottom + 4) + "px";
+      panel2.style.width = Math.max(180, rect.width) + "px";
+      panel2.style.zIndex = "9999";
+    };
+
+    btn2?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const isOpen = host2.classList.contains("open");
+      // Cerrar todos los otros
+      document.querySelectorAll(".ms.open").forEach(m => m.classList.remove("open"));
+      if (!isOpen) {
+        host2.classList.add("open");
+        positionPanel();
+      }
+    });
     panel2?.addEventListener("click", (e) => e.stopPropagation());
     document.addEventListener("click", () => host2.classList.remove("open"));
   }
