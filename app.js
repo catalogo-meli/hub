@@ -605,14 +605,15 @@ async function lazyLoadTab_(name) {
       renderHabil();
     }
     if (name === "agenda") {
-      // Solo fetchea si no hay datos todavía (no re-fetchar en cada click al tab)
       if (!S.agenda || !S.agenda.length) {
-        const cachedAgenda = CACHE.get("agenda");
-        if (cachedAgenda) {
-          S.agenda = cachedAgenda;
+        const ca = CACHE.get("agenda");
+        if (ca && ca.length) {
+          S.agenda = ca;
         } else {
+          setBusy("Agenda", "Cargando...");
           S.agenda = await API.agendaList().catch(() => []);
           if (S.agenda.length) CACHE.set("agenda", S.agenda, 5 * 60_000);
+          clearBusy();
         }
       }
       renderAgenda();
@@ -708,7 +709,7 @@ async function loadCore() {
     const fullyCached = allCached && cPlan && cOutbox;
 
     if (allCached) {
-      // Cache fresco: usar datos locales
+      // Cache fresco: render inmediato, cero requests bloqueantes
       S.colabs    = cColabs;
       S.canales   = cCanales;
       S.flujos    = cFlujos;
@@ -718,10 +719,8 @@ async function loadCore() {
       if (cPlan)   S.plan      = cPlan;
       if (cOutbox) S.outbox    = cOutbox;
 
-      if (!fullyCached) {
-        // Plan u outbox vencidos — refrescar en background sin bloquear
-        refreshPlanAndOutbox().catch(() => {});
-      }
+      // Plan+outbox vencidos o no cacheados: refrescar en background
+      if (!fullyCached) refreshPlanAndOutbox().then(() => { renderPlan(); renderOutbox(); }).catch(() => {});
     } else {
       // Cold: un solo request que trae todo
       const init = await API.hubInit();
@@ -766,6 +765,16 @@ async function loadCore() {
     refreshPresentismo().then(() => {
       mountPresentismoSelect();
       renderDashboard();
+    }).catch(() => {});
+  }
+  // Pre-cachear agenda en background si no está en cache todavía
+  // (así el primer click en Agenda tab es instantáneo)
+  if (!CACHE.get("agenda")) {
+    API.agendaList().then(d => {
+      if (d?.length) {
+        S.agenda = d;
+        CACHE.set("agenda", d, 5 * 60_000);
+      }
     }).catch(() => {});
   }
 }
@@ -3161,6 +3170,7 @@ function renderAgenda() {
     const cbs    = host2.querySelectorAll("input[type=checkbox]");
     const bClr   = host2.querySelector("[data-ms-clear]");
 
+    // Sincronizar el label del botón con las checkboxes seleccionadas
     const syncVal = () => {
       const checked = Array.from(cbs).filter(c => c.checked && c.value !== "Todos").map(c => c.value);
       val2.textContent = checked.length ? checked.join(", ") : "Todos";
@@ -3183,28 +3193,54 @@ function renderAgenda() {
       syncVal();
     });
 
-    // Posicionar el panel con position:fixed para escapar del overflow de la tabla
-    const positionPanel = () => {
-      const rect = btn2.getBoundingClientRect();
-      panel2.style.position = "fixed";
-      panel2.style.left = rect.left + "px";
-      panel2.style.top = (rect.bottom + 4) + "px";
-      panel2.style.width = Math.max(180, rect.width) + "px";
-      panel2.style.zIndex = "9999";
+    // Calcular posición del panel relativa a la ventana (position:fixed)
+    // para escapar del overflow:hidden de la tabla
+    const posPanel = () => {
+      const r = btn2.getBoundingClientRect();
+      const panelH = Math.min(220, window.innerHeight - r.bottom - 8);
+      const top = r.bottom + 4;
+      const left = Math.min(r.left, window.innerWidth - 190);
+      Object.assign(panel2.style, {
+        position: "fixed",
+        top: top + "px",
+        left: left + "px",
+        width: Math.max(180, r.width) + "px",
+        maxHeight: panelH + "px",
+        zIndex: "9999",
+        display: "block",
+      });
+    };
+
+    const closePanel = () => {
+      panel2.style.display = "none";
+      host2.classList.remove("open");
     };
 
     btn2?.addEventListener("click", (e) => {
       e.stopPropagation();
-      const isOpen = host2.classList.contains("open");
-      // Cerrar todos los otros
-      document.querySelectorAll(".ms.open").forEach(m => m.classList.remove("open"));
-      if (!isOpen) {
-        host2.classList.add("open");
-        positionPanel();
+      if (panel2.style.display === "block") {
+        closePanel();
+      } else {
+        // Cerrar cualquier otro panel abierto
+        document.querySelectorAll("[data-agenda-panel-open]").forEach(p => {
+          p.style.display = "none";
+          p.removeAttribute("data-agenda-panel-open");
+        });
+        panel2.setAttribute("data-agenda-panel-open", "1");
+        posPanel();
       }
     });
+
+    // Clicks dentro del panel no cierran
     panel2?.addEventListener("click", (e) => e.stopPropagation());
-    document.addEventListener("click", () => host2.classList.remove("open"));
+
+    // Un solo listener global por instancia — guardado en el elemento para no duplicar
+    if (!host2._agendaMsListener) {
+      host2._agendaMsListener = (e) => {
+        if (!host2.contains(e.target)) closePanel();
+      };
+      document.addEventListener("click", host2._agendaMsListener);
+    }
   }
 
   // Montar ms del formulario nuevo
