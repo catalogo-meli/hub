@@ -2885,7 +2885,6 @@ function renderAgenda() {
       <div class="ms" id="${idPrefix}_wrap" style="min-width:130px;position:relative">
         <div class="ms-btn">
           <div>
-            <div class="label" style="font-size:10px">OWNER</div>
             <div class="value" data-ms-value style="font-size:13px">${escapeHtml(sel || "Todos")}</div>
           </div>
           <div class="muted">▾</div>
@@ -3019,11 +3018,11 @@ function renderAgenda() {
         <button class="btn primary" id="btnAgendaAgregar" type="button">Agregar</button>
       </div>
       <div style="margin-top:8px">
-        <div class="muted" style="font-size:12px;margin-bottom:4px">Descripción (opcional)</div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Descripción</div>
         <textarea class="input" id="agDesc" placeholder="Escribí la descripción..." rows="2" style="width:100%;resize:vertical;min-height:48px;font-family:inherit"></textarea>
       </div>
       <div style="margin-top:6px">
-        <div class="muted" style="font-size:12px;margin-bottom:4px">Links (pegá una URL y presioná Enter)</div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Links (pegá una URL)</div>
         <div id="agLinksWrap" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:32px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg,var(--card2))">
           <input id="agLinkInput" class="input" placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:180px;padding:0"/>
         </div>
