@@ -615,8 +615,10 @@ function applySectionFilter(list, f) {
   return list.filter((x) => {
     const v = colabRowView(x);
     const rb = roleBucket(v.rol);
+    const rolRaw = String(v.rol || "").trim();
 
-    if (rolesSel.size > 0 && !rolesSel.has(rb)) return false;
+    // Filtrar por rol raw (exacto) — no usar bucket para que "Analista Soporte" no matchee "Analista PM"
+    if (rolesSel.size > 0 && !rolesSel.has(rolRaw)) return false;
     if (equiposSel.size > 0 && !equiposSel.has(v.equipo)) return false;
 
     if (q) {
@@ -2427,8 +2429,9 @@ function renderPresentismo() {
   const filtered = rows.filter((r) => {
     const meta = colabsById.get(r.id_meli) || { id: r.id_meli, nombre: r.nombre, rol: "", equipo: "" };
     const rb = roleBucket(meta.rol);
+    const rolRawPres = String(meta.rol || "").trim();
 
-    if (S.fPres.roles.size > 0 && !S.fPres.roles.has(rb)) return false;
+    if (S.fPres.roles.size > 0 && !S.fPres.roles.has(rolRawPres)) return false;
     if (S.fPres.equipos.size > 0 && !S.fPres.equipos.has(meta.equipo)) return false;
 
     const q = norm(S.fPres.q);
@@ -3505,10 +3508,11 @@ async function main() {
   $("btnSetLicencia")?.addEventListener("click", onSetLicencia);
 
   // Filters
-  const rolesList = ["Analista KV", "Analista PM", "Analista QA", "Líderes"];
-  const rolesListHab = ["Analista KV", "Analista PM", "Analista QA"];
+  // Roles dinámicos: extraídos de S.colabs, ordenados, únicos
+  const getRolesDynamic_ = () => [...new Set((S.colabs || []).map(c => colabRowView(c).rol).filter(Boolean))].sort();
+  const rolesListHab = ["Analista KV", "Analista PM", "Analista QA"]; // habilitaciones: solo analistas
 
-  const msRolesCol = mountMultiSelect("msRolesColabs", { title: "Roles", items: rolesList, onChange: (set) => { S.fColabs.roles = set; renderColabs(); }});
+  const msRolesCol = mountMultiSelect("msRolesColabs", { title: "Roles", items: getRolesDynamic_(), onChange: (set) => { S.fColabs.roles = set; renderColabs(); }});
   const msEquipCol = mountMultiSelect("msEquiposColabs", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fColabs.equipos = set; renderColabs(); }});
 
   const msRolesHab = mountMultiSelect("msRolesHabil", { title: "Roles", items: rolesListHab, onChange: (set) => { S.fHabil.roles = set; renderHabil(); }});
@@ -3608,7 +3612,7 @@ async function main() {
     _syncBulkFlujoItems_();
   };
 
-  const msRolesPres = mountMultiSelect("msRolesPres", { title: "Roles", items: rolesList, onChange: (set) => { S.fPres.roles = set; renderPresentismo(); }});
+  const msRolesPres = mountMultiSelect("msRolesPres", { title: "Roles", items: getRolesDynamic_(), onChange: (set) => { S.fPres.roles = set; renderPresentismo(); }});
   const msEquipPres = mountMultiSelect("msEquiposPres", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fPres.equipos = set; renderPresentismo(); }});
 
   mountSearch("searchColabs", "searchColabsWrap", "clearSearchColabs", (q) => { S.fColabs.q = q; renderColabs(); });
