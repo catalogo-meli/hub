@@ -29,7 +29,7 @@ if (method === "GET") {
 
   // Timeout defensivo (Netlify Functions tiene límites; mejor fallar rápido con info).
   const controller = new AbortController();
-  const timeoutMs = 12000;
+  const timeoutMs = 55000; // Netlify Functions tiene límite de 60s; GAS puede tardar hasta ~20s en cold start
   const t = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
@@ -58,7 +58,7 @@ if (method === "GET") {
     }
 
     // Si es JSON, devolvemos tal cual (mantiene contrato ok_/err_)
-    if (isJson) return { statusCode: 200, headers: { ...cors(), "Content-Type": "application/json" }, body: text };
+    if (isJson) return { statusCode: 200, headers: cors(), body: text };
 
     // Si no es JSON, devolvemos envoltorio JSON (evita "Non-JSON response")
     return json(200, { ok: false, error: "Non-JSON response from GAS", url: url.toString(), body: text.slice(0, 800) });
@@ -189,9 +189,6 @@ function cors() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
-    // Evita que Netlify CDN cachee respuestas de la API (fix Presentismo stale data)
-    "Cache-Control": "no-store, no-cache, must-revalidate",
-    "Pragma": "no-cache",
   };
 }
 function json(statusCode, obj) {
