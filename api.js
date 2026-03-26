@@ -66,7 +66,11 @@ export const API = {
   health: () => get("health"),
 
   hubInit: () => get("hub.init"),
-  colaboradoresList: () => get("colaboradores.list"),
+  colaboradoresList:   () => get("colaboradores.list"),
+  colaboradoresEquipos:() => get("colaboradores.equipos"),
+  colaboradoresAdd:    (data) => post("colaboradores.add", data),
+  colaboradoresUpdate: (data) => post("colaboradores.update", data),
+  colaboradoresDelete: (ids)  => post("colaboradores.delete", { ids }),
   canalesList: () => get("canales.list"),
 
   flujosList: () => get("flujos.list"),

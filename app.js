@@ -2268,6 +2268,10 @@ function renderColabs() {
     return;
   }
 
+  // Mostrar/ocultar botón Eliminar según selección
+  const btnElim = $("btnColabEliminar");
+  if (btnElim) btnElim.style.display = S.selColabs.size > 0 ? "" : "none";
+
   tb.innerHTML = sorted
     .map((v) => {
       const checked = S.selColabs.has(v.id) ? "checked" : "";
@@ -2276,12 +2280,15 @@ function renderColabs() {
           <td class="nowrap"><input type="checkbox" data-sel ${checked} /></td>
           <td class="copyable" data-copy="${escapeAttr(v.id)}">${escapeHtml(v.id)}</td>
           <td>${escapeHtml(v.nombre)}</td>
-          <td>${escapeHtml(roleBucket(v.rol))}</td>
+          <td>${escapeHtml(v.rol)}</td>
           <td>${escapeHtml(v.equipo)}</td>
           <td>${escapeHtml(v.ubic)}</td>
           <td class="copyable" data-copy="${escapeAttr(v.mailProd)}">${escapeHtml(v.mailProd)}</td>
           <td class="copyable" data-copy="${escapeAttr(v.mailExt)}">${escapeHtml(v.mailExt)}</td>
           <td class="nowrap">${escapeHtml(fmtDateAny(v.ingreso))}</td>
+          <td class="nowrap">
+            <button class="btn ghost" data-colab-edit="${escapeAttr(v.id)}" style="font-size:11px;padding:3px 8px" title="Editar">✏️</button>
+          </td>
         </tr>
       `;
     })
@@ -2303,11 +2310,190 @@ function renderColabs() {
     });
   });
 
+  // Botón editar por fila
+  tb.querySelectorAll("[data-colab-edit]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = unescapeAttr(btn.getAttribute("data-colab-edit"));
+      openColabModal_(id);
+    });
+  });
+
   // sortable headers + indicators
   mountTableSort_("tblColabs", S.sort.colabs, (next) => {
     S.sort.colabs = next;
     renderColabs();
   });
+}
+
+
+/* ========= Colaboradores CRUD ========= */
+
+let _colabModalMode_ = "add"; // "add" | "edit"
+let _colabEditId_    = null;
+
+async function openColabModal_(editId = null) {
+  _colabModalMode_ = editId ? "edit" : "add";
+  _colabEditId_    = editId || null;
+
+  const modal = $("colabModal");
+  const title = $("colabModalTitle");
+  if (!modal) return;
+
+  title.textContent = editId ? "Editar colaborador" : "Agregar colaborador";
+
+  // Poblar datalists de Rol y Equipo
+  const roles   = [...new Set((S.colabs || []).map(c => colabRowView(c).rol).filter(Boolean))].sort();
+  const equipos = [...new Set((S.colabs || []).map(c => colabRowView(c).equipo).filter(Boolean))].sort();
+
+  const rolList = $("cmRolList");
+  const eqList  = $("cmEquipoList");
+  if (rolList) rolList.innerHTML = roles.map(r => `<option value="${escapeAttr(r)}">`).join("");
+  if (eqList)  eqList.innerHTML  = equipos.map(e => `<option value="${escapeAttr(e)}">`).join("");
+
+  // Limpiar / poblar campos
+  const campos = ["cmIdMeli","cmNombre","cmRol","cmEquipo","cmUbic","cmFechaIngreso","cmMailProd","cmMailExt","cmTag"];
+  campos.forEach(id => { const el = $(id); if (el) el.value = ""; });
+
+  if (editId) {
+    const v = colabRowView((S.colabs || []).find(c => {
+      const cv = colabRowView(c);
+      return cv.id === editId;
+    }));
+    if (v) {
+      const set_ = (id, val) => { const el = $(id); if (el && val) el.value = val; };
+      set_("cmIdMeli",       v.id);
+      set_("cmNombre",       v.nombre);
+      set_("cmRol",          v.rol);
+      set_("cmEquipo",       v.equipo);
+      set_("cmUbic",         v.ubic);
+      set_("cmMailProd",     v.mailProd);
+      set_("cmMailExt",      v.mailExt);
+      // Fecha ingreso: convertir a yyyy-MM-dd para input type=date
+      if (v.ingreso) {
+        const iso = _fechaToISO_(v.ingreso) || (v.ingreso instanceof Date ? v.ingreso.toISOString().slice(0,10) : "");
+        if (iso && $("cmFechaIngreso")) $("cmFechaIngreso").value = iso;
+      }
+      // TAG desde el objeto raw
+      const raw = (S.colabs || []).find(c => colabRowView(c).id === editId);
+      const tag = raw?.TAG || raw?.tag || "";
+      if (tag && $("cmTag")) $("cmTag").value = tag;
+      // ID no editable en modo edit
+      if ($("cmIdMeli")) $("cmIdMeli").disabled = true;
+    }
+  } else {
+    if ($("cmIdMeli")) $("cmIdMeli").disabled = false;
+    // Fecha por defecto: hoy
+    if ($("cmFechaIngreso")) $("cmFechaIngreso").value = new Date().toISOString().slice(0,10);
+  }
+
+  modal.style.display = "block";
+  setTimeout(() => $("cmIdMeli")?.focus(), 50);
+}
+
+function closeColabModal_() {
+  const modal = $("colabModal");
+  if (modal) modal.style.display = "none";
+  if ($("cmIdMeli")) $("cmIdMeli").disabled = false;
+}
+
+async function saveColabModal_() {
+  const id_meli       = $("cmIdMeli")?.value?.trim() || "";
+  const nombre        = $("cmNombre")?.value?.trim() || "";
+  const rol           = $("cmRol")?.value?.trim() || "";
+  const equipo        = $("cmEquipo")?.value?.trim() || "";
+  const ubicacion     = $("cmUbic")?.value?.trim() || "";
+  const fecha_ingreso = $("cmFechaIngreso")?.value || "";
+  const mail_prod     = $("cmMailProd")?.value?.trim() || "";
+  const mail_ext      = $("cmMailExt")?.value?.trim() || "";
+  const tag           = $("cmTag")?.value?.trim() || "";
+
+  // Validar obligatorios
+  const faltantes = [];
+  if (!id_meli)       faltantes.push("ID_MELI");
+  if (!nombre)        faltantes.push("Nombre");
+  if (!rol)           faltantes.push("Rol");
+  if (!equipo)        faltantes.push("Equipo");
+  if (!ubicacion)     faltantes.push("Ubicación");
+  if (!fecha_ingreso) faltantes.push("Fecha Ingreso");
+  if (!mail_prod)     faltantes.push("Mail Productora");
+  if (!mail_ext)      faltantes.push("Mail Externo");
+
+  if (faltantes.length) {
+    setErr("Campos obligatorios: " + faltantes.join(", "));
+    return;
+  }
+
+  setErr("");
+  try {
+    setBusy("Colaboradores", _colabModalMode_ === "add" ? "Agregando..." : "Guardando...");
+
+    const payload = { id_meli, nombre, rol, equipo, ubicacion, mail_prod, mail_ext, fecha_ingreso, tag };
+
+    if (_colabModalMode_ === "add") {
+      await API.colaboradoresAdd(payload);
+      toast("Colaboradores", `✓ ${nombre} agregado`);
+    } else {
+      await API.colaboradoresUpdate({ ...payload, id_meli: _colabEditId_ || id_meli });
+      toast("Colaboradores", `✓ ${nombre} actualizado`);
+    }
+
+    // Recargar colabs y cerrar modal
+    S.colabs = await API.colaboradoresList();
+    CACHE.invalidate("colabs");
+    CACHE.set("colabs", S.colabs, 5 * 60_000);
+    _refreshRoleFilters_();
+    renderColabs();
+    renderDashboard();
+    closeColabModal_();
+  } catch (e) {
+    setErr(`Colaboradores: ${e.message || e}`);
+  } finally {
+    clearBusy();
+  }
+}
+
+async function deleteColabsConfirm_() {
+  const ids = [...S.selColabs];
+  if (!ids.length) return;
+
+  // Mostrar modal de confirmación con nombres
+  const modal = $("colabDeleteModal");
+  const list  = $("colabDeleteList");
+  if (!modal || !list) return;
+
+  const nombres = ids.map(id => {
+    const v = colabRowView((S.colabs || []).find(c => colabRowView(c).id === id) || {});
+    return v.nombre || id;
+  });
+
+  list.innerHTML = nombres.map(n => `<div class="pill bad" style="margin:3px;display:inline-block">${escapeHtml(n)}</div>`).join("");
+  modal.style.display = "block";
+}
+
+function closeDeleteModal_() {
+  const modal = $("colabDeleteModal");
+  if (modal) modal.style.display = "none";
+}
+
+async function deleteColabsExecute_() {
+  const ids = [...S.selColabs];
+  closeDeleteModal_();
+  try {
+    setBusy("Colaboradores", "Eliminando...");
+    await API.colaboradoresDelete(ids);
+    S.selColabs.clear();
+    S.colabs = await API.colaboradoresList();
+    CACHE.invalidate("colabs");
+    CACHE.set("colabs", S.colabs, 5 * 60_000);
+    _refreshRoleFilters_();
+    renderColabs();
+    renderDashboard();
+    toast("Colaboradores", `✓ ${ids.length} colaborador${ids.length > 1 ? "es" : ""} eliminado${ids.length > 1 ? "s" : ""}`);
+  } catch (e) {
+    setErr(`Colaboradores: ${e.message || e}`);
+  } finally {
+    clearBusy();
+  }
 }
 
 // Instancia del mountMultiSelect del filtro de flujo en Habilitaciones
@@ -3701,6 +3887,17 @@ async function main() {
     renderDashboard();
     toast("Colaboradores", "Actualizado");
   });
+
+  // CRUD colaboradores
+  $("btnColabAgregar")?.addEventListener("click", () => openColabModal_());
+  $("btnColabEliminar")?.addEventListener("click", () => deleteColabsConfirm_());
+  $("colabModalClose")?.addEventListener("click",  closeColabModal_);
+  $("colabModalCancel")?.addEventListener("click", closeColabModal_);
+  $("colabModalSave")?.addEventListener("click",   saveColabModal_);
+  $("colabModal")?.addEventListener("click", (e) => { if (e.target === $("colabModal")) closeColabModal_(); });
+  $("colabDeleteCancel")?.addEventListener("click",  closeDeleteModal_);
+  $("colabDeleteConfirm")?.addEventListener("click", deleteColabsExecute_);
+  $("colabDeleteModal")?.addEventListener("click", (e) => { if (e.target === $("colabDeleteModal")) closeDeleteModal_(); });
   $("btnReloadHabil")?.addEventListener("click", async () => {
     S.habil = null; // forzar re-fetch
     await refreshHabil();
