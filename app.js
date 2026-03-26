@@ -3297,14 +3297,14 @@ const AGENDA_TIEMPO_OPTS = ["5", "10", "15", "20", "30", "45", "Si sobra tiempo"
 const AGENDA_OWNERS = ["Cele", "Eze", "Jose", "Mati L.", "Mati M.", "Vicky"];
 const AGENDA_ESTADOS = ["Para hacer", "En progreso", "En espera", "Bloqueado", "Hecho"];
 const AGENDA_ESTADO_CLS = {
-  "Para hacer": "ok",
-  "En progreso": "warn",
-  "En espera":  "",
-  "Bloqueado":  "bad",
-  "Hecho":      "muted",
-  // Legacy: normalizar estados viejos del sheet
-  "Pendiente":  "ok",
-  "":           "ok",
+  "Para hacer": "ag-todo",
+  "En progreso": "ag-wip",
+  "En espera":   "ag-wait",
+  "Bloqueado":   "ag-blocked",
+  "Hecho":       "ag-done",
+  // Legacy
+  "Pendiente":   "ag-todo",
+  "":            "ag-todo",
 };
 
 // Convierte texto con URLs en HTML con links clickeables
@@ -3510,8 +3510,17 @@ function mountWysiwyg_(editorId, toolbarId, emojiId) {
       `;
       picker.querySelector("#_agEmojiSearch")?.addEventListener("input", (ev) => renderPicker(ev.target.value));
       picker.querySelectorAll("[data-emo]").forEach(b => {
+        b.addEventListener("mousedown", (ev) => ev.preventDefault()); // no perder foco
         b.addEventListener("click", () => {
-          editor.focus();
+          // Restaurar posición del cursor guardada antes de abrir el picker
+          if (editor._savedRange) {
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(editor._savedRange);
+            editor._savedRange = null;
+          } else {
+            editor.focus();
+          }
           document.execCommand("insertText", false, b.getAttribute("data-emo"));
           picker.style.display = "none";
         });
@@ -3524,6 +3533,11 @@ function mountWysiwyg_(editorId, toolbarId, emojiId) {
     emojiBtn.addEventListener("click", e => {
       e.stopPropagation();
       if (picker.style.display !== "none") { picker.style.display = "none"; return; }
+      // Guardar posición del cursor antes de abrir el picker
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        editor._savedRange = sel.getRangeAt(0).cloneRange();
+      }
       const rect = emojiBtn.getBoundingClientRect();
       picker.style.top  = (rect.bottom + 4) + "px";
       picker.style.left = Math.min(rect.left, window.innerWidth - 300) + "px";
@@ -4129,12 +4143,16 @@ function renderAgenda() {
         tiempo: payload.tiempo, prioridad: payload.prioridad,
         descripcion: payload.descripcion, estado: payload.estado
       });
-      if (statusEl) statusEl.textContent = "Guardando…";
+      // Mostrar "Guardando" solo si tarda más de 400ms
+      const slowTimer = setTimeout(() => {
+        if (statusEl) statusEl.textContent = "Guardando…";
+      }, 400);
       await API.agendaUpdate(payload);
+      clearTimeout(slowTimer);
       CACHE.invalidate("agenda");
       if (statusEl) {
-        statusEl.textContent = "✓ Guardado";
-        setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 2000);
+        statusEl.textContent = "✓";
+        setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 1500);
       }
       _updateAgendaBadge_();
       _updateKpiAgenda_();
@@ -4171,16 +4189,24 @@ function renderAgenda() {
     menu.querySelectorAll("[data-estado-opt]").forEach(opt => {
       opt.addEventListener("click", () => {
         const nuevoEstado = opt.getAttribute("data-estado-opt");
-        // Actualizar pill
-        const cls = AGENDA_ESTADO_CLS[nuevoEstado] || "ok";
-        pill.className = `pill ${cls}`;
-        pill.innerHTML = `${escapeHtml(nuevoEstado)} ▾`;
-        // Actualizar hidden input
-        if (hiddenInput) hiddenInput.value = nuevoEstado;
         menu.style.display = "none";
-        // Auto-save inmediato al cambiar estado
-        const card = pill.closest("[data-agenda-row]");
-        if (card) saveRow_(rowId, card);
+        // Patch optimista inmediato en S.agenda
+        const idx = (S.agenda || []).findIndex(r => r.row === rowId);
+        if (idx >= 0) S.agenda[idx].estado = nuevoEstado;
+        CACHE.invalidate("agenda");
+        // Renderizar inmediatamente — la tarjeta se mueve a historial si corresponde
+        renderAgenda();
+        // Guardar en GAS en background (sin bloquear UI)
+        const card2 = host.querySelector(`[data-agenda-row="${rowId}"]`);
+        if (card2) {
+          const payload = buildPayload_(card2, rowId);
+          payload.estado = nuevoEstado;
+          API.agendaUpdate(payload).catch(e => setErr(`Agenda: ${e.message || e}`));
+        } else {
+          // La tarjeta ya no está en pendientes (se movió a historial) — guardar igual
+          const item = (S.agenda || []).find(r => r.row === rowId);
+          if (item) API.agendaUpdate({ row: rowId, estado: nuevoEstado }).catch(e => setErr(`Agenda: ${e.message || e}`));
+        }
       });
     });
   });
@@ -4335,41 +4361,41 @@ async function onAgendaAgregar_(ownerParam) {
     : new Date().toLocaleDateString("es-AR", { day:"2-digit", month:"2-digit", year:"numeric" });
 
   setErr("");
-  try {
-    setBusy("Agenda", "Guardando...");
-    // Optimistic: agregar item local inmediatamente
-    const tempRow = -Date.now();
-    S.agenda = [{ row: tempRow, fecha, owner, tema, tiempo, prioridad,
-      descripcion: desc, estado: "Para hacer" }, ...(S.agenda || [])];
-    renderAgenda();
-    await API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc });
-    // Row real se sincroniza en el próximo auto-refresh — no bloquear UI con re-fetch
-    CACHE.invalidate("agenda");
-    if ($("agTema")) $("agTema").value = "";
-    if (_agDescEditor_) _agDescEditor_.clear();
-    const linkWrap = $("agLinksWrap");
-    if (linkWrap) linkWrap.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
-    toast("Agenda", "✓ Tema agregado");
-    // Re-fetch en background para obtener row real
-    API.agendaList().then(d => {
+  // Optimistic: mostrar item inmediatamente sin esperar GAS
+  const tempRow = -Date.now();
+  S.agenda = [{ row: tempRow, fecha, owner, tema, tiempo, prioridad,
+    descripcion: desc, estado: "Para hacer" }, ...(S.agenda || [])];
+  CACHE.invalidate("agenda");
+  renderAgenda();
+
+  // Limpiar formulario inmediatamente
+  if ($("agTema")) $("agTema").value = "";
+  if (_agDescEditor_) _agDescEditor_.clear();
+  const linkWrap = $("agLinksWrap");
+  if (linkWrap) linkWrap.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
+  // Cerrar formulario
+  const agFormBody = $("agFormBody");
+  const agFormBtn  = $("btnAgFormToggle");
+  if (agFormBody) agFormBody.style.display = "none";
+  if (agFormBtn)  agFormBtn.textContent = "✚ Agregar tema";
+
+  // Guardar en GAS en background
+  API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc })
+    .then(() => {
+      toast("Agenda", "✓ Tema agregado");
+      // Re-fetch para obtener row real de Sheets
+      return API.agendaList();
+    })
+    .then(d => {
       if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
-    }).catch(() => {});
-  } catch (e) {
-    // GAS puede escribir la fila y fallar al devolver JSON (deployment viejo)
-    // En ese caso recargar igual para mostrar lo que se guardó
-    try {
-      S.agenda = await API.agendaList();
-      renderAgenda();
-      if ($("agTema")) $("agTema").value = "";
-      if ($("agDesc")) $("agDesc").value = "";
-      const lw = $("agLinksWrap");
-      if (lw) lw.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
-      toast("Agenda", "✓ Guardado");
-    } catch (_) {}
-    if (!String(e.message || e).includes("Non-JSON")) setErr(`Agenda: ${e.message || e}`);
-  } finally {
-    clearBusy();
-  }
+    })
+    .catch(e => {
+      // Si falla, intentar re-fetch igual (GAS pudo haber escrito antes de fallar)
+      setErr("Agenda: error al guardar — reintentando...");
+      API.agendaList().then(d => {
+        if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
+      }).catch(() => {});
+    });
 }
 
 async function onAgendaSetHecho_(row, btn) {

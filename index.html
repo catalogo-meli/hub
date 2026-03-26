@@ -379,6 +379,14 @@ header {
 .pill.warn { background: var(--warn-dim); border-color: var(--warn-brd); color: var(--warn-txt); }
 .pill.bad  { background: var(--err-dim);  border-color: var(--err-brd);  color: var(--err-txt);  }
 
+/* ── Agenda estados ──────────────────────────────────────── */
+.pill.ag-todo    { background: var(--pri-dim);              border-color: var(--pri-brd);              color: var(--pri);                    }
+.pill.ag-wip     { background: var(--warn-dim);             border-color: var(--warn-brd);             color: var(--warn-txt);               }
+.pill.ag-wait    { background: rgba(139,92,246,.12);        border-color: rgba(139,92,246,.30);        color: #a78bfa;                       }
+.pill.ag-blocked { background: var(--err-dim);              border-color: var(--err-brd);              color: var(--err-txt);                }
+.pill.ag-done    { background: var(--ok-dim);               border-color: var(--ok-brd);               color: var(--ok-txt);                 }
+[data-theme="light"] .pill.ag-wait { background: rgba(139,92,246,.08); border-color: rgba(139,92,246,.25); color: #7c3aed; }
+
 a.pill {
   text-decoration: none;
   cursor: pointer;
