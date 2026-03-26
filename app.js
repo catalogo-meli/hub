@@ -611,11 +611,12 @@ async function lazyLoadTab_(name) {
         const ca = CACHE.get("agenda");
         if (ca && ca.length) {
           S.agenda = ca;
+          renderAgenda();
         } else {
-          setBusy("Agenda", "Cargando...");
+          // Sin cache — fetch con indicador pequeño (no bloquea la UI)
+          renderAgenda(); // mostrar estado vacío primero
           S.agenda = await API.agendaList().catch(() => []);
           if (S.agenda.length) CACHE.set("agenda", S.agenda, 5 * 60_000);
-          clearBusy();
         }
       }
       renderAgenda();
@@ -3559,6 +3560,7 @@ function mountWysiwyg_(editorId, toolbarId, emojiId) {
 
 // Instancia global del editor del formulario de nueva entrada
 let _agDescEditor_ = null;
+let _agendaAddInProgress_ = false; // previene doble-add por doble click
 
 // ── Editor Markdown toolbar ──────────────────────────────────
 function applyMdFormat_(ta, cmd) {
@@ -3764,7 +3766,14 @@ function renderAgenda() {
   const host = $("agendaContent");
   if (!host) return;
 
-  const items = (S.agenda || []).slice();
+  // Deduplicar por row (evita duplicados por optimistic + re-fetch simultáneos)
+  const seen = new Set();
+  const items = (S.agenda || []).filter(r => {
+    const key = String(r.row);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   const HISTORIAL_ESTADOS = new Set(["Hecho", "Bloqueado"]);
   const pendientes = items.filter(r => !HISTORIAL_ESTADOS.has(r.estado));
   const historial  = items.filter(r =>  HISTORIAL_ESTADOS.has(r.estado));
@@ -4251,6 +4260,8 @@ function _fechaToISO_(ddmmyyyy) {
 }
 
 async function onAgendaAgregar_(ownerParam) {
+  if (_agendaAddInProgress_) return; // prevenir doble click
+  _agendaAddInProgress_ = true;
   const fecha     = $("agFecha")?.value || "";
   const owner     = ownerParam || "Todos";
   const tema      = $("agTema")?.value?.trim() || "";
@@ -4266,6 +4277,7 @@ async function onAgendaAgregar_(ownerParam) {
     const temaEl = $("agTema");
     if (temaEl) { temaEl.style.borderColor = "var(--err)"; temaEl.focus(); setTimeout(() => { temaEl.style.borderColor = ""; }, 2000); }
     setErr("El campo Tema es obligatorio.");
+    _agendaAddInProgress_ = false;
     return;
   }
   setErr("");
@@ -4275,66 +4287,74 @@ async function onAgendaAgregar_(ownerParam) {
     ? fecha.split("-").reverse().join("/")
     : new Date().toLocaleDateString("es-AR", { day:"2-digit", month:"2-digit", year:"numeric" });
 
-  // Feedback visual en el botón
   const btnAgregar = $("btnAgendaAgregar");
-  if (btnAgregar) { btnAgregar.disabled = true; btnAgregar.textContent = "Agregando..."; }
 
-  // Optimistic: mostrar item inmediatamente sin esperar GAS
+  // Optimistic: mostrar item inmediatamente
   const tempRow = -Date.now();
   S.agenda = [{ row: tempRow, fecha, owner, tema, tiempo, prioridad,
     descripcion: desc, estado: "Para hacer" }, ...(S.agenda || [])];
   CACHE.invalidate("agenda");
   renderAgenda();
 
-  // Limpiar formulario inmediatamente
-  if ($("agTema")) $("agTema").value = "";
-  if (_agDescEditor_) _agDescEditor_.clear();
-  const linkWrap = $("agLinksWrap");
-  if (linkWrap) linkWrap.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
-  // Restaurar botón Agregar
-  if (btnAgregar) { btnAgregar.disabled = false; btnAgregar.textContent = "Agregar"; }
+  // Feedback en botón
+  if (btnAgregar) { btnAgregar.disabled = true; btnAgregar.textContent = "Guardando..."; }
 
-  // Cerrar formulario
-  const agFormBody = $("agFormBody");
-  const agFormBtn  = $("btnAgFormToggle");
-  if (agFormBody) agFormBody.style.display = "none";
-  if (agFormBtn)  agFormBtn.textContent = "✚ Agregar tema";
+  try {
+    await API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc });
 
-  // Guardar en GAS en background — sin re-fetch inmediato
-  // (evita conflicto de LockService con requests simultáneos)
-  // El auto-refresh de 60s sincroniza el row real de Sheets
-  API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc })
-    .then(() => {
-      toast("Agenda", "✓ Tema agregado");
-    })
-    .catch(e => {
-      if (btnAgregar) { btnAgregar.disabled = false; btnAgregar.textContent = "Agregar"; }
-      const msg = String(e?.message || e);
-      // GAS puede escribir la fila y fallar al responder (timeout o lock)
-      if (msg.includes("Non-JSON") || msg.includes("timeout") || msg.includes("lock")) {
-        toast("Agenda", "✓ Guardado (verificando...)");
-        // Re-fetch demorado para no competir con el lock
-        setTimeout(() => {
-          API.agendaList().then(d => {
-            if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
-          }).catch(() => {});
-        }, 3000);
-      } else {
-        // Error real — restaurar el item del tempRow y notificar
-        setErr("Agenda: no se pudo guardar. Intentá de nuevo.");
-        // Remover el item temporal si sigue en S.agenda
-        S.agenda = (S.agenda || []).filter(r => r.row !== tempRow);
-        CACHE.invalidate("agenda");
-        renderAgenda();
-        // Reabrir formulario con los datos
-        const agFormBody2 = $("agFormBody");
-        const agFormBtn2  = $("btnAgFormToggle");
-        if (agFormBody2) agFormBody2.style.display = "block";
-        if (agFormBtn2)  agFormBtn2.textContent = "✕ Cancelar";
-        if ($("agTema")) $("agTema").value = tema;
-        if (_agDescEditor_) _agDescEditor_.setValue(descText);
-      }
-    });
+    // Éxito — limpiar y cerrar formulario
+    if ($("agTema")) $("agTema").value = "";
+    if (_agDescEditor_) _agDescEditor_.clear();
+    const linkWrap = $("agLinksWrap");
+    if (linkWrap) linkWrap.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
+    const agFormBody = $("agFormBody");
+    const agFormBtn  = $("btnAgFormToggle");
+    if (agFormBody) agFormBody.style.display = "none";
+    if (agFormBtn)  agFormBtn.textContent = "✚ Agregar tema";
+    if (btnAgregar) { btnAgregar.disabled = false; btnAgregar.textContent = "Agregar"; }
+    toast("Agenda", "✓ Tema agregado");
+    _agendaAddInProgress_ = false;
+
+    // Reemplazar tempRow con datos reales de Sheets
+    API.agendaList().then(d => {
+      if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
+    }).catch(() => {});
+
+  } catch (e) {
+    if (btnAgregar) { btnAgregar.disabled = false; btnAgregar.textContent = "Agregar"; }
+    const msg = String(e?.message || e);
+
+    if (msg.includes("Non-JSON") || msg.includes("lock") || msg.includes("timeout")) {
+      // GAS probablemente escribió la fila pero falló al responder
+      // Limpiar y cerrar igual — el re-fetch traerá la fila real
+      if ($("agTema")) $("agTema").value = "";
+      if (_agDescEditor_) _agDescEditor_.clear();
+      const agFormBody = $("agFormBody");
+      const agFormBtn  = $("btnAgFormToggle");
+      if (agFormBody) agFormBody.style.display = "none";
+      if (agFormBtn)  agFormBtn.textContent = "✚ Agregar tema";
+      toast("Agenda", "✓ Guardado");
+      _agendaAddInProgress_ = false;
+      // Re-fetch demorado para no competir con el lock
+      setTimeout(() => {
+        API.agendaList().then(d => {
+          if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
+        }).catch(() => {});
+      }, 2000);
+    } else {
+      // Error real — revertir optimistic y reabrir formulario
+      setErr("No se pudo guardar. Intentá de nuevo.");
+      S.agenda = (S.agenda || []).filter(r => r.row !== tempRow);
+      CACHE.invalidate("agenda");
+      renderAgenda();
+      const agFormBody2 = $("agFormBody");
+      const agFormBtn2  = $("btnAgFormToggle");
+      if (agFormBody2) agFormBody2.style.display = "block";
+      if (agFormBtn2)  agFormBtn2.textContent = "✕ Cancelar";
+      if ($("agTema")) $("agTema").value = tema;
+      if (_agDescEditor_) _agDescEditor_.setValue(descText);
+    }
+  }
 }
 
 async function onAgendaSetHecho_(row, btn) {
