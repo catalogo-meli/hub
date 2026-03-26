@@ -3676,8 +3676,8 @@ function renderAgenda() {
 
   // ── Fila editable (pendientes) ───────────────────────────
   const rowHtmlEditable = (r) => {
-    const emoji = AGENDA_PRIO_EMOJI[r.prioridad] || "🔵";
-    const desc = linkify_(r.descripcion);
+    const estadoNorm = (!r.estado || r.estado === "Pendiente") ? "Para hacer" : r.estado;
+    const estadoCls  = AGENDA_ESTADO_CLS[estadoNorm] || "ok";
     const tiempoOpts = AGENDA_TIEMPO_OPTS.map(o =>
       `<option value="${escapeAttr(o)}" ${r.tiempo === o ? "selected" : ""}>${escapeHtml(o)}${o !== "Si sobra tiempo" ? " min" : ""}</option>`
     ).join("");
@@ -3686,45 +3686,70 @@ function renderAgenda() {
     ).join("");
 
     return `
-      <tr data-agenda-row="${r.row}">
-        <td style="text-align:center;padding:4px 6px">
-          <select class="input" data-ag-prio style="padding:2px 4px;font-size:16px;text-align:center;border:none;background:transparent;cursor:pointer;width:48px">${prioOpts}</select>
-        </td>
-        <td class="nowrap">
-          <input class="input" data-ag-fecha type="date" value="${escapeAttr(_fechaToISO_(r.fecha))}" style="font-size:12px;padding:4px 6px;min-width:130px"/>
-        </td>
-        <td>${ownerSelectHtml(r.owner, "ag_owner_" + r.row)}</td>
-        <td>
-          <div style="display:flex;gap:6px;align-items:center;margin-bottom:3px">
-            <input class="input" data-ag-tema value="${escapeAttr(r.tema)}" style="font-size:13px;flex:1"/>
-            <span class="pill ${AGENDA_ESTADO_CLS[r.estado] || "ok"}" style="font-size:11px;white-space:nowrap">${escapeHtml(!r.estado || r.estado === "Pendiente" ? "Para hacer" : r.estado)}</span>
+      <div class="ag-card" data-agenda-row="${r.row}" style="border:1px solid var(--brd);border-radius:10px;padding:12px 14px;margin-bottom:8px;background:var(--surface-2)">
+
+        <!-- BANDA 1: metadatos en una línea -->
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
+
+          <!-- Prioridad -->
+          <select class="input" data-ag-prio
+            style="font-size:16px;padding:0 2px;border:none;background:transparent;cursor:pointer;width:36px;min-width:36px;text-align:center">
+            ${prioOpts}
+          </select>
+
+          <!-- Fecha -->
+          <input class="input" data-ag-fecha type="date" value="${escapeAttr(_fechaToISO_(r.fecha))}"
+            style="font-size:12px;padding:3px 8px;max-width:150px"/>
+
+          <!-- Owner -->
+          <div style="min-width:140px;max-width:200px">
+            ${ownerSelectHtml(r.owner, "ag_owner_" + r.row)}
           </div>
-          <div class="input wysiwyg-editor" data-ag-desc contenteditable="true"
-            style="font-size:11px;margin-top:3px;width:100%;min-height:40px;font-family:inherit;line-height:1.5;padding:6px;box-sizing:border-box;cursor:text"
-            data-placeholder="Descripción...">${mdToHtml_(parseDescLinks_(r.descripcion).text)}</div>
-          <div data-ag-links-wrap style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--card2));margin-top:3px">
-            ${parseDescLinks_(r.descripcion).urls.map(u => `<span class="pill" style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px" data-link-pill="${escapeAttr(u)}"><a href="${escapeAttr(u)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(u)}">×</span></span>`).join("")}
-            <input class="input" data-ag-link-input placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:120px;padding:0;font-size:11px"/>
-          </div>
-        </td>
-        <td class="nowrap">
-          <select class="input" data-ag-tiempo style="font-size:12px;padding:4px 6px">${tiempoOpts}</select>
-        </td>
-        <td style="padding:4px 8px">
-          <div style="display:flex;flex-direction:column;gap:4px">
-            <select class="input" data-ag-estado style="font-size:11px;padding:3px 6px;width:100%">
-              ${AGENDA_ESTADOS.map(e => {
-                const estadoNorm = (!r.estado || r.estado === "Pendiente") ? "Para hacer" : r.estado;
-                return `<option value="${e}" ${estadoNorm === e ? "selected" : ""}>${e}</option>`;
-              }).join("")}
-            </select>
-            <div style="display:flex;gap:4px;align-items:center">
-              <span class="ag-save-status" data-save-status="${r.row}" style="font-size:10px;color:var(--text-3);flex:1;text-align:right"></span>
-              <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
+
+          <!-- Tiempo -->
+          <select class="input" data-ag-tiempo style="font-size:12px;padding:3px 8px;max-width:130px">
+            ${tiempoOpts}
+          </select>
+
+          <!-- Pill de estado con dropdown -->
+          <div style="position:relative" data-estado-wrap="${r.row}">
+            <span class="pill ${estadoCls}" data-ag-estado-pill="${r.row}"
+              style="cursor:pointer;font-size:11px;padding:3px 10px;user-select:none;white-space:nowrap">
+              ${escapeHtml(estadoNorm)} ▾
+            </span>
+            <input type="hidden" data-ag-estado value="${escapeAttr(estadoNorm)}"/>
+            <div data-estado-menu="${r.row}"
+              style="display:none;position:fixed;background:var(--surface);border:1px solid var(--brd-2);border-radius:8px;box-shadow:var(--shd-lg);z-index:9999;min-width:140px;padding:4px 0;overflow:hidden">
+              ${AGENDA_ESTADOS.map(e => `
+                <div data-estado-opt="${escapeAttr(e)}" data-estado-for="${r.row}"
+                  style="padding:7px 14px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:8px;transition:background .1s"
+                  onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background=''">
+                  <span class="pill ${AGENDA_ESTADO_CLS[e] || "ok"}" style="font-size:10px;padding:1px 6px">${escapeHtml(e)}</span>
+                </div>`).join("")}
             </div>
           </div>
-        </td>
-      </tr>`;
+
+          <!-- Spacer + save status + delete -->
+          <div style="flex:1"></div>
+          <span class="ag-save-status" data-save-status="${r.row}" style="font-size:10px;color:var(--text-3)"></span>
+          <button class="xbtn" data-ag-del="${r.row}" title="Eliminar" style="flex-shrink:0">×</button>
+        </div>
+
+        <!-- BANDA 2: contenido -->
+        <input class="input" data-ag-tema value="${escapeAttr(r.tema)}"
+          style="font-size:14px;font-weight:500;width:100%;margin-bottom:8px"/>
+
+        <div class="input wysiwyg-editor" data-ag-desc contenteditable="true"
+          style="font-size:12px;width:100%;min-height:40px;font-family:inherit;line-height:1.6;padding:8px;box-sizing:border-box;cursor:text"
+          data-placeholder="Descripción...">${mdToHtml_(parseDescLinks_(r.descripcion).text)}</div>
+
+        <div data-ag-links-wrap
+          style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--card2));margin-top:6px">
+          ${parseDescLinks_(r.descripcion).urls.map(u => `<span class="pill" style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px" data-link-pill="${escapeAttr(u)}"><a href="${escapeAttr(u)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(u)}">×</span></span>`).join("")}
+          <input class="input" data-ag-link-input placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:120px;padding:0;font-size:11px"/>
+        </div>
+
+      </div>`;
   };
 
   // ── Fila solo lectura (historial) ────────────────────────
@@ -3755,26 +3780,8 @@ function renderAgenda() {
       </tr>`;
   };
 
-  const colgroup = `<colgroup>
-    <col style="width:60px"/>
-    <col style="width:140px"/>
-    <col style="width:160px"/>
-    <col/>
-    <col style="width:110px"/>
-    <col style="width:210px"/>
-  </colgroup>`;
-  const thead = `
-    <thead><tr>
-      <th style="text-align:center">Prio</th>
-      <th>Fecha</th>
-      <th>Owner</th>
-      <th>Tema / Descripción</th>
-      <th>Tiempo</th>
-      <th></th>
-    </tr></thead>`;
-
   const pendientesHtml = pendientes.length
-    ? `<div style="overflow-x:auto"><table class="table" style="margin-top:8px;table-layout:fixed;width:100%">${colgroup}${thead}<tbody>${pendientes.map(r => rowHtmlEditable(r)).join("")}</tbody></table></div>`
+    ? `<div style="margin-top:10px">${pendientes.map(r => rowHtmlEditable(r)).join("")}</div>`
     : `<div class="muted" style="margin-top:12px;padding:12px">Sin pendientes. ¡Todo al día! 🎉</div>`;
 
   const histBtnLabel = S.agendaHistCollapsed ? `▶ Ver historial (${historial.length})` : `▼ Ocultar historial`;
@@ -3969,11 +3976,11 @@ function renderAgenda() {
   pendientes.forEach(r => {
     mountAgendaOwnerMs_("ag_owner_" + r.row + "_wrap");
 
-    // Montar WYSIWYG en el div contenteditable de descripción de la fila
-    const descEl = host.querySelector('tr[data-agenda-row="' + r.row + '"] [data-ag-desc]');
+    // Montar WYSIWYG en el div contenteditable de descripción de la card
+    const descEl = host.querySelector('[data-agenda-row="' + r.row + '"] [data-ag-desc]');
     if (descEl) {
       // Conectar botones de toolbar inline a este editor
-      const toolbarBtns = host.querySelectorAll('[data-tb-row="' + r.row + '"]');
+      const toolbarBtns = host.querySelectorAll(`[data-tb-row="${r.row}"]`);
       toolbarBtns.forEach(btn => {
         btn.addEventListener("mousedown", e => {
           e.preventDefault();
@@ -4052,27 +4059,27 @@ function renderAgenda() {
 
   // ── Botones guardar (edición inline) ────────────────────
   // ── Auto-save con debounce por fila ─────────────────────
-  const buildPayload_ = (tr, row) => {
-    const owner   = readOwnerFromMs("ag_owner_" + row);
-    const fechaISO = tr.querySelector("[data-ag-fecha]")?.value || "";
-    const fecha   = fechaISO ? fechaISO.split("-").reverse().join("/") : "";
-    const agDescEl = tr.querySelector("[data-ag-desc]");
+  const buildPayload_ = (card, row) => {
+    const owner    = readOwnerFromMs("ag_owner_" + row);
+    const fechaISO = card.querySelector("[data-ag-fecha]")?.value || "";
+    const fecha    = fechaISO ? fechaISO.split("-").reverse().join("/") : "";
+    const agDescEl = card.querySelector("[data-ag-desc]");
     const descTxt  = agDescEl ? htmlToMd_(agDescEl.innerHTML).trim() : "";
-    const rowLinks = Array.from(tr.querySelectorAll("[data-ag-links-wrap] [data-link-pill]"))
+    const rowLinks = Array.from(card.querySelectorAll("[data-ag-links-wrap] [data-link-pill]"))
       .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
     return {
       row, fecha, owner,
-      tema:        tr.querySelector("[data-ag-tema]")?.value?.trim() || "",
-      tiempo:      tr.querySelector("[data-ag-tiempo]")?.value       || "",
-      prioridad:   tr.querySelector("[data-ag-prio]")?.value         || "",
+      tema:        card.querySelector("[data-ag-tema]")?.value?.trim() || "",
+      tiempo:      card.querySelector("[data-ag-tiempo]")?.value       || "",
+      prioridad:   card.querySelector("[data-ag-prio]")?.value         || "",
       descripcion: joinDescLinks_(descTxt, rowLinks),
-      estado:      tr.querySelector("[data-ag-estado]")?.value       || "Para hacer",
+      estado:      card.querySelector("[data-ag-estado]")?.value       || "Para hacer",
     };
   };
 
-  const saveRow_ = async (row, tr) => {
-    const statusEl = tr.querySelector(`[data-save-status="${row}"]`);
-    const payload  = buildPayload_(tr, row);
+  const saveRow_ = async (row, card) => {
+    const statusEl = card.querySelector(`[data-save-status="${row}"]`);
+    const payload  = buildPayload_(card, row);
     try {
       const idx = (S.agenda||[]).findIndex(r => r.row === row);
       if (idx >= 0) Object.assign(S.agenda[idx], {
@@ -4095,24 +4102,63 @@ function renderAgenda() {
     }
   };
 
-  // Registrar auto-save en cada fila
-  pendientes.forEach(r => {
-    const tr = host.querySelector(`tr[data-agenda-row="${r.row}"]`);
-    if (!tr) return;
-    const rowId = r.row;
-    const autoSave = debounce(() => saveRow_(rowId, tr), 2000);
+  // ── Pill de estado con dropdown (position:fixed) ────────
+  host.querySelectorAll("[data-ag-estado-pill]").forEach(pill => {
+    const rowId = Number(pill.getAttribute("data-ag-estado-pill"));
+    const menu  = host.querySelector(`[data-estado-menu="${rowId}"]`);
+    const hiddenInput = host.querySelector(`[data-estado-wrap="${rowId}"] [data-ag-estado]`);
+    if (!menu) return;
 
-    // Disparar en cualquier cambio de campo
-    tr.querySelectorAll("[data-ag-tema],[data-ag-tiempo],[data-ag-prio],[data-ag-estado]").forEach(el => {
+    pill.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const r2 = pill.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - r2.bottom - 8;
+      if (spaceBelow < 200) {
+        menu.style.bottom = (window.innerHeight - r2.top + 4) + "px";
+        menu.style.top = "auto";
+      } else {
+        menu.style.top  = (r2.bottom + 4) + "px";
+        menu.style.bottom = "auto";
+      }
+      menu.style.left = r2.left + "px";
+      menu.style.display = menu.style.display === "none" ? "block" : "none";
+    });
+    menu.addEventListener("click", (e) => e.stopPropagation());
+    document.addEventListener("click", () => { menu.style.display = "none"; });
+
+    menu.querySelectorAll("[data-estado-opt]").forEach(opt => {
+      opt.addEventListener("click", () => {
+        const nuevoEstado = opt.getAttribute("data-estado-opt");
+        // Actualizar pill
+        const cls = AGENDA_ESTADO_CLS[nuevoEstado] || "ok";
+        pill.className = `pill ${cls}`;
+        pill.innerHTML = `${escapeHtml(nuevoEstado)} ▾`;
+        // Actualizar hidden input
+        if (hiddenInput) hiddenInput.value = nuevoEstado;
+        menu.style.display = "none";
+        // Auto-save inmediato al cambiar estado
+        const card = pill.closest("[data-agenda-row]");
+        if (card) saveRow_(rowId, card);
+      });
+    });
+  });
+
+  // Registrar auto-save en cada card
+  pendientes.forEach(r => {
+    const card = host.querySelector(`[data-agenda-row="${r.row}"]`);
+    if (!card) return;
+    const rowId = r.row;
+    const autoSave = debounce(() => saveRow_(rowId, card), 2000);
+
+    card.querySelectorAll("[data-ag-tema],[data-ag-tiempo],[data-ag-prio]").forEach(el => {
       el.addEventListener("input",  autoSave);
       el.addEventListener("change", autoSave);
     });
-    tr.querySelectorAll("[data-ag-fecha]").forEach(el => {
+    card.querySelectorAll("[data-ag-fecha]").forEach(el => {
       el.addEventListener("change", autoSave);
     });
-    const descEl = tr.querySelector("[data-ag-desc]");
+    const descEl = card.querySelector("[data-ag-desc]");
     if (descEl) descEl.addEventListener("input", autoSave);
-    // Owner multiselect — disparar al cambiar
     const ownerMs = host.querySelector(`#ag_owner_${rowId}_wrap`);
     if (ownerMs) ownerMs.querySelectorAll("input[type=checkbox]").forEach(cb => {
       cb.addEventListener("change", autoSave);
@@ -4139,8 +4185,8 @@ function renderAgenda() {
       renderAgenda();
       // Scroll a la fila
       setTimeout(() => {
-        const tr = host.querySelector(`tr[data-agenda-row="${row}"]`);
-        tr?.scrollIntoView({ behavior: "smooth", block: "center" });
+        const card2 = host.querySelector(`[data-agenda-row="${row}"]`);
+        card2?.scrollIntoView({ behavior: "smooth", block: "center" });
       }, 100);
     });
   });
