@@ -800,17 +800,23 @@ async function loadCore() {
       renderDashboard();
     }).catch(() => {});
   }
-  // Pre-cachear agenda en background si no está en cache todavía
-  if (!CACHE.get("agenda")) {
+  // Pre-cachear agenda en background — siempre actualizar badge y card
+  const cAgenda = CACHE.get("agenda");
+  if (cAgenda && cAgenda.length) {
+    // Hay agenda en sessionStorage — usar inmediatamente
+    S.agenda = cAgenda;
+    _updateAgendaBadge_();
+    _updateKpiAgenda_();
+  } else {
+    // Fetch en background
     API.agendaList().then(d => {
       if (d?.length) {
         S.agenda = d;
         CACHE.set("agenda", d, 5 * 60_000);
         _updateAgendaBadge_();
+        _updateKpiAgenda_();
       }
     }).catch(() => {});
-  } else {
-    _updateAgendaBadge_();
   }
 }
 
@@ -3675,7 +3681,9 @@ function renderAgenda() {
             <input class="input" data-ag-tema value="${escapeAttr(r.tema)}" style="font-size:13px;flex:1"/>
             <span class="pill ${AGENDA_ESTADO_CLS[r.estado] || "ok"}" style="font-size:11px;white-space:nowrap">${escapeHtml(!r.estado || r.estado === "Pendiente" ? "Para hacer" : r.estado)}</span>
           </div>
-          <textarea class="input" data-ag-desc rows="2" placeholder="Descripción..." style="font-size:11px;margin-top:3px;width:100%;resize:none;min-height:40px;font-family:inherit;overflow:hidden">${escapeHtml(parseDescLinks_(r.descripcion).text)}</textarea>
+          <div class="input wysiwyg-editor" data-ag-desc contenteditable="true"
+            style="font-size:11px;margin-top:3px;width:100%;min-height:40px;font-family:inherit;line-height:1.5;padding:6px;box-sizing:border-box;cursor:text"
+            data-placeholder="Descripción...">${mdToHtml_(parseDescLinks_(r.descripcion).text)}</div>
           <div data-ag-links-wrap style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--card2));margin-top:3px">
             ${parseDescLinks_(r.descripcion).urls.map(u => `<span class="pill" style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px" data-link-pill="${escapeAttr(u)}"><a href="${escapeAttr(u)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(u)}">×</span></span>`).join("")}
             <input class="input" data-ag-link-input placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:120px;padding:0;font-size:11px"/>
@@ -3943,11 +3951,43 @@ function renderAgenda() {
   pendientes.forEach(r => {
     mountAgendaOwnerMs_("ag_owner_" + r.row + "_wrap");
 
-    // Auto-resize del textarea de descripción
-    const descTa = host.querySelector('tr[data-agenda-row="' + r.row + '"] [data-ag-desc]');
-    if (descTa) {
-      autoResizeTextarea_(descTa);
-      descTa.addEventListener("input", () => autoResizeTextarea_(descTa));
+    // Montar WYSIWYG en el div contenteditable de descripción de la fila
+    const descEl = host.querySelector('tr[data-agenda-row="' + r.row + '"] [data-ag-desc]');
+    if (descEl) {
+      // Conectar botones de toolbar inline a este editor
+      const toolbarBtns = host.querySelectorAll('[data-tb-row="' + r.row + '"]');
+      toolbarBtns.forEach(btn => {
+        btn.addEventListener("mousedown", e => {
+          e.preventDefault();
+          const cmd = btn.getAttribute("data-md");
+          descEl.focus();
+          if (cmd === "bold")      document.execCommand("bold", false, null);
+          if (cmd === "italic")    document.execCommand("italic", false, null);
+          if (cmd === "underline") document.execCommand("underline", false, null);
+          if (cmd === "ul")        document.execCommand("insertUnorderedList", false, null);
+          if (cmd === "ol")        document.execCommand("insertOrderedList", false, null);
+        });
+      });
+      // Auto-conversión de markdown al escribir
+      descEl.addEventListener("keydown", e => {
+        if (e.key === " " || e.key === "Enter") {
+          const sel = window.getSelection();
+          if (!sel.rangeCount) return;
+          const range = sel.getRangeAt(0);
+          const node = range.startContainer;
+          if (node.nodeType !== Node.TEXT_NODE) return;
+          const lineText = node.textContent.slice(0, range.startOffset);
+          if (e.key === " " && lineText === "-") {
+            e.preventDefault();
+            document.execCommand("insertUnorderedList", false, null);
+            return;
+          }
+          if (e.key === " " && /^\d+\.$/.test(lineText)) {
+            e.preventDefault();
+            document.execCommand("insertOrderedList", false, null);
+          }
+        }
+      });
     }
 
     // Links píldoras en fila editable
@@ -4000,7 +4040,8 @@ function renderAgenda() {
       const owner = readOwnerFromMs("ag_owner_" + row);
       const fechaISO = tr.querySelector("[data-ag-fecha]")?.value || "";
       const fecha = fechaISO ? fechaISO.split("-").reverse().join("/") : "";
-      const descTxt  = tr.querySelector("[data-ag-desc]")?.value?.trim() || "";
+      const agDescEl = tr.querySelector("[data-ag-desc]");
+      const descTxt  = agDescEl ? htmlToMd_(agDescEl.innerHTML).trim() : "";
       const rowLinks = Array.from(tr.querySelectorAll("[data-ag-links-wrap] [data-link-pill]"))
         .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
       const payload = {
