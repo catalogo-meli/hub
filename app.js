@@ -3668,6 +3668,89 @@ function _updateAgendaBadge_() {
   }
 }
 
+
+function mountAgendaOwnerMs_(wrapId) {
+  const host2 = $(wrapId);
+  if (!host2) return;
+  const btn2   = host2.querySelector(".ms-btn");
+  const panel2 = host2.querySelector(".ms-panel");
+  const val2   = host2.querySelector("[data-ms-value]");
+  const cbs    = host2.querySelectorAll("input[type=checkbox]");
+  const bClr   = host2.querySelector("[data-ms-clear]");
+
+  // Sincronizar el label del botón con las checkboxes seleccionadas
+  const syncVal = () => {
+    const checked = Array.from(cbs).filter(c => c.checked && c.value !== "Todos").map(c => c.value);
+    val2.textContent = checked.length ? checked.join(", ") : "Todos";
+  };
+
+  cbs.forEach(cb => {
+    cb.addEventListener("change", () => {
+      if (cb.value === "Todos") {
+        cbs.forEach(c => { if (c.value !== "Todos") c.checked = false; });
+      } else {
+        const todoCb = Array.from(cbs).find(c => c.value === "Todos");
+        if (todoCb) todoCb.checked = false;
+      }
+      syncVal();
+    });
+  });
+
+  bClr?.addEventListener("click", () => {
+    cbs.forEach(c => { c.checked = c.value === "Todos"; });
+    syncVal();
+  });
+
+  // Calcular posición del panel relativa a la ventana (position:fixed)
+  // para escapar del overflow:hidden de la tabla
+  const posPanel = () => {
+    const r = btn2.getBoundingClientRect();
+    const panelH = Math.min(220, window.innerHeight - r.bottom - 8);
+    const top = r.bottom + 4;
+    const left = Math.min(r.left, window.innerWidth - 190);
+    Object.assign(panel2.style, {
+      position: "fixed",
+      top: top + "px",
+      left: left + "px",
+      width: Math.max(180, r.width) + "px",
+      maxHeight: panelH + "px",
+      zIndex: "9999",
+      display: "block",
+    });
+  };
+
+  const closePanel = () => {
+    panel2.style.display = "none";
+    host2.classList.remove("open");
+  };
+
+  btn2?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (panel2.style.display === "block") {
+      closePanel();
+    } else {
+      // Cerrar cualquier otro panel abierto
+      document.querySelectorAll("[data-agenda-panel-open]").forEach(p => {
+        p.style.display = "none";
+        p.removeAttribute("data-agenda-panel-open");
+      });
+      panel2.setAttribute("data-agenda-panel-open", "1");
+      posPanel();
+    }
+  });
+
+  // Clicks dentro del panel no cierran
+  panel2?.addEventListener("click", (e) => e.stopPropagation());
+
+  // Un solo listener global por instancia — guardado en el elemento para no duplicar
+  if (!host2._agendaMsListener) {
+    host2._agendaMsListener = (e) => {
+      if (!host2.contains(e.target)) closePanel();
+    };
+    document.addEventListener("click", host2._agendaMsListener);
+  }
+}
+
 function renderAgenda() {
   const host = $("agendaContent");
   if (!host) return;
@@ -3854,87 +3937,8 @@ function renderAgenda() {
   `;
 
   // ── Activar multiselects de owner ────────────────────────
-  function mountAgendaOwnerMs_(wrapId) {
-    const host2 = $(wrapId);
-    if (!host2) return;
-    const btn2   = host2.querySelector(".ms-btn");
-    const panel2 = host2.querySelector(".ms-panel");
-    const val2   = host2.querySelector("[data-ms-value]");
-    const cbs    = host2.querySelectorAll("input[type=checkbox]");
-    const bClr   = host2.querySelector("[data-ms-clear]");
+  // mountAgendaOwnerMs_ definida globalmente (ver abajo)
 
-    // Sincronizar el label del botón con las checkboxes seleccionadas
-    const syncVal = () => {
-      const checked = Array.from(cbs).filter(c => c.checked && c.value !== "Todos").map(c => c.value);
-      val2.textContent = checked.length ? checked.join(", ") : "Todos";
-    };
-
-    cbs.forEach(cb => {
-      cb.addEventListener("change", () => {
-        if (cb.value === "Todos") {
-          cbs.forEach(c => { if (c.value !== "Todos") c.checked = false; });
-        } else {
-          const todoCb = Array.from(cbs).find(c => c.value === "Todos");
-          if (todoCb) todoCb.checked = false;
-        }
-        syncVal();
-      });
-    });
-
-    bClr?.addEventListener("click", () => {
-      cbs.forEach(c => { c.checked = c.value === "Todos"; });
-      syncVal();
-    });
-
-    // Calcular posición del panel relativa a la ventana (position:fixed)
-    // para escapar del overflow:hidden de la tabla
-    const posPanel = () => {
-      const r = btn2.getBoundingClientRect();
-      const panelH = Math.min(220, window.innerHeight - r.bottom - 8);
-      const top = r.bottom + 4;
-      const left = Math.min(r.left, window.innerWidth - 190);
-      Object.assign(panel2.style, {
-        position: "fixed",
-        top: top + "px",
-        left: left + "px",
-        width: Math.max(180, r.width) + "px",
-        maxHeight: panelH + "px",
-        zIndex: "9999",
-        display: "block",
-      });
-    };
-
-    const closePanel = () => {
-      panel2.style.display = "none";
-      host2.classList.remove("open");
-    };
-
-    btn2?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (panel2.style.display === "block") {
-        closePanel();
-      } else {
-        // Cerrar cualquier otro panel abierto
-        document.querySelectorAll("[data-agenda-panel-open]").forEach(p => {
-          p.style.display = "none";
-          p.removeAttribute("data-agenda-panel-open");
-        });
-        panel2.setAttribute("data-agenda-panel-open", "1");
-        posPanel();
-      }
-    });
-
-    // Clicks dentro del panel no cierran
-    panel2?.addEventListener("click", (e) => e.stopPropagation());
-
-    // Un solo listener global por instancia — guardado en el elemento para no duplicar
-    if (!host2._agendaMsListener) {
-      host2._agendaMsListener = (e) => {
-        if (!host2.contains(e.target)) closePanel();
-      };
-      document.addEventListener("click", host2._agendaMsListener);
-    }
-  }
 
   // Montar ms del formulario nuevo
   // Formulario ya está en HTML estático — owner multiselect montado en wireUI
