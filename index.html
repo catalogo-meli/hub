@@ -947,6 +947,30 @@ tbody .skeleton { margin: 4px 0; }
 /* ── MENTIONS ────────────────────────────────────────────────── */
 .mention-wrap { position: relative; }
 
+/* ── Asignaciones: íconos Hab/Fijo ──────────────────────── */
+.habil-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid var(--brd);
+  background: transparent;
+  cursor: pointer;
+  transition: all .15s;
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.habil-btn:hover { border-color: var(--brd-2); background: var(--surface-2); }
+.habil-btn.is-hab  { background: var(--ok-dim);  border-color: var(--ok-brd);  color: var(--ok-txt);  }
+.habil-btn.is-fijo { background: var(--pri-dim); border-color: var(--pri-brd); color: var(--pri);     }
+.habil-btn:disabled { opacity: .35; cursor: not-allowed; }
+/* Celdas de la tabla más compactas */
+#tblHabil td, #tblHabil th { padding: 6px 8px; }
+#tblHabil td .habil-cell { display: flex; gap: 6px; align-items: center; justify-content: center; }
+
 /* ── Agenda cards ───────────────────────────────────────── */
 .ag-card { transition: border-color .15s, box-shadow .1s; }
 .ag-card:hover { border-color: var(--brd-2); }
@@ -1111,7 +1135,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="tab" data-tab="agenda">Agenda</div>
 <div class="tab" data-tab="daily">Operativa diaria</div>
 <div class="tab" data-tab="colabs">Colaboradores</div>
-<div class="tab" data-tab="habil">Habilitaciones</div>
+<div class="tab" data-tab="habil">Asignaciones</div>
 <div class="tab" data-tab="pres">Presentismo</div>
 </nav>
 <main class="grid" style="margin-top:16px">

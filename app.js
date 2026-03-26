@@ -2614,11 +2614,11 @@ function renderHabil() {
       </th>
       <th style="min-width:220px">Colaborador</th>
       ${flujos.map((f) => `
-        <th class="nowrap" style="text-align:center">
+        <th class="nowrap" style="text-align:center;font-size:11px;text-transform:uppercase;letter-spacing:.05em">
           ${escapeHtml(f)}
-          <div style="display:flex;gap:10px;justify-content:center;margin-top:3px">
-            <span class="muted" style="font-size:10px;letter-spacing:.04em" title="Habilitado para este flujo">Hab.</span>
-            <span class="muted" style="font-size:10px;letter-spacing:.04em" title="Asignación fija (no varía por día)">Fijo</span>
+          <div style="display:flex;gap:6px;justify-content:center;margin-top:4px;opacity:.5;font-size:10px">
+            <span title="Habilitado">●</span>
+            <span title="Fijo">📌</span>
           </div>
         </th>`).join("")}
     </tr>
@@ -2680,16 +2680,30 @@ function renderHabil() {
       const sel = prevSel.has(id);
       const cells = flujos
         .map((f) => {
-          const hab = !!r[`H_${f}`];
+          const hab  = !!r[`H_${f}`];
           const fijo = !!r[`F_${f}`];
           return `
-            <td class="nowrap">
-              <label class="row" style="gap:10px;margin:0">
-                <input type="checkbox" data-h="1" data-id="${escapeAttr(id)}" data-flujo="${escapeAttr(f)}" ${hab ? "checked" : ""} />
-                <span class="muted">H</span>
-                <input type="checkbox" data-f="1" data-id="${escapeAttr(id)}" data-flujo="${escapeAttr(f)}" ${fijo ? "checked" : ""} />
-                <span class="muted">F</span>
-              </label>
+            <td style="text-align:center;padding:6px 8px">
+              <div style="display:inline-flex;gap:6px;align-items:center">
+                <button type="button"
+                  data-h="1" data-id="${escapeAttr(id)}" data-flujo="${escapeAttr(f)}"
+                  title="${hab ? "Habilitado — click para deshabilitar" : "No habilitado — click para habilitar"}"
+                  style="width:26px;height:26px;border-radius:50%;border:2px solid ${hab ? "var(--ok)" : "var(--brd-2)"};
+                    background:${hab ? "var(--ok-dim)" : "transparent"};
+                    color:${hab ? "var(--ok-txt)" : "var(--text-3)"};
+                    cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;
+                    transition:all .15s;flex-shrink:0"
+                  aria-pressed="${hab}">●</button>
+                <button type="button"
+                  data-f="1" data-id="${escapeAttr(id)}" data-flujo="${escapeAttr(f)}"
+                  title="${fijo ? "Fijo — click para desfijar" : hab ? "No fijo — click para fijar" : "Habilitá primero para poder fijar"}"
+                  style="width:26px;height:26px;border-radius:50%;border:2px solid ${fijo ? "var(--pri)" : "var(--brd)"};
+                    background:${fijo ? "var(--pri-dim)" : "transparent"};
+                    color:${fijo ? "var(--pri)" : hab ? "var(--text-3)" : "var(--text-3)"};
+                    cursor:${hab ? "pointer" : "default"};font-size:12px;display:flex;align-items:center;justify-content:center;
+                    transition:all .15s;flex-shrink:0;opacity:${hab ? "1" : "0.3"}"
+                  aria-pressed="${fijo}" ${!hab ? "disabled" : ""}>📌</button>
+              </div>
             </td>
           `;
         })
@@ -2733,27 +2747,55 @@ function renderHabil() {
   });
 
   // ── Listeners de H y F individuales ────────────────────────
-  body.querySelectorAll("input[data-h]").forEach((cb) => {
-    cb.addEventListener("change", async () => {
-      const idMeli = cb.getAttribute("data-id");
-      const flujo = cb.getAttribute("data-flujo");
-      const habilitado = cb.checked;
-      const fijoCb = body.querySelector(`input[data-f][data-id="${cssEsc(idMeli)}"][data-flujo="${cssEsc(flujo)}"]`);
-      const fijo = fijoCb ? fijoCb.checked : false;
-      if (!habilitado && fijoCb) fijoCb.checked = false;
+  // Listeners para botones ícono ● (hab) y 📌 (fijo)
+  body.querySelectorAll("button[data-h]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const idMeli  = btn.getAttribute("data-id");
+      const flujo   = btn.getAttribute("data-flujo");
+      const wasHab  = btn.getAttribute("aria-pressed") === "true";
+      const habilitado = !wasHab;
+      const fijoBtn = body.querySelector(`button[data-f][data-id="${cssEsc(idMeli)}"][data-flujo="${cssEsc(flujo)}"]`);
+      const fijo    = fijoBtn ? fijoBtn.getAttribute("aria-pressed") === "true" : false;
+      // Feedback visual inmediato
+      btn.style.borderColor  = habilitado ? "var(--ok)"    : "var(--brd-2)";
+      btn.style.background   = habilitado ? "var(--ok-dim)": "transparent";
+      btn.style.color        = habilitado ? "var(--ok-txt)": "var(--text-3)";
+      btn.setAttribute("aria-pressed", habilitado);
+      if (!habilitado && fijoBtn) {
+        fijoBtn.setAttribute("aria-pressed", "false");
+        fijoBtn.style.borderColor = "var(--brd)";
+        fijoBtn.style.background  = "transparent";
+        fijoBtn.style.opacity     = "0.3";
+        fijoBtn.disabled = true;
+      } else if (habilitado && fijoBtn) {
+        fijoBtn.style.opacity = "1";
+        fijoBtn.disabled = false;
+      }
       await setHabilitacion(idMeli, flujo, habilitado, habilitado ? fijo : false);
     });
   });
 
-  body.querySelectorAll("input[data-f]").forEach((cb) => {
-    cb.addEventListener("change", async () => {
-      const idMeli = cb.getAttribute("data-id");
-      const flujo = cb.getAttribute("data-flujo");
-      const fijo = cb.checked;
-      const habCb = body.querySelector(`input[data-h][data-id="${cssEsc(idMeli)}"][data-flujo="${cssEsc(flujo)}"]`);
-      const habilitado = habCb ? habCb.checked : false;
-      if (fijo && habCb && !habilitado) habCb.checked = true;
-      await setHabilitacion(idMeli, flujo, fijo ? true : habilitado, fijo);
+  body.querySelectorAll("button[data-f]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (btn.disabled) return;
+      const idMeli  = btn.getAttribute("data-id");
+      const flujo   = btn.getAttribute("data-flujo");
+      const wasFijo = btn.getAttribute("aria-pressed") === "true";
+      const fijo    = !wasFijo;
+      const habBtn  = body.querySelector(`button[data-h][data-id="${cssEsc(idMeli)}"][data-flujo="${cssEsc(flujo)}"]`);
+      // Si se fija pero no estaba habilitado, habilitar automáticamente
+      if (fijo && habBtn && habBtn.getAttribute("aria-pressed") !== "true") {
+        habBtn.setAttribute("aria-pressed", "true");
+        habBtn.style.borderColor = "var(--ok)";
+        habBtn.style.background  = "var(--ok-dim)";
+        habBtn.style.color       = "var(--ok-txt)";
+      }
+      // Feedback visual inmediato
+      btn.style.borderColor = fijo ? "var(--pri)"  : "var(--brd)";
+      btn.style.background  = fijo ? "var(--pri-dim)" : "transparent";
+      btn.style.color       = fijo ? "var(--pri)"  : "var(--text-3)";
+      btn.setAttribute("aria-pressed", fijo);
+      await setHabilitacion(idMeli, flujo, true, fijo);
     });
   });
 
@@ -4766,11 +4808,11 @@ async function main() {
     onChange: (set) => { S.fHabil.flujos = set; renderHabil(); },
   });
 
-  // Select de flujo en la barra masiva (multi: puede aplicar a varios flujos a la vez)
+  // Select de flujo en la barra masiva — se puebla con S.flujos (Operativa)
   let _habilBulkFlujoMs = mountMultiSelect("msHabilBulkFlujo", {
     title: "Flujos a aplicar",
-    items: [],   // se puebla al abrir habilitaciones
-    onChange: () => {},  // no filtra, solo acumula selección para la acción
+    items: (S.flujos || []).map(f => String(f.flujo || f)).filter(Boolean).sort(),
+    onChange: () => {},  // no filtra — acumula selección para la acción bulk
   });
 
   // Poblar ms de barra masiva — fuente única: S.flujos (Operativa) con fallback a habil.flujos
