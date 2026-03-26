@@ -3919,10 +3919,8 @@ function renderAgenda() {
           descripcion: payload.descripcion, estado: payload.estado
         });
         await API.agendaUpdate(payload);
-        // Recargar desde GAS para sincronizar con Sheets
+        // Patch optimista ya aplicado — solo invalidar cache, sin re-fetch
         CACHE.invalidate("agenda");
-        S.agenda = await API.agendaList();
-        CACHE.set("agenda", S.agenda, 5 * 60_000);
         toast("Agenda", "✓ Guardado");
         renderAgenda();
       } catch (e) { setErr(`Agenda: ${e.message || e}`); }
@@ -3961,18 +3959,14 @@ function renderAgenda() {
       if (!confirm("¿Eliminar este tema de la agenda?")) return;
       const idx = (S.agenda||[]).findIndex(r => r.row === row);
       if (idx >= 0) S.agenda.splice(idx, 1);
+      CACHE.invalidate("agenda");
       renderAgenda();
-      try {
-        await API.agendaDelete(row);
-        CACHE.invalidate("agenda");
-        S.agenda = await API.agendaList();
-        CACHE.set("agenda", S.agenda, 5 * 60_000);
-        renderAgenda();
-      } catch (e) {
+      // Confirmar eliminación en GAS en background
+      API.agendaDelete(row).catch(e => {
         setErr(`Agenda: ${e.message || e}`);
-        S.agenda = await API.agendaList().catch(() => S.agenda);
-        renderAgenda();
-      }
+        // Si falla, recargar desde GAS
+        API.agendaList().then(d => { if (d) { S.agenda = d; renderAgenda(); } }).catch(() => {});
+      });
     });
   });
 
@@ -3983,6 +3977,10 @@ function renderAgenda() {
   });
 
   $("btnAgendaCopiar")?.addEventListener("click", onAgendaCopiar_);
+
+  // Siempre sincronizar badge y card con el estado actual
+  _updateAgendaBadge_();
+  _updateKpiAgenda_();
 }
 
 // Convierte "dd/MM/yyyy" → "yyyy-MM-dd" para input type=date
@@ -4021,8 +4019,13 @@ async function onAgendaAgregar_(ownerParam) {
   setErr("");
   try {
     setBusy("Agenda", "Guardando...");
+    // Optimistic: agregar item local inmediatamente
+    const tempRow = -Date.now();
+    S.agenda = [{ row: tempRow, fecha, owner, tema, tiempo, prioridad,
+      descripcion: desc, estado: "Para hacer" }, ...(S.agenda || [])];
+    renderAgenda();
     await API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc });
-    CACHE.invalidate("agenda");
+    // Re-fetch para obtener row real asignado por Sheets
     S.agenda = await API.agendaList();
     CACHE.set("agenda", S.agenda, 5 * 60_000);
     renderAgenda();
@@ -4057,11 +4060,10 @@ async function onAgendaSetHecho_(row, btn) {
   try {
     await API.agendaSetHecho(row);
     CACHE.invalidate("agenda");
-    S.agenda = await API.agendaList();
-    CACHE.set("agenda", S.agenda, 5 * 60_000);
+    // Sin re-fetch — patch optimista ya aplicado
     toast("Agenda", "✓ Marcado como hecho");
   } catch (e) {
-    // Revertir
+    // Revertir si falla
     if (idx >= 0) S.agenda[idx].estado = "Pendiente";
     renderAgenda();
     setErr(`Agenda: ${e.message || e}`);
