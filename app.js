@@ -2421,7 +2421,7 @@ function renderPresentismo() {
 
   const colabsById = new Map((S.colabs || []).map((c) => {
     const v = colabRowView(c);
-    return [v.id, v];
+    return [String(v.id || "").trim(), v];
   }));
 
   const filtered = rows.filter((r) => {
@@ -2556,7 +2556,7 @@ function countAnalistasDisponiblesHoy_() {
   const today = todayYMD();
   const colabsById = new Map((S.colabs || []).map((c) => {
     const v = colabRowView(c);
-    return [v.id, v];
+    return [String(v.id || "").trim(), v];
   }));
 
   let n = 0;
@@ -2611,14 +2611,16 @@ function renderDashboard() {
 
   if (S.presWeek?.rows?.length) {
     const today = todayYMD();
+    // Normalizar IDs con trim para evitar mismatches por espacios en el sheet
     const colabsById = new Map((S.colabs || []).map((c) => {
       const v = colabRowView(c);
-      return [v.id, v];
+      return [String(v.id || "").trim(), v];
     }));
     for (const r of S.presWeek.rows) {
       const vday = String(r.vals?.[today] || "").trim();
       const imp = presImpactFromCode_(vday);
-      const meta = colabsById.get(r.id_meli);
+      const idNorm = String(r.id_meli || "").trim();
+      const meta = colabsById.get(idNorm);
       const role = normRole(meta?.rol || "");
 
       // Presente (ok) o Presente parcial (warn = TM/TR, CJ): ambos cuentan como presente
