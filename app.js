@@ -3751,6 +3751,15 @@ function mountAgendaOwnerMs_(wrapId) {
   }
 }
 
+
+function readOwnerFromMs(wrapId) {
+  const wrap = $(wrapId + "_wrap");
+  if (!wrap) return "Todos";
+  const checked = Array.from(wrap.querySelectorAll("input[type=checkbox]:checked"))
+    .filter(c => c.value !== "Todos").map(c => c.value);
+  return checked.length ? checked.join(", ") : "Todos";
+}
+
 function renderAgenda() {
   const host = $("agendaContent");
   if (!host) return;
@@ -4017,13 +4026,7 @@ function renderAgenda() {
   });
 
   // ── Helpers para leer owner del ms ──────────────────────
-  const readOwnerFromMs = (wrapId) => {
-    const wrap = $(wrapId + "_wrap");
-    if (!wrap) return "Todos";
-    const checked = Array.from(wrap.querySelectorAll("input[type=checkbox]:checked"))
-      .filter(c => c.value !== "Todos").map(c => c.value);
-    return checked.length ? checked.join(", ") : "Todos";
-  };
+  // readOwnerFromMs es global — definida fuera de renderAgenda (ver arriba)
 
   // ── Botón agregar ────────────────────────────────────────
   // btnAgendaAgregar montado en wireUI
@@ -4258,14 +4261,24 @@ async function onAgendaAgregar_(ownerParam) {
     .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
   const desc = joinDescLinks_(descText, linkPills);
 
-  if (!tema) { setErr("Agenda: el campo Tema es obligatorio."); return; }
+  if (!tema) {
+    // Highlight del campo Tema
+    const temaEl = $("agTema");
+    if (temaEl) { temaEl.style.borderColor = "var(--err)"; temaEl.focus(); setTimeout(() => { temaEl.style.borderColor = ""; }, 2000); }
+    setErr("El campo Tema es obligatorio.");
+    return;
+  }
+  setErr("");
 
   // Convertir fecha de yyyy-MM-dd a dd/MM/yyyy para GAS
   const fechaGAS = fecha
     ? fecha.split("-").reverse().join("/")
     : new Date().toLocaleDateString("es-AR", { day:"2-digit", month:"2-digit", year:"numeric" });
 
-  setErr("");
+  // Feedback visual en el botón
+  const btnAgregar = $("btnAgendaAgregar");
+  if (btnAgregar) { btnAgregar.disabled = true; btnAgregar.textContent = "Agregando..."; }
+
   // Optimistic: mostrar item inmediatamente sin esperar GAS
   const tempRow = -Date.now();
   S.agenda = [{ row: tempRow, fecha, owner, tema, tiempo, prioridad,
@@ -4278,6 +4291,9 @@ async function onAgendaAgregar_(ownerParam) {
   if (_agDescEditor_) _agDescEditor_.clear();
   const linkWrap = $("agLinksWrap");
   if (linkWrap) linkWrap.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
+  // Restaurar botón Agregar
+  if (btnAgregar) { btnAgregar.disabled = false; btnAgregar.textContent = "Agregar"; }
+
   // Cerrar formulario
   const agFormBody = $("agFormBody");
   const agFormBtn  = $("btnAgFormToggle");
@@ -4292,9 +4308,9 @@ async function onAgendaAgregar_(ownerParam) {
       toast("Agenda", "✓ Tema agregado");
     })
     .catch(e => {
+      if (btnAgregar) { btnAgregar.disabled = false; btnAgregar.textContent = "Agregar"; }
       const msg = String(e?.message || e);
       // GAS puede escribir la fila y fallar al responder (timeout o lock)
-      // En ese caso NO mostrar error — el auto-refresh va a traer el item
       if (msg.includes("Non-JSON") || msg.includes("timeout") || msg.includes("lock")) {
         toast("Agenda", "✓ Guardado (verificando...)");
         // Re-fetch demorado para no competir con el lock
