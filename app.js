@@ -565,7 +565,10 @@ async function lazyLoadTab_(name) {
       renderHabil();
     }
     if (name === "agenda") {
-      S.agenda = await API.agendaList().catch(() => S.agenda || []);
+      // Solo fetchea si no hay datos todavía (no re-fetchar en cada click al tab)
+      if (!S.agenda || !S.agenda.length) {
+        S.agenda = await API.agendaList().catch(() => []);
+      }
       renderAgenda();
     }
     if (name === "pres") {
@@ -660,7 +663,8 @@ async function loadCore() {
       S.flujos  = init.flujos  || [];
       S.plan    = init.plan    || [];
       S.outbox  = init.outbox  || [];
-      S.agenda  = init.agenda  || [];
+      // agenda NO se carga en arranque (268 filas históricas = demasiado pesado)
+      // Carga lazy al primer click en el tab
       // Poblar cache de cliente
       CACHE.set("colabs",  S.colabs,  5 * 60_000);
       CACHE.set("canales", S.canales, 10 * 60_000);
