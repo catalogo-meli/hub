@@ -3382,6 +3382,90 @@ function mountWysiwyg_(editorId, toolbarId, emojiId) {
     document.execCommand(cmd, false, val || null);
   };
 
+  // Auto-convertir marcadores Markdown mientras se escribe
+  // Detecta ** ** → bold, * * → italic, __ __ → underline, - → lista
+  editor.addEventListener("keyup", (e) => {
+    // Solo procesar en ciertos caracteres que cierran un marcador
+    if (!["*", "_", " ", "Enter"].includes(e.key)) return;
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return;
+    const text = node.textContent;
+    const offset = range.startOffset;
+    const lineText = text.slice(0, offset);
+
+    // ** negrita **
+    const boldM = lineText.match(/\*\*(.+?)\*\*$/);
+    if (boldM) {
+      const full = boldM[0];
+      const inner = boldM[1];
+      const start = offset - full.length;
+      const r2 = range.cloneRange();
+      r2.setStart(node, start);
+      r2.setEnd(node, offset);
+      r2.deleteContents();
+      document.execCommand("bold", false, null);
+      document.execCommand("insertText", false, inner);
+      document.execCommand("bold", false, null);
+      return;
+    }
+    // * cursiva * (no doble)
+    const italicM = lineText.match(/(?<!\*)\*([^*]+?)\*$/);
+    if (italicM) {
+      const full = italicM[0];
+      const inner = italicM[1];
+      const start = offset - full.length;
+      const r2 = range.cloneRange();
+      r2.setStart(node, start);
+      r2.setEnd(node, offset);
+      r2.deleteContents();
+      document.execCommand("italic", false, null);
+      document.execCommand("insertText", false, inner);
+      document.execCommand("italic", false, null);
+      return;
+    }
+    // __ subrayado __
+    const ulM = lineText.match(/__(.+?)__$/);
+    if (ulM) {
+      const full = ulM[0];
+      const inner = ulM[1];
+      const start = offset - full.length;
+      const r2 = range.cloneRange();
+      r2.setStart(node, start);
+      r2.setEnd(node, offset);
+      r2.deleteContents();
+      document.execCommand("underline", false, null);
+      document.execCommand("insertText", false, inner);
+      document.execCommand("underline", false, null);
+      return;
+    }
+  });
+
+  // Convertir "- " al inicio de línea en viñeta al presionar espacio
+  editor.addEventListener("keydown", (e) => {
+    if (e.key !== " " && e.key !== "Enter") return;
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return;
+    const lineText = node.textContent.slice(0, range.startOffset);
+    // "- " → lista al presionar espacio
+    if (e.key === " " && lineText === "-") {
+      e.preventDefault();
+      document.execCommand("insertUnorderedList", false, null);
+      return;
+    }
+    // "1. " → lista numerada al presionar espacio
+    if (e.key === " " && /^\d+\.$/.test(lineText)) {
+      e.preventDefault();
+      document.execCommand("insertOrderedList", false, null);
+      return;
+    }
+  });
+
   if (toolbar) {
     toolbar.querySelectorAll("[data-cmd]").forEach(btn => {
       btn.addEventListener("mousedown", e => {
@@ -4044,15 +4128,17 @@ async function onAgendaAgregar_(ownerParam) {
       descripcion: desc, estado: "Para hacer" }, ...(S.agenda || [])];
     renderAgenda();
     await API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc });
-    // Re-fetch para obtener row real asignado por Sheets
-    S.agenda = await API.agendaList();
-    CACHE.set("agenda", S.agenda, 5 * 60_000);
-    renderAgenda();
+    // Row real se sincroniza en el próximo auto-refresh — no bloquear UI con re-fetch
+    CACHE.invalidate("agenda");
     if ($("agTema")) $("agTema").value = "";
     if (_agDescEditor_) _agDescEditor_.clear();
     const linkWrap = $("agLinksWrap");
     if (linkWrap) linkWrap.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
     toast("Agenda", "✓ Tema agregado");
+    // Re-fetch en background para obtener row real
+    API.agendaList().then(d => {
+      if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
+    }).catch(() => {});
   } catch (e) {
     // GAS puede escribir la fila y fallar al devolver JSON (deployment viejo)
     // En ese caso recargar igual para mostrar lo que se guardó
