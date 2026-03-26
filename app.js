@@ -16,10 +16,11 @@ const $ = (id) => document.getElementById(id);
  * CACHE CLIENTE (TTL)
  * Evita re-fetches innecesarios al navegar entre tabs
  ***********************/
+const CACHE_VERSION = "v7"; // incrementar si cambia el formato de los datos
 const CACHE = {
   _store: {},
   _ss: typeof sessionStorage !== "undefined" ? sessionStorage : null,
-  _sk: (k) => "hub_cache_" + k,
+  _sk: (k) => "hub_cache_" + CACHE_VERSION + "_" + k,
 
   set(key, data, ttlMs = 60_000) {
     const exp = Date.now() + ttlMs;
@@ -702,16 +703,25 @@ async function loadCore() {
     const cHabil   = CACHE.get("habil");
     const allCached = cColabs && cCanales && cFlujos;
 
+    const cPlan   = CACHE.get("plan");
+    const cOutbox = CACHE.get("outbox");
+    const fullyCached = allCached && cPlan && cOutbox;
+
     if (allCached) {
-      // Cache fresco: cero requests a GAS
+      // Cache fresco: usar datos locales
       S.colabs    = cColabs;
       S.canales   = cCanales;
       S.flujos    = cFlujos;
       if (cPres)   S.presWeek  = cPres;
       if (cStats)  S.presStats = cStats;
       if (cHabil)  S.habil     = cHabil;
-      // Solo refrescar plan+outbox (muy dinámicos, 30s TTL en GAS)
-      await refreshPlanAndOutbox();
+      if (cPlan)   S.plan      = cPlan;
+      if (cOutbox) S.outbox    = cOutbox;
+
+      if (!fullyCached) {
+        // Plan u outbox vencidos — refrescar en background sin bloquear
+        refreshPlanAndOutbox().catch(() => {});
+      }
     } else {
       // Cold: un solo request que trae todo
       const init = await API.hubInit();
@@ -2962,7 +2972,7 @@ function renderAgenda() {
     const sel = String(selectedVal || "");
     const selected = sel === "Todos" || sel === "All" ? [] : sel.split(",").map(s => s.trim()).filter(Boolean);
     return `
-      <div class="ms" id="${idPrefix}_wrap" style="min-width:130px;position:relative">
+      <div class="ms" id="${idPrefix}_wrap" style="min-width:130px;position:relative;overflow:visible">
         <div class="ms-btn">
           <div>
             <div class="value" data-ms-value style="font-size:13px">${escapeHtml(sel || "Todos")}</div>
@@ -3065,7 +3075,7 @@ function renderAgenda() {
     </tr></thead>`;
 
   const pendientesHtml = pendientes.length
-    ? `<div style="overflow-x:auto"><table class="table" style="margin-top:8px">${thead}<tbody>${pendientes.map(r => rowHtmlEditable(r)).join("")}</tbody></table></div>`
+    ? `<div style="overflow:visible"><table class="table" style="margin-top:8px">${thead}<tbody>${pendientes.map(r => rowHtmlEditable(r)).join("")}</tbody></table></div>`
     : `<div class="muted" style="margin-top:12px;padding:12px">Sin pendientes. ¡Todo al día! 🎉</div>`;
 
   const histBtnLabel = S.agendaHistCollapsed ? `▶ Ver historial (${historial.length})` : `▼ Ocultar historial`;
