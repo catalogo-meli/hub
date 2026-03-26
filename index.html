@@ -926,16 +926,24 @@ tbody .skeleton { margin: 4px 0; }
 .mention-wrap { position: relative; }
 
 .mention-dd {
-  position: absolute; left: 0; top: calc(100% + 4px);
-  min-width: 320px; width: max-content; max-width: 480px;
-  margin: 0; padding: 4px; max-height: 240px; overflow-y: auto;
+  position: fixed;
+  min-width: 320px; max-width: 500px;
+  margin: 0; padding: 6px;
+  max-height: 320px; overflow-y: auto;
   z-index: 9999;
   background: var(--surface);
   border: 1px solid var(--brd-2);
   box-shadow: var(--shd-lg);
   border-radius: var(--r);
 }
-.mention-box { position: relative; overflow: hidden; }
+.mention-dd button.btn {
+  border-radius: 6px;
+  transition: background .12s;
+}
+.mention-dd button.btn:hover {
+  background: var(--hover);
+}
+.mention-box { position: relative; overflow: visible; }
 
 #slackMentionPills .pill  { padding: 3px 8px; gap: 4px; font-size: 10px; }
 #slackMentionPills .xbtn  { border: 0; background: transparent; color: var(--text-3); cursor: pointer; font-size: 14px; padding: 0 2px; transition: color .1s; }

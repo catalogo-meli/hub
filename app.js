@@ -1887,16 +1887,38 @@ function mountSlackCompose_() {
     mentionResults.innerHTML = "";
   };
 
+  // Posicionar el panel de menciones con position:fixed para escapar de overflow
+  const posMentionPanel = () => {
+    if (!mentionSearch || !mentionResults) return;
+    const r = mentionSearch.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom - 8;
+    const spaceAbove = r.top - 8;
+    const panelH = Math.min(320, Math.max(spaceBelow, spaceAbove));
+    // Preferir abajo, si no hay espacio abrir arriba
+    if (spaceBelow >= 120 || spaceBelow >= spaceAbove) {
+      mentionResults.style.top  = (r.bottom + 4) + "px";
+      mentionResults.style.bottom = "auto";
+    } else {
+      mentionResults.style.bottom = (window.innerHeight - r.top + 4) + "px";
+      mentionResults.style.top = "auto";
+    }
+    mentionResults.style.left  = r.left + "px";
+    mentionResults.style.width = Math.max(320, r.width) + "px";
+    mentionResults.style.maxHeight = panelH + "px";
+  };
+
   const renderMentionResults = (q) => {
     if (!mentionResults) return;
     const nq = norm(q);
     if (!nq) return closeMentionResults();
-    const hits = allMentions.filter((x) => x.hay.includes(nq)).slice(0, 10);
+    const hits = allMentions.filter((x) => x.hay.includes(nq)).slice(0, 15); // hasta 15
     if (!hits.length) {
+      posMentionPanel();
       mentionResults.style.display = "block";
       mentionResults.innerHTML = `<div class="muted" style="font-size:12px;padding:6px">Sin resultados.</div>`;
       return;
     }
+    posMentionPanel();
     mentionResults.style.display = "block";
     mentionResults.innerHTML = hits
       .map((x) => {
