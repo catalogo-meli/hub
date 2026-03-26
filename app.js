@@ -3485,37 +3485,55 @@ function mountWysiwyg_(editorId, toolbarId, emojiId) {
   }
 
   // Emoji picker
-  const EMOJIS = ["👍","👎","✅","❌","⚠️","🔴","🟡","🟢","🔵","⭐","🎯","🚀","💡","📌","🔧","📊","📅","👤","💬","🔔","⏰","📝","🗂️","✍️","🤝","💪","🎉","🙌","👀","❓","❗","➡️","⬅️","⬆️","⬇️"];
+  // Emoji picker unificado — usa los mismos grupos del picker de Slack
+  const AGENDA_EMOJI_GROUPS = [
+    { k: "frecuentes", items: ["👍","👎","✅","❌","⚠️","🔴","🟡","🟢","🔵","⭐","🎯","🚀","💡","📌","🔔","⏰","📝","💬","👀","❓","❗"] },
+    { k: "urgencia",   items: ["🚨","‼️","🔥","🚩","📢","👆","👇","👉","🆘","⏱️"] },
+    { k: "estado",     items: ["☑️","✔️","✖️","⛔️","🛑","🚫","🔄","⏳","⌛️","⚪️","⚫️"] },
+    { k: "operativo",  items: ["📊","📈","📉","🗂️","⚙️","🛠️","🔧","📦","🏷️","🔗","🔍","🧩","📎","✍️"] },
+    { k: "personas",   items: ["👤","👥","🤝","👋","🙋‍♂️","🙋‍♀️","🧑‍💻","🙌","🙏","🤔","💪","🎉"] },
+    { k: "fechas",     items: ["📅","🗓️","📆","🕘","🔜","🔚"] },
+  ];
+  const ALL_AGENDA_EMOJIS = AGENDA_EMOJI_GROUPS.flatMap(g => g.items);
 
   if (emojiBtn) {
     const picker = document.createElement("div");
-    picker.style.cssText = "position:fixed;background:var(--surface);border:1px solid var(--brd-2);border-radius:8px;padding:8px;display:none;flex-wrap:wrap;gap:4px;width:260px;z-index:9999;box-shadow:var(--shd-lg)";
-    EMOJIS.forEach(em => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = em;
-      b.style.cssText = "font-size:20px;padding:3px;border:none;background:none;cursor:pointer;border-radius:4px;line-height:1";
-      b.addEventListener("click", () => {
-        editor.focus();
-        document.execCommand("insertText", false, em);
-        picker.style.display = "none";
+    picker.style.cssText = "position:fixed;background:var(--surface);border:1px solid var(--brd-2);border-radius:8px;padding:10px;display:none;z-index:9999;box-shadow:var(--shd-lg);width:290px;max-height:320px;overflow-y:auto";
+
+    const renderPicker = (q) => {
+      const items = q ? ALL_AGENDA_EMOJIS.filter(e => e.includes(q)) : ALL_AGENDA_EMOJIS;
+      picker.innerHTML = `
+        <input id="_agEmojiSearch" placeholder="Buscar emoji..." style="width:100%;padding:5px 8px;border:1px solid var(--brd-2);border-radius:6px;background:var(--surface-2);color:var(--text-1);font-size:12px;margin-bottom:8px;box-sizing:border-box"/>
+        <div style="display:flex;flex-wrap:wrap;gap:3px">
+          ${items.map(e => `<button type="button" data-emo="${e}" style="font-size:20px;padding:4px;border:none;background:none;cursor:pointer;border-radius:4px;line-height:1" title="${e}">${e}</button>`).join("")}
+        </div>
+      `;
+      picker.querySelector("#_agEmojiSearch")?.addEventListener("input", (ev) => renderPicker(ev.target.value));
+      picker.querySelectorAll("[data-emo]").forEach(b => {
+        b.addEventListener("click", () => {
+          editor.focus();
+          document.execCommand("insertText", false, b.getAttribute("data-emo"));
+          picker.style.display = "none";
+        });
       });
-      picker.appendChild(b);
-    });
+    };
+
+    renderPicker("");
     document.body.appendChild(picker);
 
     emojiBtn.addEventListener("click", e => {
       e.stopPropagation();
-      const r = emojiBtn.getBoundingClientRect();
-      if (picker.style.display === "none") {
-        picker.style.display = "flex";
-        picker.style.top = (r.bottom + 4) + "px";
-        picker.style.left = Math.min(r.left, window.innerWidth - 270) + "px";
-      } else {
-        picker.style.display = "none";
-      }
+      if (picker.style.display !== "none") { picker.style.display = "none"; return; }
+      const rect = emojiBtn.getBoundingClientRect();
+      picker.style.top  = (rect.bottom + 4) + "px";
+      picker.style.left = Math.min(rect.left, window.innerWidth - 300) + "px";
+      picker.style.display = "block";
+      renderPicker("");
+      setTimeout(() => picker.querySelector("#_agEmojiSearch")?.focus(), 50);
     });
-    document.addEventListener("click", () => { picker.style.display = "none"; });
+    document.addEventListener("click", (e) => {
+      if (!picker.contains(e.target) && e.target !== emojiBtn) picker.style.display = "none";
+    });
   }
 
   return {
@@ -3700,8 +3718,8 @@ function renderAgenda() {
                 return `<option value="${e}" ${estadoNorm === e ? "selected" : ""}>${e}</option>`;
               }).join("")}
             </select>
-            <div style="display:flex;gap:4px">
-              <button class="btn ghost" data-ag-save="${r.row}" style="font-size:11px;padding:3px 8px;flex:1" title="Guardar">💾 Guardar</button>
+            <div style="display:flex;gap:4px;align-items:center">
+              <span class="ag-save-status" data-save-status="${r.row}" style="font-size:10px;color:var(--text-3);flex:1;text-align:right"></span>
               <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
             </div>
           </div>
@@ -3803,14 +3821,14 @@ function renderAgenda() {
           <button type="button" class="btn ghost" data-cmd="bold"                style="font-size:12px;padding:2px 8px;font-weight:700" title="Negrita">B</button>
           <button type="button" class="btn ghost" data-cmd="italic"              style="font-size:12px;padding:2px 8px;font-style:italic" title="Cursiva">I</button>
           <button type="button" class="btn ghost" data-cmd="underline"           style="font-size:12px;padding:2px 8px;text-decoration:underline" title="Subrayado">S</button>
-          <button type="button" class="btn ghost" data-cmd="insertUnorderedList" style="font-size:12px;padding:2px 8px" title="Viñetas">• Lista</button>
-          <button type="button" class="btn ghost" data-cmd="insertOrderedList"   style="font-size:12px;padding:2px 8px" title="Lista numerada">1. Lista</button>
+          <button type="button" class="btn ghost" data-cmd="insertUnorderedList" style="font-size:12px;padding:2px 8px" title="Viñetas">•</button>
+          <button type="button" class="btn ghost" data-cmd="insertOrderedList"   style="font-size:12px;padding:2px 8px" title="Lista numerada">1.</button>
           <button type="button" class="btn ghost" id="agDescEmoji"               style="font-size:14px;padding:2px 8px" title="Emojis">😊</button>
         </div>
         <div id="agDesc" contenteditable="true" class="input wysiwyg-editor" style="min-height:60px;padding:8px;font-family:inherit;font-size:13px;line-height:1.5;overflow:auto;cursor:text" data-placeholder="Escribí la descripción..."></div>
       </div>
       <div style="margin-top:6px">
-        <div class="muted" style="font-size:12px;margin-bottom:4px">Links (pegá una URL)</div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Links (pegá todos los necesarios)</div>
         <div id="agLinksWrap" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:32px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg,var(--card2))">
           <input id="agLinkInput" class="input" placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:180px;padding:0"/>
         </div>
@@ -4033,41 +4051,71 @@ function renderAgenda() {
   });
 
   // ── Botones guardar (edición inline) ────────────────────
-  host.querySelectorAll("[data-ag-save]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      const row = Number(btn.getAttribute("data-ag-save"));
-      const tr = btn.closest("tr");
-      const owner = readOwnerFromMs("ag_owner_" + row);
-      const fechaISO = tr.querySelector("[data-ag-fecha]")?.value || "";
-      const fecha = fechaISO ? fechaISO.split("-").reverse().join("/") : "";
-      const agDescEl = tr.querySelector("[data-ag-desc]");
-      const descTxt  = agDescEl ? htmlToMd_(agDescEl.innerHTML).trim() : "";
-      const rowLinks = Array.from(tr.querySelectorAll("[data-ag-links-wrap] [data-link-pill]"))
-        .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
-      const payload = {
-        row,
-        fecha,
-        owner,
-        tema:        tr.querySelector("[data-ag-tema]")?.value?.trim()  || "",
-        tiempo:      tr.querySelector("[data-ag-tiempo]")?.value        || "",
-        prioridad:   tr.querySelector("[data-ag-prio]")?.value          || "",
-        descripcion: joinDescLinks_(descTxt, rowLinks),
-        estado:      tr.querySelector("[data-ag-estado]")?.value        || "Para hacer",
-      };
-      try {
-        // Optimistic update
-        const idx = (S.agenda||[]).findIndex(r => r.row === row);
-        if (idx >= 0) Object.assign(S.agenda[idx], {
-          fecha: payload.fecha, owner: payload.owner, tema: payload.tema,
-          tiempo: payload.tiempo, prioridad: payload.prioridad,
-          descripcion: payload.descripcion, estado: payload.estado
-        });
-        await API.agendaUpdate(payload);
-        // Patch optimista ya aplicado — solo invalidar cache, sin re-fetch
-        CACHE.invalidate("agenda");
-        toast("Agenda", "✓ Guardado");
-        renderAgenda();
-      } catch (e) { setErr(`Agenda: ${e.message || e}`); }
+  // ── Auto-save con debounce por fila ─────────────────────
+  const buildPayload_ = (tr, row) => {
+    const owner   = readOwnerFromMs("ag_owner_" + row);
+    const fechaISO = tr.querySelector("[data-ag-fecha]")?.value || "";
+    const fecha   = fechaISO ? fechaISO.split("-").reverse().join("/") : "";
+    const agDescEl = tr.querySelector("[data-ag-desc]");
+    const descTxt  = agDescEl ? htmlToMd_(agDescEl.innerHTML).trim() : "";
+    const rowLinks = Array.from(tr.querySelectorAll("[data-ag-links-wrap] [data-link-pill]"))
+      .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
+    return {
+      row, fecha, owner,
+      tema:        tr.querySelector("[data-ag-tema]")?.value?.trim() || "",
+      tiempo:      tr.querySelector("[data-ag-tiempo]")?.value       || "",
+      prioridad:   tr.querySelector("[data-ag-prio]")?.value         || "",
+      descripcion: joinDescLinks_(descTxt, rowLinks),
+      estado:      tr.querySelector("[data-ag-estado]")?.value       || "Para hacer",
+    };
+  };
+
+  const saveRow_ = async (row, tr) => {
+    const statusEl = tr.querySelector(`[data-save-status="${row}"]`);
+    const payload  = buildPayload_(tr, row);
+    try {
+      const idx = (S.agenda||[]).findIndex(r => r.row === row);
+      if (idx >= 0) Object.assign(S.agenda[idx], {
+        fecha: payload.fecha, owner: payload.owner, tema: payload.tema,
+        tiempo: payload.tiempo, prioridad: payload.prioridad,
+        descripcion: payload.descripcion, estado: payload.estado
+      });
+      if (statusEl) statusEl.textContent = "Guardando…";
+      await API.agendaUpdate(payload);
+      CACHE.invalidate("agenda");
+      if (statusEl) {
+        statusEl.textContent = "✓ Guardado";
+        setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 2000);
+      }
+      _updateAgendaBadge_();
+      _updateKpiAgenda_();
+    } catch (e) {
+      if (statusEl) statusEl.textContent = "Error al guardar";
+      setErr(`Agenda: ${e.message || e}`);
+    }
+  };
+
+  // Registrar auto-save en cada fila
+  pendientes.forEach(r => {
+    const tr = host.querySelector(`tr[data-agenda-row="${r.row}"]`);
+    if (!tr) return;
+    const rowId = r.row;
+    const autoSave = debounce(() => saveRow_(rowId, tr), 2000);
+
+    // Disparar en cualquier cambio de campo
+    tr.querySelectorAll("[data-ag-tema],[data-ag-tiempo],[data-ag-prio],[data-ag-estado]").forEach(el => {
+      el.addEventListener("input",  autoSave);
+      el.addEventListener("change", autoSave);
+    });
+    tr.querySelectorAll("[data-ag-fecha]").forEach(el => {
+      el.addEventListener("change", autoSave);
+    });
+    const descEl = tr.querySelector("[data-ag-desc]");
+    if (descEl) descEl.addEventListener("input", autoSave);
+    // Owner multiselect — disparar al cambiar
+    const ownerMs = host.querySelector(`#ag_owner_${rowId}_wrap`);
+    if (ownerMs) ownerMs.querySelectorAll("input[type=checkbox]").forEach(cb => {
+      cb.addEventListener("change", autoSave);
     });
   });
 
