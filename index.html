@@ -1310,6 +1310,8 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="pill" id="colabsSelPill"><b>Seleccionados</b> 0</div>
 <div class="spacer"></div>
 <div class="selbar">
+<button class="btn primary" id="btnColabAgregar">+ Agregar colaborador</button>
+<button class="btn bad" id="btnColabEliminar" style="display:none">× Eliminar seleccionados</button>
 <button class="btn" id="btnCopySelIds">Copiar IDs</button>
 <button class="btn" id="btnCopySelMailProd">Copiar Mail Productora</button>
 <button class="btn" id="btnCopySelMailExt">Copiar Mail Externo</button>
@@ -1469,5 +1471,75 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 </div>
 <script src="/api.js" type="module"></script>
 <script src="/app.js" type="module"></script>
+
+<!-- Modal Colaborador (Agregar / Editar) -->
+<div id="colabModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;overflow:auto">
+  <div style="background:var(--surface);border-radius:var(--r-lg);max-width:580px;width:calc(100% - 32px);margin:48px auto;padding:28px;box-shadow:var(--shd-lg)">
+    <div class="row" style="margin-bottom:20px">
+      <h2 id="colabModalTitle" style="margin:0">Agregar colaborador</h2>
+      <div class="spacer"></div>
+      <button class="xbtn" id="colabModalClose" style="font-size:20px">×</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">ID_MELI *</div>
+        <input class="input" id="cmIdMeli" placeholder="ext_apellido"/>
+      </div>
+      <div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Nombre *</div>
+        <input class="input" id="cmNombre" placeholder="Nombre completo"/>
+      </div>
+      <div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Rol *</div>
+        <input class="input" id="cmRol" placeholder="Analista PM" list="cmRolList"/>
+        <datalist id="cmRolList"></datalist>
+      </div>
+      <div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Equipo *</div>
+        <input class="input" id="cmEquipo" placeholder="Nombre del equipo" list="cmEquipoList"/>
+        <datalist id="cmEquipoList"></datalist>
+      </div>
+      <div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Ubicación *</div>
+        <input class="input" id="cmUbic" placeholder="AMBA, MDP, TANDIL..."/>
+      </div>
+      <div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Fecha Ingreso *</div>
+        <input class="input" id="cmFechaIngreso" type="date"/>
+      </div>
+      <div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Mail Productora *</div>
+        <input class="input" id="cmMailProd" placeholder="nombre@grupokelsoft.com" type="email"/>
+      </div>
+      <div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Mail Externo *</div>
+        <input class="input" id="cmMailExt" placeholder="ext_id@mercadolibre.com" type="email"/>
+      </div>
+      <div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">TAG <span class="muted">(opcional)</span></div>
+        <input class="input" id="cmTag" placeholder="NJA, NRF..."/>
+      </div>
+    </div>
+    <div class="hr" style="margin:20px 0"></div>
+    <div class="row" style="justify-content:flex-end;gap:8px">
+      <button class="btn ghost" id="colabModalCancel">Cancelar</button>
+      <button class="btn primary" id="colabModalSave">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Confirmar Eliminación -->
+<div id="colabDeleteModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000">
+  <div style="background:var(--surface);border-radius:var(--r-lg);max-width:480px;width:calc(100% - 32px);margin:120px auto;padding:28px;box-shadow:var(--shd-lg)">
+    <h2 style="margin:0 0 12px">¿Eliminar colaboradores?</h2>
+    <p class="muted" style="margin:0 0 8px">Esta acción eliminará las siguientes personas de <b>Colaboradores</b> y <b>Presentismo</b>. No se puede deshacer.</p>
+    <div id="colabDeleteList" style="margin:12px 0;max-height:160px;overflow:auto"></div>
+    <div class="hr" style="margin:16px 0"></div>
+    <div class="row" style="justify-content:flex-end;gap:8px">
+      <button class="btn ghost" id="colabDeleteCancel">Cancelar</button>
+      <button class="btn bad" id="colabDeleteConfirm">Sí, eliminar</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
