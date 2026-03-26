@@ -3173,23 +3173,22 @@ async function onCopiarMensajePlan_() {
 
 /* ========= Agenda del equipo ========= */
 
+
 // ── Markdown renderer (descripción agenda) ──────────────────
 function renderMarkdown_(text) {
   if (!text) return "";
   let html = escapeHtml(text);
-  // Viñetas: líneas que empiezan con - o *
-  html = html.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
-  html = html.replace(/(<li>.*<\/li>
-?)+/g, m => `<ul style="margin:2px 0 2px 16px;padding:0">${m}</ul>`);
-  // Viñetas numéricas: 1. 2. etc
-  html = html.replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
-  // Negrita
+  // Negrita ** **
   html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  // Cursiva
+  // Cursiva * *
   html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
-  // Subrayado
+  // Subrayado __ __
   html = html.replace(/__(.+?)__/g, "<u>$1</u>");
-  // Saltos de línea
+  // Viñetas: líneas que empiezan con - 
+  html = html.replace(/(^|&lt;br&gt;)- (.+?)(?=&lt;br&gt;|$)/g, "$1<li>$2</li>");
+  // Listas numeradas: 1. 2.
+  html = html.replace(/(^|&lt;br&gt;)\d+\. (.+?)(?=&lt;br&gt;|$)/g, "$1<li>$2</li>");
+  // Saltos de línea (escapeHtml no toca \n)
   html = html.replace(/\n/g, "<br>");
   return html;
 }
@@ -3240,70 +3239,46 @@ function linkify_(text) {
 
 
 // ── Editor Markdown toolbar ──────────────────────────────────
-function mountMdToolbar_(toolbarId, textareaEl) {
-  const tb = $(toolbarId);
-  if (!tb || !textareaEl) return;
+function applyMdFormat_(ta, cmd) {
+  if (!ta) return;
+  const start = ta.selectionStart;
+  const end   = ta.selectionEnd;
+  const sel   = ta.value.slice(start, end);
+  const before = ta.value.slice(0, start);
+  const after  = ta.value.slice(end);
 
-  // Auto-crecer el textarea con el contenido
-  const autoResize = () => {
-    textareaEl.style.height = "auto";
-    textareaEl.style.height = Math.max(60, textareaEl.scrollHeight) + "px";
-  };
-  textareaEl.addEventListener("input", autoResize);
-  autoResize();
-
-  const wrap = (before, after, placeholder) => {
-    const start = textareaEl.selectionStart;
-    const end   = textareaEl.selectionEnd;
-    const sel   = textareaEl.value.slice(start, end) || placeholder;
-    const newVal = textareaEl.value.slice(0, start) + before + sel + after + textareaEl.value.slice(end);
-    textareaEl.value = newVal;
-    textareaEl.focus();
-    textareaEl.selectionStart = start + before.length;
-    textareaEl.selectionEnd   = start + before.length + sel.length;
-    textareaEl.dispatchEvent(new Event("input"));
+  const wrap = (b, a, ph) => {
+    const s = sel || ph;
+    ta.value = before + b + s + a + after;
+    ta.focus();
+    ta.selectionStart = start + b.length;
+    ta.selectionEnd   = start + b.length + s.length;
+    ta.dispatchEvent(new Event("input"));
   };
 
-  const insertLine = (prefix) => {
-    const start  = textareaEl.selectionStart;
-    const val    = textareaEl.value;
-    const lineStart = val.lastIndexOf("\n", start - 1) + 1;
-    const lineEnd   = val.indexOf("\n", start);
-    const line      = val.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
-    // Si ya tiene el prefijo, quitarlo; sino, agregarlo
-    if (line.startsWith(prefix)) {
-      textareaEl.value = val.slice(0, lineStart) + line.slice(prefix.length) + (lineEnd === -1 ? "" : val.slice(lineEnd));
+  const insertPrefix = (prefix) => {
+    const lineStart = before.lastIndexOf("\n") + 1;
+    const lineContent = ta.value.slice(lineStart);
+    if (lineContent.startsWith(prefix)) {
+      ta.value = ta.value.slice(0, lineStart) + lineContent.slice(prefix.length);
     } else {
-      textareaEl.value = val.slice(0, lineStart) + prefix + line + (lineEnd === -1 ? "" : val.slice(lineEnd));
+      ta.value = ta.value.slice(0, lineStart) + prefix + lineContent;
     }
-    textareaEl.focus();
-    textareaEl.dispatchEvent(new Event("input"));
+    ta.focus();
+    ta.dispatchEvent(new Event("input"));
   };
 
-  tb.querySelectorAll("[data-md]").forEach(btn => {
-    btn.addEventListener("mousedown", (e) => {
-      e.preventDefault(); // no perder el foco del textarea
-      const cmd = btn.getAttribute("data-md");
-      if (cmd === "bold")      wrap("**", "**", "negrita");
-      if (cmd === "italic")    wrap("*", "*", "cursiva");
-      if (cmd === "underline") wrap("__", "__", "subrayado");
-      if (cmd === "ul")        insertLine("- ");
-      if (cmd === "ol") {
-        // Numerar líneas seleccionadas
-        const start = textareaEl.selectionStart;
-        const end   = textareaEl.selectionEnd;
-        const sel   = textareaEl.value.slice(start, end);
-        if (sel) {
-          const lines  = sel.split("\n");
-          const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join("\n");
-          textareaEl.value = textareaEl.value.slice(0, start) + numbered + textareaEl.value.slice(end);
-        } else {
-          insertLine("1. ");
-        }
-        textareaEl.dispatchEvent(new Event("input"));
-      }
-    });
-  });
+  if (cmd === "bold")      wrap("**", "**", "negrita");
+  if (cmd === "italic")    wrap("*", "*", "cursiva");
+  if (cmd === "underline") wrap("__", "__", "subrayado");
+  if (cmd === "ul")        insertPrefix("- ");
+  if (cmd === "ol")        insertPrefix("1. ");
+}
+
+function autoResizeTextarea_(ta) {
+  if (!ta) return;
+  ta.style.height = "auto";
+  ta.style.height = Math.max(48, ta.scrollHeight) + "px";
 }
 
 function renderAgenda() {
@@ -3372,14 +3347,7 @@ function renderAgenda() {
             <input class="input" data-ag-tema value="${escapeAttr(r.tema)}" style="font-size:13px;flex:1"/>
             <span class="pill ${AGENDA_ESTADO_CLS[r.estado] || "ok"}" style="font-size:11px;white-space:nowrap">${escapeHtml(!r.estado || r.estado === "Pendiente" ? "Para hacer" : r.estado)}</span>
           </div>
-          <div class="ag-desc-toolbar-${r.row}" style="display:flex;gap:3px;margin-top:3px;flex-wrap:wrap">
-            <button type="button" class="btn ghost" data-md="bold"      data-tb-row="${r.row}" style="font-size:11px;padding:1px 6px;font-weight:700">B</button>
-            <button type="button" class="btn ghost" data-md="italic"    data-tb-row="${r.row}" style="font-size:11px;padding:1px 6px;font-style:italic">I</button>
-            <button type="button" class="btn ghost" data-md="underline" data-tb-row="${r.row}" style="font-size:11px;padding:1px 6px;text-decoration:underline">S</button>
-            <button type="button" class="btn ghost" data-md="ul"        data-tb-row="${r.row}" style="font-size:11px;padding:1px 6px">•</button>
-            <button type="button" class="btn ghost" data-md="ol"        data-tb-row="${r.row}" style="font-size:11px;padding:1px 6px">1.</button>
-          </div>
-          <textarea class="input" data-ag-desc rows="2" placeholder="Descripción..." style="font-size:11px;margin-top:2px;width:100%;resize:none;min-height:40px;font-family:inherit;overflow:hidden">${escapeHtml(parseDescLinks_(r.descripcion).text)}</textarea>
+          <textarea class="input" data-ag-desc rows="2" placeholder="Descripción..." style="font-size:11px;margin-top:3px;width:100%;resize:none;min-height:40px;font-family:inherit;overflow:hidden">${escapeHtml(parseDescLinks_(r.descripcion).text)}</textarea>
           <div data-ag-links-wrap style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--card2));margin-top:3px">
             ${parseDescLinks_(r.descripcion).urls.map(u => `<span class="pill" style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px" data-link-pill="${escapeAttr(u)}"><a href="${escapeAttr(u)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(u)}">×</span></span>`).join("")}
             <input class="input" data-ag-link-input placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:120px;padding:0;font-size:11px"/>
@@ -3492,14 +3460,14 @@ function renderAgenda() {
       </div>
       <div style="margin-top:8px">
         <div class="muted" style="font-size:12px;margin-bottom:4px">Descripción</div>
-        <div id="agDescToolbar" style="display:flex;gap:4px;margin-bottom:4px;flex-wrap:wrap">
-          <button type="button" class="btn ghost" data-md="bold"      style="font-size:12px;padding:2px 8px;font-weight:700">B</button>
-          <button type="button" class="btn ghost" data-md="italic"    style="font-size:12px;padding:2px 8px;font-style:italic">I</button>
-          <button type="button" class="btn ghost" data-md="underline" style="font-size:12px;padding:2px 8px;text-decoration:underline">S</button>
-          <button type="button" class="btn ghost" data-md="ul"        style="font-size:12px;padding:2px 8px">• Lista</button>
-          <button type="button" class="btn ghost" data-md="ol"        style="font-size:12px;padding:2px 8px">1. Lista</button>
+        <div style="display:flex;gap:4px;margin-bottom:4px">
+          <button type="button" class="btn ghost" data-md-form="bold"      style="font-size:12px;padding:2px 8px;font-weight:700">B</button>
+          <button type="button" class="btn ghost" data-md-form="italic"    style="font-size:12px;padding:2px 8px;font-style:italic">I</button>
+          <button type="button" class="btn ghost" data-md-form="underline" style="font-size:12px;padding:2px 8px;text-decoration:underline">S</button>
+          <button type="button" class="btn ghost" data-md-form="ul"        style="font-size:12px;padding:2px 8px">• Lista</button>
+          <button type="button" class="btn ghost" data-md-form="ol"        style="font-size:12px;padding:2px 8px">1. Lista</button>
         </div>
-        <textarea class="input" id="agDesc" placeholder="Escribí la descripción..." rows="2" style="width:100%;resize:none;min-height:60px;font-family:inherit;overflow:hidden"></textarea>
+        <textarea class="input" id="agDesc" placeholder="Escribí la descripción..." rows="2" style="width:100%;resize:none;min-height:48px;font-family:inherit;overflow:hidden"></textarea>
       </div>
       <div style="margin-top:6px">
         <div class="muted" style="font-size:12px;margin-bottom:4px">Links (pegá una URL)</div>
@@ -3609,8 +3577,17 @@ function renderAgenda() {
   // Montar ms del formulario nuevo
   mountAgendaOwnerMs_("ag_new_owner_wrap");
 
-  // Toolbar de descripción — formulario nuevo
-  mountMdToolbar_("agDescToolbar", $("agDesc"));
+  // Toolbar formulario nuevo
+  const agDescEl = $("agDesc");
+  if (agDescEl) {
+    agDescEl.addEventListener("input", () => autoResizeTextarea_(agDescEl));
+    host.querySelectorAll("[data-md-form]").forEach(btn => {
+      btn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        applyMdFormat_(agDescEl, btn.getAttribute("data-md-form"));
+      });
+    });
+  }
 
   // ── Links píldoras en el formulario nuevo ───────────────
   (function mountLinkInput_(inputId, wrapId) {
@@ -3639,54 +3616,15 @@ function renderAgenda() {
     inp.addEventListener("paste", () => setTimeout(addLink, 50));
   })("agLinkInput", "agLinksWrap");
 
-  // Montar ms, toolbars y links de cada fila editable
+  // Montar ms, auto-resize y links de cada fila editable
   pendientes.forEach(r => {
     mountAgendaOwnerMs_("ag_owner_" + r.row + "_wrap");
 
-    // Toolbar de descripción en fila editable
-    const descTa = host.querySelector(`tr[data-agenda-row="${r.row}"] [data-ag-desc]`);
+    // Auto-resize del textarea de descripción
+    const descTa = host.querySelector('tr[data-agenda-row="' + r.row + '"] [data-ag-desc]');
     if (descTa) {
-      // Auto-resize inicial
-      descTa.style.height = "auto";
-      descTa.style.height = Math.max(40, descTa.scrollHeight) + "px";
-      descTa.addEventListener("input", () => {
-        descTa.style.height = "auto";
-        descTa.style.height = Math.max(40, descTa.scrollHeight) + "px";
-      });
-      // Conectar botones de toolbar inline
-      host.querySelectorAll(`[data-tb-row="${r.row}"]`).forEach(btn => {
-        btn.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          const cmd = btn.getAttribute("data-md");
-          const ta = descTa;
-          const start = ta.selectionStart;
-          const end   = ta.selectionEnd;
-          const sel   = ta.value.slice(start, end);
-          const wrap = (b, a, ph) => {
-            const s = sel || ph;
-            ta.value = ta.value.slice(0, start) + b + s + a + ta.value.slice(end);
-            ta.focus();
-            ta.selectionStart = start + b.length;
-            ta.selectionEnd   = start + b.length + s.length;
-            ta.dispatchEvent(new Event("input"));
-          };
-          if (cmd === "bold")      wrap("**", "**", "negrita");
-          if (cmd === "italic")    wrap("*", "*", "cursiva");
-          if (cmd === "underline") wrap("__", "__", "subrayado");
-          if (cmd === "ul") {
-            const lineStart = ta.value.lastIndexOf("\n", start - 1) + 1;
-            const line = ta.value.slice(lineStart);
-            ta.value = ta.value.slice(0, lineStart) + "- " + line;
-            ta.dispatchEvent(new Event("input"));
-          }
-          if (cmd === "ol") {
-            const lineStart = ta.value.lastIndexOf("\n", start - 1) + 1;
-            const line = ta.value.slice(lineStart);
-            ta.value = ta.value.slice(0, lineStart) + "1. " + line;
-            ta.dispatchEvent(new Event("input"));
-          }
-        });
-      });
+      autoResizeTextarea_(descTa);
+      descTa.addEventListener("input", () => autoResizeTextarea_(descTa));
     }
 
     // Links píldoras en fila editable
