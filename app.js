@@ -1501,12 +1501,15 @@ function renderOutbox() {
         `;
       }
 
-      // Scheduled: solo eliminar (no reprogramar acá; menos estados raros)
+      // Scheduled: mostrar canal como texto + botón desprogramar + eliminar
+      const canalNombre = (S.canales || []).find(c => c.channel_id === chId)?.canal || chId || "—";
       return `
         <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+          <div style="font-size:12px;color:var(--text-2)">Canal: <b>${escapeHtml(canalNombre)}</b></div>
           <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" disabled />
           <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
             <button class="xbtn" data-del title="Eliminar">×</button>
+            <button class="btn ghost" data-desch style="font-size:11px;padding:3px 8px">Desprogramar</button>
           </div>
         </div>
       `;
@@ -1648,6 +1651,15 @@ function renderOutbox() {
         } catch (e) {
           setErr(`Programar: ${e.message || e}`);
         }
+      });
+
+      // Desprogramar (solo en filas programadas)
+      tr.querySelector("[data-desch]")?.addEventListener("click", async () => {
+        try {
+          await API.slackOutboxDesprogramar(row);
+          patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
+          toast("Outbox", "Mensaje desprogramado");
+        } catch (e) { setErr(`Outbox: ${e.message || e}`); }
       });
 
       tr.querySelector("[data-send]")?.addEventListener("click", async () => {

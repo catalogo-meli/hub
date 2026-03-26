@@ -479,7 +479,7 @@ select option {
   border-spacing: 0;
   border: 1px solid var(--brd);
   border-radius: var(--r-lg);
-  overflow: hidden;
+  overflow: visible;
   font-size: 12px;
 }
 
@@ -926,9 +926,10 @@ tbody .skeleton { margin: 4px 0; }
 .mention-wrap { position: relative; }
 
 .mention-dd {
-  position: absolute; left: 0; right: 0; top: 42px;
-  margin: 0; padding: 4px; max-height: 180px; overflow: auto;
-  z-index: 140;
+  position: absolute; left: 0; top: calc(100% + 4px);
+  min-width: 320px; width: max-content; max-width: 480px;
+  margin: 0; padding: 4px; max-height: 240px; overflow-y: auto;
+  z-index: 9999;
   background: var(--surface);
   border: 1px solid var(--brd-2);
   box-shadow: var(--shd-lg);
