@@ -3837,67 +3837,8 @@ function renderAgenda() {
       ${histThead}<tbody>${historial.map(r => rowHtmlReadOnly(r)).join("")}</tbody>
     </table></div>`;
 
-  // ── Owner multiselect para el formulario de carga ────────
+  // Formulario está en HTML estático — solo renderizar pendientes e historial
   host.innerHTML = `
-    <!-- Formulario colapsable -->
-    <div id="agFormWrap" style="margin-bottom:12px">
-      <button class="btn ghost" id="btnAgFormToggle" type="button"
-        style="font-size:13px;padding:8px 14px;border:1px dashed var(--brd-2);width:100%;text-align:left;color:var(--text-2);border-radius:8px">
-        ✚ Agregar tema
-      </button>
-      <div id="agFormBody" style="display:none;margin-top:10px;padding:14px;border:1px solid var(--brd-2);border-radius:10px;background:var(--surface-2)">
-    <div style="margin-bottom:10px">
-      <div class="row" style="flex-wrap:wrap;gap:8px;align-items:flex-end">
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <div class="muted" style="font-size:12px">Fecha</div>
-          <input class="input" id="agFecha" type="date" style="max-width:160px" value="${new Date().toISOString().slice(0,10)}"/>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <div class="muted" style="font-size:12px">Owner</div>
-          ${ownerSelectHtml("", "ag_new_owner")}
-        </div>
-        <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:180px">
-          <div class="muted" style="font-size:12px">Tema *</div>
-          <input class="input" id="agTema" placeholder="Tema a tratar..."/>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <div class="muted" style="font-size:12px">Tiempo</div>
-          <select class="input" id="agTiempo" style="max-width:160px">
-            ${AGENDA_TIEMPO_OPTS.map(o => `<option value="${escapeAttr(o)}">${escapeHtml(o)}${o !== "Si sobra tiempo" ? " min" : ""}</option>`).join("")}
-          </select>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <div class="muted" style="font-size:12px">Prioridad</div>
-          <select class="input" id="agPrioridad" style="max-width:140px">
-            <option value="Urgente">🔴 Urgente</option>
-            <option value="Importante" selected>🟡 Importante</option>
-            <option value="Normal">🔵 Normal</option>
-          </select>
-        </div>
-        <button class="btn primary" id="btnAgendaAgregar" type="button">Agregar</button>
-      </div>
-      <div style="margin-top:8px">
-        <div class="muted" style="font-size:12px;margin-bottom:4px">Descripción</div>
-        <div id="agDescToolbar" style="display:flex;gap:3px;margin-bottom:4px;flex-wrap:wrap;align-items:center">
-          <button type="button" class="btn ghost" data-cmd="bold"                style="font-size:12px;padding:2px 8px;font-weight:700" title="Negrita">B</button>
-          <button type="button" class="btn ghost" data-cmd="italic"              style="font-size:12px;padding:2px 8px;font-style:italic" title="Cursiva">I</button>
-          <button type="button" class="btn ghost" data-cmd="underline"           style="font-size:12px;padding:2px 8px;text-decoration:underline" title="Subrayado">S</button>
-          <button type="button" class="btn ghost" data-cmd="insertUnorderedList" style="font-size:12px;padding:2px 8px" title="Viñetas">•</button>
-          <button type="button" class="btn ghost" data-cmd="insertOrderedList"   style="font-size:12px;padding:2px 8px" title="Lista numerada">1.</button>
-          <button type="button" class="btn ghost" id="agDescEmoji"               style="font-size:14px;padding:2px 8px" title="Emojis">😊</button>
-        </div>
-        <div id="agDesc" contenteditable="true" class="input wysiwyg-editor" style="min-height:60px;padding:8px;font-family:inherit;font-size:13px;line-height:1.5;overflow:auto;cursor:text" data-placeholder="Escribí la descripción..."></div>
-      </div>
-      <div style="margin-top:6px">
-        <div class="muted" style="font-size:12px;margin-bottom:4px">Links (pegá todos los necesarios)</div>
-        <div id="agLinksWrap" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:32px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg,var(--card2))">
-          <input id="agLinkInput" class="input" placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:180px;padding:0"/>
-        </div>
-      </div>
-    </div>
-      </div>
-    </div>
-    <div class="hr"></div>
     <div id="agendaPendSection" class="row" style="align-items:center;justify-content:space-between;margin-bottom:4px">
       <div class="pill"><b>${pendientes.length}</b> pendiente${pendientes.length !== 1 ? "s" : ""}</div>
       <div style="display:flex;gap:8px">
@@ -3996,37 +3937,10 @@ function renderAgenda() {
   }
 
   // Montar ms del formulario nuevo
-  mountAgendaOwnerMs_("ag_new_owner_wrap");
+  // Formulario ya está en HTML estático — owner multiselect montado en wireUI
+  // _agDescEditor_ ya montado en wireUI
 
-  // Montar editor WYSIWYG del formulario nuevo
-  _agDescEditor_ = mountWysiwyg_("agDesc", "agDescToolbar", "agDescEmoji");
-
-  // ── Links píldoras en el formulario nuevo ───────────────
-  (function mountLinkInput_(inputId, wrapId) {
-    const inp = $(inputId);
-    const wrap = $(wrapId);
-    if (!inp || !wrap) return;
-
-    const addLink = () => {
-      const url = inp.value.trim();
-      if (!url || !/^https?:\/\//.test(url)) return;
-      // No duplicar
-      if (wrap.querySelector(`[data-link-pill="${CSS.escape(url)}"]`)) { inp.value = ""; return; }
-      const pill = document.createElement("span");
-      pill.className = "pill";
-      pill.setAttribute("data-link-pill", url);
-      pill.style.cssText = "font-size:11px;cursor:default;display:flex;align-items:center;gap:4px";
-      pill.innerHTML = `<a href="${url}" target="_blank" rel="noopener" style="color:var(--pri);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(url.replace(/^https?:\/\//, "").slice(0,40))}${url.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px;cursor:pointer" data-rm>×</span>`;
-      pill.querySelector("[data-rm]").addEventListener("click", () => pill.remove());
-      wrap.insertBefore(pill, inp);
-      inp.value = "";
-    };
-
-    inp.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); addLink(); }
-    });
-    inp.addEventListener("paste", () => setTimeout(addLink, 50));
-  })("agLinkInput", "agLinksWrap");
+  // mountLinkInput_ montado en wireUI
 
   // Montar ms, auto-resize y links de cada fila editable
   pendientes.forEach(r => {
@@ -4108,10 +4022,7 @@ function renderAgenda() {
   };
 
   // ── Botón agregar ────────────────────────────────────────
-  $("btnAgendaAgregar")?.addEventListener("click", async () => {
-    const owner = readOwnerFromMs("ag_new_owner");
-    await onAgendaAgregar_(owner);
-  });
+  // btnAgendaAgregar montado en wireUI
 
   // ── Botones guardar (edición inline) ────────────────────
   // ── Auto-save con debounce por fila ─────────────────────
@@ -4291,17 +4202,7 @@ function renderAgenda() {
         onAgendaCopiar_();
         return;
       }
-      // Toggle formulario nuevo
-      if (e.target.closest("#btnAgFormToggle")) {
-        const body = $("agFormBody");
-        const btn  = $("btnAgFormToggle");
-        if (!body) return;
-        const isOpen = body.style.display !== "none";
-        body.style.display = isOpen ? "none" : "block";
-        if (btn) btn.textContent = isOpen ? "✚ Agregar tema" : "✕ Cancelar";
-        if (!isOpen) setTimeout(() => $("agTema")?.focus(), 50);
-        return;
-      }
+      // btnAgFormToggle y btnAgendaAgregar manejados en wireUI (fuera del host)
     });
   }
 
@@ -4379,22 +4280,40 @@ async function onAgendaAgregar_(ownerParam) {
   if (agFormBody) agFormBody.style.display = "none";
   if (agFormBtn)  agFormBtn.textContent = "✚ Agregar tema";
 
-  // Guardar en GAS en background
+  // Guardar en GAS en background — sin re-fetch inmediato
+  // (evita conflicto de LockService con requests simultáneos)
+  // El auto-refresh de 60s sincroniza el row real de Sheets
   API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc })
     .then(() => {
       toast("Agenda", "✓ Tema agregado");
-      // Re-fetch para obtener row real de Sheets
-      return API.agendaList();
-    })
-    .then(d => {
-      if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
     })
     .catch(e => {
-      // Si falla, intentar re-fetch igual (GAS pudo haber escrito antes de fallar)
-      setErr("Agenda: error al guardar — reintentando...");
-      API.agendaList().then(d => {
-        if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
-      }).catch(() => {});
+      const msg = String(e?.message || e);
+      // GAS puede escribir la fila y fallar al responder (timeout o lock)
+      // En ese caso NO mostrar error — el auto-refresh va a traer el item
+      if (msg.includes("Non-JSON") || msg.includes("timeout") || msg.includes("lock")) {
+        toast("Agenda", "✓ Guardado (verificando...)");
+        // Re-fetch demorado para no competir con el lock
+        setTimeout(() => {
+          API.agendaList().then(d => {
+            if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
+          }).catch(() => {});
+        }, 3000);
+      } else {
+        // Error real — restaurar el item del tempRow y notificar
+        setErr("Agenda: no se pudo guardar. Intentá de nuevo.");
+        // Remover el item temporal si sigue en S.agenda
+        S.agenda = (S.agenda || []).filter(r => r.row !== tempRow);
+        CACHE.invalidate("agenda");
+        renderAgenda();
+        // Reabrir formulario con los datos
+        const agFormBody2 = $("agFormBody");
+        const agFormBtn2  = $("btnAgFormToggle");
+        if (agFormBody2) agFormBody2.style.display = "block";
+        if (agFormBtn2)  agFormBtn2.textContent = "✕ Cancelar";
+        if ($("agTema")) $("agTema").value = tema;
+        if (_agDescEditor_) _agDescEditor_.setValue(descText);
+      }
     });
 }
 
@@ -4608,6 +4527,86 @@ async function main() {
     renderHabil();
     toast("Habilitaciones", "Actualizado");
   });
+
+  // ── Formulario de nueva entrada (estático, montado una sola vez) ──
+  // Poblar owner multiselect estático
+  (function initAgendaForm_() {
+    // Poner fecha de hoy
+    const agFechaEl = $("agFecha");
+    if (agFechaEl && !agFechaEl.value) agFechaEl.value = new Date().toISOString().slice(0, 10);
+
+    // Montar owner multiselect en el div estático
+    const ownerWrap = $("ag_new_owner_wrap_static");
+    if (ownerWrap) {
+      ownerWrap.innerHTML = `
+        <div class="ms" id="ag_new_owner_wrap" style="min-width:130px;position:relative;overflow:visible">
+          <div class="ms-btn">
+            <div>
+              <div class="label">Owner</div>
+              <div class="value" data-ms-value>Todos</div>
+            </div>
+            <div class="muted">▾</div>
+          </div>
+          <div class="ms-panel">
+            <div data-ms-list>
+              <label class="ms-item"><input type="checkbox" value="Todos" checked/><div>Todos</div></label>
+              ${(AGENDA_OWNERS || ["Cele","Eze","Jose","Mati L.","Mati M.","Vicky"]).map(o => `<label class="ms-item"><input type="checkbox" value="${escapeAttr(o)}"/><div>${escapeHtml(o)}</div></label>`).join("")}
+            </div>
+            <div class="ms-actions">
+              <button class="btn ghost" type="button" data-ms-clear>Limpiar</button>
+            </div>
+          </div>
+        </div>`;
+      mountAgendaOwnerMs_("ag_new_owner_wrap");
+    }
+
+    // Montar WYSIWYG
+    _agDescEditor_ = mountWysiwyg_("agDesc", "agDescToolbar", "agDescEmoji");
+
+    // Link input
+    (function mountLinkInput_(inputId, wrapId) {
+      const inp = $(inputId);
+      const wrap = $(wrapId);
+      if (!inp || !wrap) return;
+      inp.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        const url = inp.value.trim();
+        if (!url || !/^https?:\/\//.test(url)) return;
+        const pill = document.createElement("span");
+        pill.className = "pill";
+        pill.style.cssText = "font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px";
+        pill.setAttribute("data-link-pill", url);
+        pill.innerHTML = `<a href="${escapeAttr(url)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(url.replace(/^https?:\/\//, "").slice(0,40))}${url.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(url)}">×</span>`;
+        pill.querySelector("[data-rm-link]")?.addEventListener("click", () => pill.remove());
+        wrap.insertBefore(pill, inp);
+        inp.value = "";
+      });
+      inp.addEventListener("paste", (e) => {
+        setTimeout(() => {
+          const url = inp.value.trim();
+          if (url && /^https?:\/\//.test(url)) inp.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        }, 10);
+      });
+    })("agLinkInput", "agLinksWrap");
+
+    // Toggle formulario
+    $("btnAgFormToggle")?.addEventListener("click", () => {
+      const body = $("agFormBody");
+      const btn  = $("btnAgFormToggle");
+      if (!body) return;
+      const isOpen = body.style.display !== "none";
+      body.style.display = isOpen ? "none" : "block";
+      if (btn) btn.textContent = isOpen ? "✚ Agregar tema" : "✕ Cancelar";
+      if (!isOpen) setTimeout(() => $("agTema")?.focus(), 50);
+    });
+
+    // Botón Agregar
+    $("btnAgendaAgregar")?.addEventListener("click", async () => {
+      const owner = readOwnerFromMs("ag_new_owner");
+      await onAgendaAgregar_(owner);
+    });
+  })();
 
   $("btnReloadAgenda")?.addEventListener("click", async () => {
     try {
