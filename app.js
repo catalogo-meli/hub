@@ -2358,7 +2358,8 @@ function renderHabil() {
 
   const filtered = rows.filter((r) => {
     const rb = roleBucket(r._meta.rol);
-    if (S.fHabil.roles.size > 0 && !S.fHabil.roles.has(rb)) return false;
+    const rolRaw = String(r._meta.rol || "").trim();
+    if (S.fHabil.roles.size > 0 && !S.fHabil.roles.has(rolRaw)) return false;
     if (S.fHabil.equipos.size > 0 && !S.fHabil.equipos.has(r._meta.equipo)) return false;
     if (S.fHabil.flujos.size > 0 && ![...S.fHabil.flujos].some(f => r[`H_${f}`])) return false;
     const q = norm(S.fHabil.q);
