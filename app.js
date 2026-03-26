@@ -2820,6 +2820,7 @@ async function onCopiarMensajePlan_() {
 
 const AGENDA_PRIO_EMOJI = { "Urgente": "🔴", "Importante": "🟡", "Normal": "🔵" };
 const AGENDA_TIEMPO_OPTS = ["5", "10", "15", "20", "30", "45", "Si sobra tiempo"];
+const AGENDA_OWNERS = ["Cele", "Eze", "Jose", "Mati L.", "Mati M.", "Vicky"];
 
 // Convierte texto con URLs en HTML con links clickeables
 function linkify_(text) {
@@ -2839,7 +2840,6 @@ function renderAgenda() {
   const pendientes = items.filter(r => r.estado !== "Hecho");
   const historial  = items.filter(r => r.estado === "Hecho");
 
-  // Ordenar pendientes: Urgente → Importante → resto, luego fecha asc
   const priOrd = { "Urgente": 0, "Importante": 1 };
   pendientes.sort((a, b) => {
     const pa = priOrd[a.prioridad] ?? 2, pb = priOrd[b.prioridad] ?? 2;
@@ -2847,46 +2847,106 @@ function renderAgenda() {
     return String(a.fecha).localeCompare(String(b.fecha));
   });
 
-  const rowHtml = (r, showHecho) => {
+  // ── Owner multiselect helper ─────────────────────────────
+  // Construye el dropdown de owners con checkboxes + "Todos"
+  const ownerSelectHtml = (selectedVal, idPrefix) => {
+    const sel = String(selectedVal || "");
+    const selected = sel === "Todos" || sel === "All" ? [] : sel.split(",").map(s => s.trim()).filter(Boolean);
+    return `
+      <div class="ms" id="${idPrefix}_wrap" style="min-width:130px;position:relative">
+        <div class="ms-btn">
+          <div>
+            <div class="label" style="font-size:10px">OWNER</div>
+            <div class="value" data-ms-value style="font-size:13px">${escapeHtml(sel || "Todos")}</div>
+          </div>
+          <div class="muted">▾</div>
+        </div>
+        <div class="ms-panel">
+          <div data-ms-list>
+            <label class="ms-item"><input type="checkbox" value="Todos" ${!selected.length ? "checked" : ""}/><div>Todos</div></label>
+            ${AGENDA_OWNERS.map(o => `<label class="ms-item"><input type="checkbox" value="${escapeAttr(o)}" ${selected.includes(o) ? "checked" : ""}/><div>${escapeHtml(o)}</div></label>`).join("")}
+          </div>
+          <div class="ms-actions"><button class="btn ghost" type="button" data-ms-clear>Limpiar</button></div>
+        </div>
+      </div>`;
+  };
+
+  // ── Fila editable (pendientes) ───────────────────────────
+  const rowHtmlEditable = (r) => {
+    const emoji = AGENDA_PRIO_EMOJI[r.prioridad] || "🔵";
+    const desc = linkify_(r.descripcion);
+    const tiempoOpts = AGENDA_TIEMPO_OPTS.map(o =>
+      `<option value="${escapeAttr(o)}" ${r.tiempo === o ? "selected" : ""}>${escapeHtml(o)}${o !== "Si sobra tiempo" ? " min" : ""}</option>`
+    ).join("");
+    const prioOpts = ["Urgente","Importante","Normal"].map(p =>
+      `<option value="${p}" ${r.prioridad === p ? "selected" : ""}>${AGENDA_PRIO_EMOJI[p]} ${p}</option>`
+    ).join("");
+
+    return `
+      <tr data-agenda-row="${r.row}">
+        <td style="text-align:center;padding:4px 6px">
+          <select class="input" data-ag-prio style="padding:2px 4px;font-size:13px;min-width:36px">${prioOpts}</select>
+        </td>
+        <td class="nowrap">
+          <input class="input" data-ag-fecha type="date" value="${escapeAttr(_fechaToISO_(r.fecha))}" style="font-size:12px;padding:4px 6px;min-width:130px"/>
+        </td>
+        <td>${ownerSelectHtml(r.owner, "ag_owner_" + r.row)}</td>
+        <td>
+          <input class="input" data-ag-tema value="${escapeAttr(r.tema)}" style="font-size:13px;min-width:180px"/>
+          <input class="input" data-ag-desc placeholder="Descripción / link..." value="${escapeAttr(r.descripcion || "")}" style="font-size:11px;margin-top:3px;opacity:0.8"/>
+          ${desc ? `<div style="font-size:11px;margin-top:2px;opacity:0.7">${desc}</div>` : ""}
+        </td>
+        <td class="nowrap">
+          <select class="input" data-ag-tiempo style="font-size:12px;padding:4px 6px">${tiempoOpts}</select>
+        </td>
+        <td class="nowrap" style="white-space:nowrap">
+          <div style="display:flex;gap:4px;align-items:center">
+            <button class="btn ghost" data-ag-save="${r.row}" style="font-size:11px;padding:3px 8px" title="Guardar cambios">💾</button>
+            <button class="btn ghost" data-hecho="${r.row}" style="font-size:11px;padding:3px 8px" title="Marcar como hecho">✓</button>
+            <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
+          </div>
+        </td>
+      </tr>`;
+  };
+
+  // ── Fila solo lectura (historial) ────────────────────────
+  const rowHtmlReadOnly = (r) => {
     const emoji = AGENDA_PRIO_EMOJI[r.prioridad] || "🔵";
     const desc = linkify_(r.descripcion);
     return `
       <tr data-agenda-row="${r.row}">
-        <td class="nowrap" style="font-size:18px;text-align:center;padding:6px 8px">${emoji}</td>
+        <td style="text-align:center;font-size:16px;padding:4px 8px">${emoji}</td>
         <td class="nowrap">${escapeHtml(r.fecha)}</td>
         <td>${escapeHtml(r.owner)}</td>
-        <td><b>${escapeHtml(r.tema)}</b>${desc ? `<div style="font-size:12px;margin-top:3px;opacity:0.8">${desc}</div>` : ""}</td>
+        <td><span style="opacity:0.7">${escapeHtml(r.tema)}</span>${desc ? `<div style="font-size:11px;margin-top:2px;opacity:0.6">${desc}</div>` : ""}</td>
         <td class="nowrap">${escapeHtml(r.tiempo ? r.tiempo + (r.tiempo !== "Si sobra tiempo" ? " min" : "") : "—")}</td>
-        ${showHecho ? `<td class="nowrap"><button class="btn ghost" data-hecho="${r.row}" style="font-size:12px;padding:3px 10px">✓ Hecho</button></td>` : "<td></td>"}
-      </tr>
-    `;
+        <td class="nowrap">
+          <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
+        </td>
+      </tr>`;
   };
 
   const thead = `
-    <thead>
-      <tr>
-        <th style="width:36px"></th>
-        <th class="nowrap">Fecha</th>
-        <th>Owner</th>
-        <th>Tema / Descripción</th>
-        <th class="nowrap">Tiempo</th>
-        <th class="nowrap"></th>
-      </tr>
-    </thead>
-  `;
+    <thead><tr>
+      <th style="width:50px">Prio</th>
+      <th class="nowrap">Fecha</th>
+      <th>Owner</th>
+      <th>Tema / Descripción</th>
+      <th class="nowrap">Tiempo</th>
+      <th style="width:90px"></th>
+    </tr></thead>`;
 
   const pendientesHtml = pendientes.length
-    ? `<table class="table" style="margin-top:8px">${thead}<tbody>${pendientes.map(r => rowHtml(r, true)).join("")}</tbody></table>`
+    ? `<div style="overflow-x:auto"><table class="table" style="margin-top:8px">${thead}<tbody>${pendientes.map(r => rowHtmlEditable(r)).join("")}</tbody></table></div>`
     : `<div class="muted" style="margin-top:12px;padding:12px">Sin pendientes. ¡Todo al día! 🎉</div>`;
 
   const histBtnLabel = S.agendaHistCollapsed ? `▶ Ver historial (${historial.length})` : `▼ Ocultar historial`;
   const histContent  = S.agendaHistCollapsed ? "" : `
-    <table class="table" style="margin-top:8px">
-      ${thead}
-      <tbody>${historial.map(r => rowHtml(r, false)).join("")}</tbody>
-    </table>
-  `;
+    <div style="overflow-x:auto"><table class="table" style="margin-top:8px">
+      ${thead}<tbody>${historial.map(r => rowHtmlReadOnly(r)).join("")}</tbody>
+    </table></div>`;
 
+  // ── Owner multiselect para el formulario de carga ────────
   host.innerHTML = `
     <div style="margin-bottom:10px">
       <div class="row" style="flex-wrap:wrap;gap:8px;align-items:flex-end">
@@ -2896,11 +2956,11 @@ function renderAgenda() {
         </div>
         <div style="display:flex;flex-direction:column;gap:4px">
           <div class="muted" style="font-size:12px">Owner</div>
-          <input class="input" id="agOwner" placeholder="All, Vicky, TLs..." style="max-width:160px"/>
+          ${ownerSelectHtml("", "ag_new_owner")}
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:180px">
           <div class="muted" style="font-size:12px">Tema *</div>
-          <input class="input" id="agTema" placeholder="Tema a tratar..." />
+          <input class="input" id="agTema" placeholder="Tema a tratar..."/>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px">
           <div class="muted" style="font-size:12px">Tiempo</div>
@@ -2928,7 +2988,6 @@ function renderAgenda() {
       <div class="pill"><b>${pendientes.length}</b> pendiente${pendientes.length !== 1 ? "s" : ""}</div>
       <div style="display:flex;gap:8px">
         <button class="btn ghost" id="btnAgendaCopiar" type="button">Copiar agenda</button>
-        <button class="btn" id="btnAgendaSlack" type="button">Enviar a Slack</button>
       </div>
     </div>
     ${pendientesHtml}
@@ -2939,33 +2998,141 @@ function renderAgenda() {
     <div id="agendaHistSection">${histContent}</div>
   `;
 
-  // Botón agregar
-  $("btnAgendaAgregar")?.addEventListener("click", onAgendaAgregar_);
+  // ── Activar multiselects de owner ────────────────────────
+  function mountAgendaOwnerMs_(wrapId) {
+    const host2 = $(wrapId);
+    if (!host2) return;
+    const btn2   = host2.querySelector(".ms-btn");
+    const panel2 = host2.querySelector(".ms-panel");
+    const val2   = host2.querySelector("[data-ms-value]");
+    const cbs    = host2.querySelectorAll("input[type=checkbox]");
+    const bClr   = host2.querySelector("[data-ms-clear]");
 
-  // Botones Hecho
-  host.querySelectorAll("[data-hecho]").forEach(btn => {
+    const syncVal = () => {
+      const checked = Array.from(cbs).filter(c => c.checked && c.value !== "Todos").map(c => c.value);
+      val2.textContent = checked.length ? checked.join(", ") : "Todos";
+    };
+
+    cbs.forEach(cb => {
+      cb.addEventListener("change", () => {
+        if (cb.value === "Todos") {
+          cbs.forEach(c => { if (c.value !== "Todos") c.checked = false; });
+        } else {
+          const todoCb = Array.from(cbs).find(c => c.value === "Todos");
+          if (todoCb) todoCb.checked = false;
+        }
+        syncVal();
+      });
+    });
+
+    bClr?.addEventListener("click", () => {
+      cbs.forEach(c => { c.checked = c.value === "Todos"; });
+      syncVal();
+    });
+
+    btn2?.addEventListener("click", (e) => { e.stopPropagation(); host2.classList.toggle("open"); });
+    panel2?.addEventListener("click", (e) => e.stopPropagation());
+    document.addEventListener("click", () => host2.classList.remove("open"));
+  }
+
+  // Montar ms del formulario nuevo
+  mountAgendaOwnerMs_("ag_new_owner_wrap");
+
+  // Montar ms de cada fila editable
+  pendientes.forEach(r => mountAgendaOwnerMs_("ag_owner_" + r.row + "_wrap"));
+
+  // ── Helpers para leer owner del ms ──────────────────────
+  const readOwnerFromMs = (wrapId) => {
+    const wrap = $(wrapId + "_wrap");
+    if (!wrap) return "Todos";
+    const checked = Array.from(wrap.querySelectorAll("input[type=checkbox]:checked"))
+      .filter(c => c.value !== "Todos").map(c => c.value);
+    return checked.length ? checked.join(", ") : "Todos";
+  };
+
+  // ── Botón agregar ────────────────────────────────────────
+  $("btnAgendaAgregar")?.addEventListener("click", async () => {
+    const owner = readOwnerFromMs("ag_new_owner");
+    await onAgendaAgregar_(owner);
+  });
+
+  // ── Botones guardar (edición inline) ────────────────────
+  host.querySelectorAll("[data-ag-save]").forEach(btn => {
     btn.addEventListener("click", async () => {
-      const row = Number(btn.getAttribute("data-hecho"));
-      await onAgendaSetHecho_(row, btn);
+      const row = Number(btn.getAttribute("data-ag-save"));
+      const tr = btn.closest("tr");
+      const owner = readOwnerFromMs("ag_owner_" + row);
+      const fechaISO = tr.querySelector("[data-ag-fecha]")?.value || "";
+      const fecha = fechaISO ? fechaISO.split("-").reverse().join("/") : "";
+      const payload = {
+        row,
+        fecha,
+        owner,
+        tema:       tr.querySelector("[data-ag-tema]")?.value?.trim()  || "",
+        tiempo:     tr.querySelector("[data-ag-tiempo]")?.value        || "",
+        prioridad:  tr.querySelector("[data-ag-prio]")?.value          || "",
+        descripcion:tr.querySelector("[data-ag-desc]")?.value?.trim()  || "",
+      };
+      try {
+        // Optimistic update
+        const idx = (S.agenda||[]).findIndex(r => r.row === row);
+        if (idx >= 0) Object.assign(S.agenda[idx], {
+          fecha: payload.fecha, owner: payload.owner, tema: payload.tema,
+          tiempo: payload.tiempo, prioridad: payload.prioridad, descripcion: payload.descripcion
+        });
+        await API.agendaUpdate(payload);
+        toast("Agenda", "✓ Guardado");
+        renderAgenda();
+      } catch (e) { setErr(`Agenda: ${e.message || e}`); }
     });
   });
 
-  // Toggle historial
+  // ── Botones Hecho ────────────────────────────────────────
+  host.querySelectorAll("[data-hecho]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      await onAgendaSetHecho_(Number(btn.getAttribute("data-hecho")));
+    });
+  });
+
+  // ── Botones eliminar (×) ─────────────────────────────────
+  host.querySelectorAll("[data-ag-del]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const row = Number(btn.getAttribute("data-ag-del"));
+      if (!confirm("¿Eliminar este tema de la agenda?")) return;
+      const idx = (S.agenda||[]).findIndex(r => r.row === row);
+      if (idx >= 0) S.agenda.splice(idx, 1);
+      renderAgenda();
+      try {
+        await API.agendaDelete(row);
+        S.agenda = await API.agendaList();
+        renderAgenda();
+      } catch (e) {
+        setErr(`Agenda: ${e.message || e}`);
+        S.agenda = await API.agendaList().catch(() => S.agenda);
+        renderAgenda();
+      }
+    });
+  });
+
+  // ── Toggle historial ─────────────────────────────────────
   $("btnAgendaHistToggle")?.addEventListener("click", () => {
     S.agendaHistCollapsed = !S.agendaHistCollapsed;
     renderAgenda();
   });
 
-  // Copiar agenda
   $("btnAgendaCopiar")?.addEventListener("click", onAgendaCopiar_);
-
-  // Enviar a Slack (abre selector de canal, usa el Outbox)
-  $("btnAgendaSlack")?.addEventListener("click", onAgendaEnviarSlack_);
 }
 
-async function onAgendaAgregar_() {
+// Convierte "dd/MM/yyyy" → "yyyy-MM-dd" para input type=date
+function _fechaToISO_(ddmmyyyy) {
+  const m = String(ddmmyyyy || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
+  return ddmmyyyy || "";
+}
+
+async function onAgendaAgregar_(ownerParam) {
   const fecha     = $("agFecha")?.value || "";
-  const owner     = $("agOwner")?.value?.trim() || "All";
+  const owner     = ownerParam || "Todos";
   const tema      = $("agTema")?.value?.trim() || "";
   const tiempo    = $("agTiempo")?.value || "10";
   const prioridad = $("agPrioridad")?.value || "Importante";
@@ -3050,30 +3217,7 @@ async function onAgendaCopiar_() {
   toast("✓ Copiado", "Agenda lista para pegar en Slack");
 }
 
-async function onAgendaEnviarSlack_() {
-  const msg = buildMensajeAgenda_();
-  if (!msg) { setErr("No hay pendientes para enviar."); return; }
 
-  // Reutilizar el selector de canal del Slack Compose
-  // Appendear al Outbox como borrador y llevar al usuario a esa sección
-  try {
-    setBusy("Agenda", "Guardando en Outbox...");
-    const hoy = todayYMD();
-    await API.slackOutboxAppend(hoy, "AGENDA", "", "", msg, "BORRADOR - AGENDA");
-    S.outbox = await API.slackOutboxList();
-    renderOutbox();
-    // Navegar al tab daily sección outbox
-    activateTab("daily");
-    setTimeout(() => {
-      $("daily-outbox")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 300);
-    toast("Agenda", "Borrador guardado en Outbox — elegí el canal y enviá");
-  } catch (e) {
-    setErr(`Agenda: ${e.message || e}`);
-  } finally {
-    clearBusy();
-  }
-}
 
 async function onGenerarPlanificacionYOutbox_() {
   setErr("");
