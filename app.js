@@ -3089,18 +3089,37 @@ function _updateKpiAgenda_() {
   ).length;
 
   numEl.textContent = pending;
+
   if (pending === 0) {
     labelEl.textContent = "Agenda al día ✓";
+    // Sin pendientes: deshabilitar visualmente
+    if (card) {
+      card.style.cursor = "default";
+      card.style.opacity = "0.55";
+      card.style.pointerEvents = "none";
+      card._agClickBound = false; // reset para si vuelven a haber pendientes
+    }
   } else {
     labelEl.textContent = pending === 1 ? "Tema en agenda" : "Temas en agenda";
-  }
-
-  // Click: navegar al tab Agenda
-  if (card && !card._agClickBound) {
-    card._agClickBound = true;
-    card.addEventListener("click", () => {
-      document.querySelector('[data-tab="agenda"]')?.click();
-    });
+    // Con pendientes: habilitar y clickeable
+    if (card) {
+      card.style.cursor = "pointer";
+      card.style.opacity = "1";
+      card.style.pointerEvents = "";
+    }
+    // Registrar click una sola vez, reemplazar si ya existía
+    if (card && !card._agClickBound) {
+      card._agClickBound = true;
+      card.addEventListener("click", () => {
+        // 1. Navegar al tab Agenda
+        document.querySelector('[data-tab="agenda"]')?.click();
+        // 2. Scroll a la sección de pendientes
+        setTimeout(() => {
+          const pend = $("agendaPendSection");
+          if (pend) pend.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 150); // esperar que el tab se active y renderice
+      });
+    }
   }
 }
 
@@ -3706,7 +3725,7 @@ function renderAgenda() {
       </div>
     </div>
     <div class="hr"></div>
-    <div class="row" style="align-items:center;justify-content:space-between;margin-bottom:4px">
+    <div id="agendaPendSection" class="row" style="align-items:center;justify-content:space-between;margin-bottom:4px">
       <div class="pill"><b>${pendientes.length}</b> pendiente${pendientes.length !== 1 ? "s" : ""}</div>
       <div style="display:flex;gap:8px">
         <button class="btn ghost" id="btnAgendaCopiar" type="button">Copiar agenda</button>
