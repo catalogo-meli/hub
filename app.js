@@ -560,8 +560,7 @@ async function lazyLoadTab_(name) {
       renderDashboard();
     }
     if (name === "habil") {
-      CACHE.invalidate("habil");
-      await refreshHabil();
+      if (!S.habil) await refreshHabil();
       renderHabil();
     }
     if (name === "agenda") {
@@ -665,6 +664,7 @@ async function loadCore() {
       S.outbox    = init.outbox    || [];
       S.presWeek  = init.presWeek  || null;
       S.presStats = init.presStats || null;
+      S.habil     = init.habil     || null;
       // agenda carga lazy al primer click en el tab
       // Poblar cache de cliente
       CACHE.set("colabs",  S.colabs,  5 * 60_000);
@@ -684,14 +684,13 @@ async function loadCore() {
     clearBusy();
   }
 
-  // Habilitaciones en background
-  refreshHabil().catch(() => {});
+  // Todo viene del hubInit en cold start.
+  // En cache hit (allCached), habil y presWeek no vienen → refreshear en background.
+  if (!S.habil) refreshHabil().catch(() => {});
 
-  // Presentismo: si ya vino del hubInit, solo montar el select y renderizar
-  // Si no (cache hit de colabs pero no de presWeek), fetchear igual
   if (S.presWeek) {
     mountPresentismoSelect();
-    renderDashboard(); // actualizar píldora con datos de presentismo
+    renderDashboard();
   } else {
     refreshPresentismo().then(() => {
       mountPresentismoSelect();
@@ -3454,7 +3453,7 @@ async function main() {
     toast("Colaboradores", "Actualizado");
   });
   $("btnReloadHabil")?.addEventListener("click", async () => {
-    CACHE.invalidate("habil");
+    S.habil = null; // forzar re-fetch
     await refreshHabil();
     renderHabil();
     toast("Habilitaciones", "Actualizado");
