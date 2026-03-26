@@ -3173,6 +3173,28 @@ async function onCopiarMensajePlan_() {
 
 /* ========= Agenda del equipo ========= */
 
+// ── Markdown renderer (descripción agenda) ──────────────────
+function renderMarkdown_(text) {
+  if (!text) return "";
+  let html = escapeHtml(text);
+  // Viñetas: líneas que empiezan con - o *
+  html = html.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
+  html = html.replace(/(<li>.*<\/li>
+?)+/g, m => `<ul style="margin:2px 0 2px 16px;padding:0">${m}</ul>`);
+  // Viñetas numéricas: 1. 2. etc
+  html = html.replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
+  // Negrita
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  // Cursiva
+  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  // Subrayado
+  html = html.replace(/__(.+?)__/g, "<u>$1</u>");
+  // Saltos de línea
+  html = html.replace(/
+/g, "<br>");
+  return html;
+}
+
 // ── Descripción + links helpers ─────────────────────────────
 // Formato en Sheets: "texto libre\nURL1\nURL2"
 // Separar texto de URLs
@@ -3215,6 +3237,74 @@ function linkify_(text) {
     /https?:\/\/[^\s<>"]+/g,
     url => `<a href="${url}" target="_blank" rel="noopener" style="color:var(--pri);word-break:break-all">${url}</a>`
   );
+}
+
+
+// ── Editor Markdown toolbar ──────────────────────────────────
+function mountMdToolbar_(toolbarId, textareaEl) {
+  const tb = $(toolbarId);
+  if (!tb || !textareaEl) return;
+
+  // Auto-crecer el textarea con el contenido
+  const autoResize = () => {
+    textareaEl.style.height = "auto";
+    textareaEl.style.height = Math.max(60, textareaEl.scrollHeight) + "px";
+  };
+  textareaEl.addEventListener("input", autoResize);
+  autoResize();
+
+  const wrap = (before, after, placeholder) => {
+    const start = textareaEl.selectionStart;
+    const end   = textareaEl.selectionEnd;
+    const sel   = textareaEl.value.slice(start, end) || placeholder;
+    const newVal = textareaEl.value.slice(0, start) + before + sel + after + textareaEl.value.slice(end);
+    textareaEl.value = newVal;
+    textareaEl.focus();
+    textareaEl.selectionStart = start + before.length;
+    textareaEl.selectionEnd   = start + before.length + sel.length;
+    textareaEl.dispatchEvent(new Event("input"));
+  };
+
+  const insertLine = (prefix) => {
+    const start  = textareaEl.selectionStart;
+    const val    = textareaEl.value;
+    const lineStart = val.lastIndexOf("\n", start - 1) + 1;
+    const lineEnd   = val.indexOf("\n", start);
+    const line      = val.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+    // Si ya tiene el prefijo, quitarlo; sino, agregarlo
+    if (line.startsWith(prefix)) {
+      textareaEl.value = val.slice(0, lineStart) + line.slice(prefix.length) + (lineEnd === -1 ? "" : val.slice(lineEnd));
+    } else {
+      textareaEl.value = val.slice(0, lineStart) + prefix + line + (lineEnd === -1 ? "" : val.slice(lineEnd));
+    }
+    textareaEl.focus();
+    textareaEl.dispatchEvent(new Event("input"));
+  };
+
+  tb.querySelectorAll("[data-md]").forEach(btn => {
+    btn.addEventListener("mousedown", (e) => {
+      e.preventDefault(); // no perder el foco del textarea
+      const cmd = btn.getAttribute("data-md");
+      if (cmd === "bold")      wrap("**", "**", "negrita");
+      if (cmd === "italic")    wrap("*", "*", "cursiva");
+      if (cmd === "underline") wrap("__", "__", "subrayado");
+      if (cmd === "ul")        insertLine("- ");
+      if (cmd === "ol") {
+        // Numerar líneas seleccionadas
+        const start = textareaEl.selectionStart;
+        const end   = textareaEl.selectionEnd;
+        const sel   = textareaEl.value.slice(start, end);
+        if (sel) {
+          const lines  = sel.split("\n");
+          const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join("\n");
+          textareaEl.value = textareaEl.value.slice(0, start) + numbered + textareaEl.value.slice(end);
+        } else {
+          insertLine("1. ");
+        }
+        textareaEl.dispatchEvent(new Event("input"));
+      }
+    });
+  });
 }
 
 function renderAgenda() {
@@ -3283,7 +3373,14 @@ function renderAgenda() {
             <input class="input" data-ag-tema value="${escapeAttr(r.tema)}" style="font-size:13px;flex:1"/>
             <span class="pill ${AGENDA_ESTADO_CLS[r.estado] || "ok"}" style="font-size:11px;white-space:nowrap">${escapeHtml(!r.estado || r.estado === "Pendiente" ? "Para hacer" : r.estado)}</span>
           </div>
-          <textarea class="input" data-ag-desc rows="2" placeholder="Descripción..." style="font-size:11px;margin-top:3px;width:100%;resize:vertical;min-height:40px;font-family:inherit">${escapeHtml(parseDescLinks_(r.descripcion).text)}</textarea>
+          <div class="ag-desc-toolbar-${r.row}" style="display:flex;gap:3px;margin-top:3px;flex-wrap:wrap">
+            <button type="button" class="btn ghost" data-md="bold"      data-tb-row="${r.row}" style="font-size:11px;padding:1px 6px;font-weight:700">B</button>
+            <button type="button" class="btn ghost" data-md="italic"    data-tb-row="${r.row}" style="font-size:11px;padding:1px 6px;font-style:italic">I</button>
+            <button type="button" class="btn ghost" data-md="underline" data-tb-row="${r.row}" style="font-size:11px;padding:1px 6px;text-decoration:underline">S</button>
+            <button type="button" class="btn ghost" data-md="ul"        data-tb-row="${r.row}" style="font-size:11px;padding:1px 6px">•</button>
+            <button type="button" class="btn ghost" data-md="ol"        data-tb-row="${r.row}" style="font-size:11px;padding:1px 6px">1.</button>
+          </div>
+          <textarea class="input" data-ag-desc rows="2" placeholder="Descripción..." style="font-size:11px;margin-top:2px;width:100%;resize:none;min-height:40px;font-family:inherit;overflow:hidden">${escapeHtml(parseDescLinks_(r.descripcion).text)}</textarea>
           <div data-ag-links-wrap style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--card2));margin-top:3px">
             ${parseDescLinks_(r.descripcion).urls.map(u => `<span class="pill" style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px" data-link-pill="${escapeAttr(u)}"><a href="${escapeAttr(u)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(u)}">×</span></span>`).join("")}
             <input class="input" data-ag-link-input placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:120px;padding:0;font-size:11px"/>
@@ -3322,7 +3419,7 @@ function renderAgenda() {
           <span style="opacity:0.7">${escapeHtml(r.tema)}</span>
           ${(function() {
             const { text, urls } = parseDescLinks_(r.descripcion);
-            const textHtml = text ? `<div style="font-size:11px;margin-top:2px;opacity:0.6;white-space:pre-wrap">${escapeHtml(text)}</div>` : "";
+            const textHtml = text ? `<div style="font-size:11px;margin-top:2px;opacity:0.6;line-height:1.5">${renderMarkdown_(text)}</div>` : "";
             const linksHtml = urls.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px">${urls.map(u => `<a href="${escapeAttr(u)}" target="_blank" rel="noopener" class="pill" style="font-size:10px;color:var(--pri);text-decoration:none;opacity:0.8">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a>`).join("")}</div>` : "";
             return textHtml + linksHtml;
           })()}
@@ -3396,7 +3493,14 @@ function renderAgenda() {
       </div>
       <div style="margin-top:8px">
         <div class="muted" style="font-size:12px;margin-bottom:4px">Descripción</div>
-        <textarea class="input" id="agDesc" placeholder="Escribí la descripción..." rows="2" style="width:100%;resize:vertical;min-height:48px;font-family:inherit"></textarea>
+        <div id="agDescToolbar" style="display:flex;gap:4px;margin-bottom:4px;flex-wrap:wrap">
+          <button type="button" class="btn ghost" data-md="bold"      style="font-size:12px;padding:2px 8px;font-weight:700">B</button>
+          <button type="button" class="btn ghost" data-md="italic"    style="font-size:12px;padding:2px 8px;font-style:italic">I</button>
+          <button type="button" class="btn ghost" data-md="underline" style="font-size:12px;padding:2px 8px;text-decoration:underline">S</button>
+          <button type="button" class="btn ghost" data-md="ul"        style="font-size:12px;padding:2px 8px">• Lista</button>
+          <button type="button" class="btn ghost" data-md="ol"        style="font-size:12px;padding:2px 8px">1. Lista</button>
+        </div>
+        <textarea class="input" id="agDesc" placeholder="Escribí la descripción..." rows="2" style="width:100%;resize:none;min-height:60px;font-family:inherit;overflow:hidden"></textarea>
       </div>
       <div style="margin-top:6px">
         <div class="muted" style="font-size:12px;margin-bottom:4px">Links (pegá una URL)</div>
@@ -3506,6 +3610,9 @@ function renderAgenda() {
   // Montar ms del formulario nuevo
   mountAgendaOwnerMs_("ag_new_owner_wrap");
 
+  // Toolbar de descripción — formulario nuevo
+  mountMdToolbar_("agDescToolbar", $("agDesc"));
+
   // ── Links píldoras en el formulario nuevo ───────────────
   (function mountLinkInput_(inputId, wrapId) {
     const inp = $(inputId);
@@ -3533,9 +3640,55 @@ function renderAgenda() {
     inp.addEventListener("paste", () => setTimeout(addLink, 50));
   })("agLinkInput", "agLinksWrap");
 
-  // Montar ms y links de cada fila editable
+  // Montar ms, toolbars y links de cada fila editable
   pendientes.forEach(r => {
     mountAgendaOwnerMs_("ag_owner_" + r.row + "_wrap");
+
+    // Toolbar de descripción en fila editable
+    const descTa = host.querySelector(`tr[data-agenda-row="${r.row}"] [data-ag-desc]`);
+    if (descTa) {
+      // Auto-resize inicial
+      descTa.style.height = "auto";
+      descTa.style.height = Math.max(40, descTa.scrollHeight) + "px";
+      descTa.addEventListener("input", () => {
+        descTa.style.height = "auto";
+        descTa.style.height = Math.max(40, descTa.scrollHeight) + "px";
+      });
+      // Conectar botones de toolbar inline
+      host.querySelectorAll(`[data-tb-row="${r.row}"]`).forEach(btn => {
+        btn.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          const cmd = btn.getAttribute("data-md");
+          const ta = descTa;
+          const start = ta.selectionStart;
+          const end   = ta.selectionEnd;
+          const sel   = ta.value.slice(start, end);
+          const wrap = (b, a, ph) => {
+            const s = sel || ph;
+            ta.value = ta.value.slice(0, start) + b + s + a + ta.value.slice(end);
+            ta.focus();
+            ta.selectionStart = start + b.length;
+            ta.selectionEnd   = start + b.length + s.length;
+            ta.dispatchEvent(new Event("input"));
+          };
+          if (cmd === "bold")      wrap("**", "**", "negrita");
+          if (cmd === "italic")    wrap("*", "*", "cursiva");
+          if (cmd === "underline") wrap("__", "__", "subrayado");
+          if (cmd === "ul") {
+            const lineStart = ta.value.lastIndexOf("\n", start - 1) + 1;
+            const line = ta.value.slice(lineStart);
+            ta.value = ta.value.slice(0, lineStart) + "- " + line;
+            ta.dispatchEvent(new Event("input"));
+          }
+          if (cmd === "ol") {
+            const lineStart = ta.value.lastIndexOf("\n", start - 1) + 1;
+            const line = ta.value.slice(lineStart);
+            ta.value = ta.value.slice(0, lineStart) + "1. " + line;
+            ta.dispatchEvent(new Event("input"));
+          }
+        });
+      });
+    }
 
     // Links píldoras en fila editable
     const wrap = host.querySelector(`tr[data-agenda-row="${r.row}"] [data-ag-links-wrap]`);
