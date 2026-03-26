@@ -658,13 +658,14 @@ async function loadCore() {
     } else {
       // Cold: un solo request que trae todo
       const init = await API.hubInit();
-      S.colabs  = init.colabs  || [];
-      S.canales = init.canales || [];
-      S.flujos  = init.flujos  || [];
-      S.plan    = init.plan    || [];
-      S.outbox  = init.outbox  || [];
-      // agenda NO se carga en arranque (268 filas históricas = demasiado pesado)
-      // Carga lazy al primer click en el tab
+      S.colabs    = init.colabs    || [];
+      S.canales   = init.canales   || [];
+      S.flujos    = init.flujos    || [];
+      S.plan      = init.plan      || [];
+      S.outbox    = init.outbox    || [];
+      S.presWeek  = init.presWeek  || null;
+      S.presStats = init.presStats || null;
+      // agenda carga lazy al primer click en el tab
       // Poblar cache de cliente
       CACHE.set("colabs",  S.colabs,  5 * 60_000);
       CACHE.set("canales", S.canales, 10 * 60_000);
@@ -683,14 +684,20 @@ async function loadCore() {
     clearBusy();
   }
 
-  // Presentismo y Habilitaciones en background (no bloquean arranque)
-  Promise.all([
+  // Habilitaciones en background
+  refreshHabil().catch(() => {});
+
+  // Presentismo: si ya vino del hubInit, solo montar el select y renderizar
+  // Si no (cache hit de colabs pero no de presWeek), fetchear igual
+  if (S.presWeek) {
+    mountPresentismoSelect();
+    renderDashboard(); // actualizar píldora con datos de presentismo
+  } else {
     refreshPresentismo().then(() => {
       mountPresentismoSelect();
       renderDashboard();
-    }),
-    refreshHabil(),
-  ]).catch(() => {});
+    }).catch(() => {});
+  }
 }
 
 async function refreshPlanAndOutbox() {
@@ -2613,11 +2620,11 @@ function renderDashboard() {
       const vday = String(r.vals?.[today] || "").trim();
       const imp = presImpactFromCode_(vday);
       const meta = colabsById.get(r.id_meli);
-      // Usar el rol raw del sheet (igual que counts) para que los keys coincidan
       const role = normRole(meta?.rol || "");
 
       // Presente (ok) o Presente parcial (warn = TM/TR, CJ): ambos cuentan como presente
-      if (imp.cls === "ok" || imp.cls === "warn") {
+      // Solo contar si el colaborador tiene un rol conocido (evita "Sin rol" que no aparece en la tabla)
+      if ((imp.cls === "ok" || imp.cls === "warn") && role !== "Sin rol") {
         presentesPorRol.set(role, (presentesPorRol.get(role) || 0) + 1);
       }
 
@@ -2822,6 +2829,25 @@ async function onCopiarMensajePlan_() {
 
 /* ========= Agenda del equipo ========= */
 
+// ── Descripción + links helpers ─────────────────────────────
+// Formato en Sheets: "texto libre\nURL1\nURL2"
+// Separar texto de URLs
+function parseDescLinks_(raw) {
+  const parts = String(raw || "").split("\n");
+  const urls = [], lines = [];
+  for (const p of parts) {
+    const t = p.trim();
+    if (/^https?:\/\//.test(t)) urls.push(t);
+    else if (t) lines.push(t);
+  }
+  return { text: lines.join("\n"), urls };
+}
+// Unir texto y URLs de vuelta al formato de Sheets
+function joinDescLinks_(text, urls) {
+  const parts = [text.trim(), ...urls.filter(Boolean)].filter(Boolean);
+  return parts.join("\n");
+}
+
 const AGENDA_PRIO_EMOJI = { "Urgente": "🔴", "Importante": "🟡", "Normal": "🔵" };
 const AGENDA_TIEMPO_OPTS = ["5", "10", "15", "20", "30", "45", "Si sobra tiempo"];
 const AGENDA_OWNERS = ["Cele", "Eze", "Jose", "Mati L.", "Mati M.", "Vicky"];
@@ -2897,8 +2923,11 @@ function renderAgenda() {
         <td>${ownerSelectHtml(r.owner, "ag_owner_" + r.row)}</td>
         <td>
           <input class="input" data-ag-tema value="${escapeAttr(r.tema)}" style="font-size:13px;min-width:180px"/>
-          <input class="input" data-ag-desc placeholder="Descripción / link..." value="${escapeAttr(r.descripcion || "")}" style="font-size:11px;margin-top:3px;opacity:0.8"/>
-          ${desc ? `<div style="font-size:11px;margin-top:2px;opacity:0.7">${desc}</div>` : ""}
+          <textarea class="input" data-ag-desc rows="2" placeholder="Descripción..." style="font-size:11px;margin-top:3px;width:100%;resize:vertical;min-height:40px;font-family:inherit">${escapeHtml(parseDescLinks_(r.descripcion).text)}</textarea>
+          <div data-ag-links-wrap style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--card2));margin-top:3px">
+            ${parseDescLinks_(r.descripcion).urls.map(u => `<span class="pill" style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px" data-link-pill="${escapeAttr(u)}"><a href="${escapeAttr(u)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(u)}">×</span></span>`).join("")}
+            <input class="input" data-ag-link-input placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:120px;padding:0;font-size:11px"/>
+          </div>
         </td>
         <td class="nowrap">
           <select class="input" data-ag-tiempo style="font-size:12px;padding:4px 6px">${tiempoOpts}</select>
@@ -2922,7 +2951,15 @@ function renderAgenda() {
         <td style="text-align:center;font-size:16px;padding:4px 8px">${emoji}</td>
         <td class="nowrap">${escapeHtml(r.fecha)}</td>
         <td>${escapeHtml(r.owner)}</td>
-        <td><span style="opacity:0.7">${escapeHtml(r.tema)}</span>${desc ? `<div style="font-size:11px;margin-top:2px;opacity:0.6">${desc}</div>` : ""}</td>
+        <td>
+          <span style="opacity:0.7">${escapeHtml(r.tema)}</span>
+          ${(function() {
+            const { text, urls } = parseDescLinks_(r.descripcion);
+            const textHtml = text ? `<div style="font-size:11px;margin-top:2px;opacity:0.6;white-space:pre-wrap">${escapeHtml(text)}</div>` : "";
+            const linksHtml = urls.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px">${urls.map(u => `<a href="${escapeAttr(u)}" target="_blank" rel="noopener" class="pill" style="font-size:10px;color:var(--pri);text-decoration:none;opacity:0.8">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a>`).join("")}</div>` : "";
+            return textHtml + linksHtml;
+          })()}
+        </td>
         <td class="nowrap">${escapeHtml(r.tiempo ? r.tiempo + (r.tiempo !== "Si sobra tiempo" ? " min" : "") : "—")}</td>
         <td class="nowrap">
           <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
@@ -2983,8 +3020,14 @@ function renderAgenda() {
         <button class="btn primary" id="btnAgendaAgregar" type="button">Agregar</button>
       </div>
       <div style="margin-top:8px">
-        <div class="muted" style="font-size:12px;margin-bottom:4px">Descripción / Link (opcional)</div>
-        <input class="input" id="agDesc" placeholder="Descripción o link..." style="width:100%"/>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Descripción (opcional)</div>
+        <textarea class="input" id="agDesc" placeholder="Escribí la descripción..." rows="2" style="width:100%;resize:vertical;min-height:48px;font-family:inherit"></textarea>
+      </div>
+      <div style="margin-top:6px">
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Links (pegá una URL y presioná Enter)</div>
+        <div id="agLinksWrap" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:32px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg,var(--card2))">
+          <input id="agLinkInput" class="input" placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:180px;padding:0"/>
+        </div>
       </div>
     </div>
     <div class="hr"></div>
@@ -3042,8 +3085,63 @@ function renderAgenda() {
   // Montar ms del formulario nuevo
   mountAgendaOwnerMs_("ag_new_owner_wrap");
 
-  // Montar ms de cada fila editable
-  pendientes.forEach(r => mountAgendaOwnerMs_("ag_owner_" + r.row + "_wrap"));
+  // ── Links píldoras en el formulario nuevo ───────────────
+  (function mountLinkInput_(inputId, wrapId) {
+    const inp = $(inputId);
+    const wrap = $(wrapId);
+    if (!inp || !wrap) return;
+
+    const addLink = () => {
+      const url = inp.value.trim();
+      if (!url || !/^https?:\/\//.test(url)) return;
+      // No duplicar
+      if (wrap.querySelector(`[data-link-pill="${CSS.escape(url)}"]`)) { inp.value = ""; return; }
+      const pill = document.createElement("span");
+      pill.className = "pill";
+      pill.setAttribute("data-link-pill", url);
+      pill.style.cssText = "font-size:11px;cursor:default;display:flex;align-items:center;gap:4px";
+      pill.innerHTML = `<a href="${url}" target="_blank" rel="noopener" style="color:var(--pri);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(url.replace(/^https?:\/\//, "").slice(0,40))}${url.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px;cursor:pointer" data-rm>×</span>`;
+      pill.querySelector("[data-rm]").addEventListener("click", () => pill.remove());
+      wrap.insertBefore(pill, inp);
+      inp.value = "";
+    };
+
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); addLink(); }
+    });
+    inp.addEventListener("paste", () => setTimeout(addLink, 50));
+  })("agLinkInput", "agLinksWrap");
+
+  // Montar ms y links de cada fila editable
+  pendientes.forEach(r => {
+    mountAgendaOwnerMs_("ag_owner_" + r.row + "_wrap");
+
+    // Links píldoras en fila editable
+    const wrap = host.querySelector(`tr[data-agenda-row="${r.row}"] [data-ag-links-wrap]`);
+    const linkInp = wrap?.querySelector("[data-ag-link-input]");
+    if (wrap && linkInp) {
+      // Remover links existentes (× en cada píldora)
+      wrap.querySelectorAll("[data-rm-link]").forEach(btn => {
+        btn.addEventListener("click", () => btn.closest("[data-link-pill]")?.remove());
+      });
+      // Agregar nuevo link
+      const addRowLink = () => {
+        const url = linkInp.value.trim();
+        if (!url || !/^https?:\/\//.test(url)) return;
+        if (wrap.querySelector(`[data-link-pill="${CSS.escape(url)}"]`)) { linkInp.value = ""; return; }
+        const pill = document.createElement("span");
+        pill.className = "pill";
+        pill.setAttribute("data-link-pill", url);
+        pill.style.cssText = "font-size:11px;display:flex;align-items:center;gap:4px";
+        pill.innerHTML = `<a href="${url}" target="_blank" rel="noopener" style="color:var(--pri);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(url.replace(/^https?:\/\//, "").slice(0,40))}${url.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px;cursor:pointer" data-rm>×</span>`;
+        pill.querySelector("[data-rm]").addEventListener("click", () => pill.remove());
+        wrap.insertBefore(pill, linkInp);
+        linkInp.value = "";
+      };
+      linkInp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addRowLink(); } });
+      linkInp.addEventListener("paste", () => setTimeout(addRowLink, 50));
+    }
+  });
 
   // ── Helpers para leer owner del ms ──────────────────────
   const readOwnerFromMs = (wrapId) => {
@@ -3068,14 +3166,17 @@ function renderAgenda() {
       const owner = readOwnerFromMs("ag_owner_" + row);
       const fechaISO = tr.querySelector("[data-ag-fecha]")?.value || "";
       const fecha = fechaISO ? fechaISO.split("-").reverse().join("/") : "";
+      const descTxt  = tr.querySelector("[data-ag-desc]")?.value?.trim() || "";
+      const rowLinks = Array.from(tr.querySelectorAll("[data-ag-links-wrap] [data-link-pill]"))
+        .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
       const payload = {
         row,
         fecha,
         owner,
-        tema:       tr.querySelector("[data-ag-tema]")?.value?.trim()  || "",
-        tiempo:     tr.querySelector("[data-ag-tiempo]")?.value        || "",
-        prioridad:  tr.querySelector("[data-ag-prio]")?.value          || "",
-        descripcion:tr.querySelector("[data-ag-desc]")?.value?.trim()  || "",
+        tema:        tr.querySelector("[data-ag-tema]")?.value?.trim() || "",
+        tiempo:      tr.querySelector("[data-ag-tiempo]")?.value       || "",
+        prioridad:   tr.querySelector("[data-ag-prio]")?.value         || "",
+        descripcion: joinDescLinks_(descTxt, rowLinks),
       };
       try {
         // Optimistic update
@@ -3140,7 +3241,10 @@ async function onAgendaAgregar_(ownerParam) {
   const tema      = $("agTema")?.value?.trim() || "";
   const tiempo    = $("agTiempo")?.value || "10";
   const prioridad = $("agPrioridad")?.value || "Importante";
-  const desc      = $("agDesc")?.value?.trim() || "";
+  const descText  = $("agDesc")?.value?.trim() || "";
+  const linkPills = Array.from($("agLinksWrap")?.querySelectorAll("[data-link-pill]") || [])
+    .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
+  const desc = joinDescLinks_(descText, linkPills);
 
   if (!tema) { setErr("Agenda: el campo Tema es obligatorio."); return; }
 
@@ -3158,6 +3262,9 @@ async function onAgendaAgregar_(ownerParam) {
     // Limpiar campos (excepto fecha, owner, prioridad)
     if ($("agTema")) $("agTema").value = "";
     if ($("agDesc")) $("agDesc").value = "";
+    // Limpiar píldoras de links
+    const linkWrap = $("agLinksWrap");
+    if (linkWrap) linkWrap.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
     toast("Agenda", "✓ Tema agregado");
   } catch (e) {
     setErr(`Agenda: ${e.message || e}`);
