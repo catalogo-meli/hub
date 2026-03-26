@@ -3792,9 +3792,14 @@ function renderAgenda() {
     : `<div class="muted" style="margin-top:12px;padding:12px">Sin pendientes. ¡Todo al día! 🎉</div>`;
 
   const histBtnLabel = S.agendaHistCollapsed ? `▶ Ver historial (${historial.length})` : `▼ Ocultar historial`;
+  const histThead = `<thead><tr>
+    <th style="width:36px"></th><th style="width:90px">Fecha</th>
+    <th style="width:120px">Owner</th><th>Tema</th>
+    <th style="width:80px">Tiempo</th><th style="width:80px"></th>
+  </tr></thead>`;
   const histContent  = S.agendaHistCollapsed ? "" : `
     <div style="overflow-x:auto"><table class="table" style="margin-top:8px">
-      ${thead}<tbody>${historial.map(r => rowHtmlReadOnly(r)).join("")}</tbody>
+      ${histThead}<tbody>${historial.map(r => rowHtmlReadOnly(r)).join("")}</tbody>
     </table></div>`;
 
   // ── Owner multiselect para el formulario de carga ────────
