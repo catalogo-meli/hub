@@ -2369,7 +2369,7 @@ function mountPresentismoSelect() {
  * Lista canónica de códigos que cuentan como "Presente parcial".
  * Agregar acá si se incorporan nuevos tipos de licencia parcial.
  */
-const PRES_PARTIAL_CODES = new Set(["TM/TR", "CJ"]);
+const PRES_PARTIAL_CODES = new Set(["TM/TR", "TM", "TR", "CJ"]); // TM y TR pueden venir solos o combinados
 
 /**
  * Dado un código de celda de Presentismo, devuelve su impacto.
