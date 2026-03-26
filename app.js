@@ -2345,10 +2345,21 @@ async function openColabModal_(editId = null) {
   const roles   = [...new Set((S.colabs || []).map(c => colabRowView(c).rol).filter(Boolean))].sort();
   const equipos = [...new Set((S.colabs || []).map(c => colabRowView(c).equipo).filter(Boolean))].sort();
 
-  const rolList = $("cmRolList");
-  const eqList  = $("cmEquipoList");
-  if (rolList) rolList.innerHTML = roles.map(r => `<option value="${escapeAttr(r)}">`).join("");
-  if (eqList)  eqList.innerHTML  = equipos.map(e => `<option value="${escapeAttr(e)}">`).join("");
+  // Poblar selects de Rol y Equipo con opciones dinámicas
+  const rolSel = $("cmRol");
+  const eqSel  = $("cmEquipo");
+  if (rolSel) {
+    const curRol = rolSel.value;
+    rolSel.innerHTML = `<option value="">— Seleccioná un rol —</option>` +
+      roles.map(r => `<option value="${escapeAttr(r)}">${escapeHtml(r)}</option>`).join("");
+    if (curRol) rolSel.value = curRol;
+  }
+  if (eqSel) {
+    const curEq = eqSel.value;
+    eqSel.innerHTML = `<option value="">— Seleccioná un equipo —</option>` +
+      equipos.map(e => `<option value="${escapeAttr(e)}">${escapeHtml(e)}</option>`).join("");
+    if (curEq) eqSel.value = curEq;
+  }
 
   // Limpiar / poblar campos
   const campos = ["cmIdMeli","cmNombre","cmRol","cmEquipo","cmUbic","cmFechaIngreso","cmMailProd","cmMailExt","cmTag"];
@@ -2363,8 +2374,9 @@ async function openColabModal_(editId = null) {
       const set_ = (id, val) => { const el = $(id); if (el && val) el.value = val; };
       set_("cmIdMeli",       v.id);
       set_("cmNombre",       v.nombre);
-      set_("cmRol",          v.rol);
-      set_("cmEquipo",       v.equipo);
+      // Rol y Equipo: primero poblar el select, luego seleccionar el valor
+      if ($("cmRol") && v.rol) $("cmRol").value = v.rol;
+      if ($("cmEquipo") && v.equipo) $("cmEquipo").value = v.equipo;
       set_("cmUbic",         v.ubic);
       set_("cmMailProd",     v.mailProd);
       set_("cmMailExt",      v.mailExt);
@@ -3647,8 +3659,14 @@ function renderAgenda() {
 
 // Convierte "dd/MM/yyyy" → "yyyy-MM-dd" para input type=date
 function _fechaToISO_(ddmmyyyy) {
-  const s = String(ddmmyyyy || "");
-  // Soporta dd/MM/yyyy y dd-MM-yyyy (ambos separadores)
+  if (!ddmmyyyy) return "";
+  // Si es objeto Date
+  if (ddmmyyyy instanceof Date) return ddmmyyyy.toISOString().slice(0, 10);
+  const s = String(ddmmyyyy).trim();
+  // Ya en formato yyyy-MM-dd o ISO string
+  const isoM = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoM) return `${isoM[1]}-${isoM[2]}-${isoM[3]}`;
+  // dd/MM/yyyy o dd-MM-yyyy
   const m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
   if (m) return `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
   return s;
