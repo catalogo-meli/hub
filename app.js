@@ -18,16 +18,56 @@ const $ = (id) => document.getElementById(id);
  ***********************/
 const CACHE = {
   _store: {},
+  _ss: typeof sessionStorage !== "undefined" ? sessionStorage : null,
+  _sk: (k) => "hub_cache_" + k,
+
   set(key, data, ttlMs = 60_000) {
-    this._store[key] = { data, exp: Date.now() + ttlMs };
+    const exp = Date.now() + ttlMs;
+    this._store[key] = { data, exp };
+    // Persistir en sessionStorage para sobrevivir F5
+    if (this._ss) {
+      try {
+        this._ss.setItem(this._sk(key), JSON.stringify({ data, exp }));
+      } catch (_) {} // quota exceeded — silencioso
+    }
   },
+
   get(key) {
-    const e = this._store[key];
-    if (!e || Date.now() > e.exp) return null;
-    return e.data;
+    // 1. Primero memoria (más rápido)
+    const m = this._store[key];
+    if (m && Date.now() <= m.exp) return m.data;
+    // 2. Fallback a sessionStorage (sobrevive F5)
+    if (this._ss) {
+      try {
+        const raw = this._ss.getItem(this._sk(key));
+        if (raw) {
+          const e = JSON.parse(raw);
+          if (e && Date.now() <= e.exp) {
+            this._store[key] = e; // repoblar memoria
+            return e.data;
+          }
+          this._ss.removeItem(this._sk(key));
+        }
+      } catch (_) {}
+    }
+    return null;
   },
-  invalidate(key) { delete this._store[key]; },
-  invalidateAll() { this._store = {}; },
+
+  invalidate(key) {
+    delete this._store[key];
+    if (this._ss) try { this._ss.removeItem(this._sk(key)); } catch (_) {}
+  },
+
+  invalidateAll() {
+    this._store = {};
+    if (this._ss) {
+      try {
+        Object.keys(this._ss)
+          .filter(k => k.startsWith("hub_cache_"))
+          .forEach(k => this._ss.removeItem(k));
+      } catch (_) {}
+    }
+  },
 };
 
 /***********************
@@ -566,7 +606,13 @@ async function lazyLoadTab_(name) {
     if (name === "agenda") {
       // Solo fetchea si no hay datos todavía (no re-fetchar en cada click al tab)
       if (!S.agenda || !S.agenda.length) {
-        S.agenda = await API.agendaList().catch(() => []);
+        const cachedAgenda = CACHE.get("agenda");
+        if (cachedAgenda) {
+          S.agenda = cachedAgenda;
+        } else {
+          S.agenda = await API.agendaList().catch(() => []);
+          if (S.agenda.length) CACHE.set("agenda", S.agenda, 5 * 60_000);
+        }
       }
       renderAgenda();
     }
@@ -648,13 +694,23 @@ async function loadCore() {
     // ── PERF: un solo request a GAS en lugar de 5 requests separados ──
     // hub.init devuelve colabs+canales+flujos+plan+outbox en una sola ejecución.
     // Si algún dato está en cache de cliente, lo usamos directamente sin ir a GAS.
-    const allCached = CACHE.get("colabs") && CACHE.get("canales") && CACHE.get("flujos");
+    const cColabs  = CACHE.get("colabs");
+    const cCanales = CACHE.get("canales");
+    const cFlujos  = CACHE.get("flujos");
+    const cPres    = CACHE.get("presWeek");
+    const cStats   = CACHE.get("presStats");
+    const cHabil   = CACHE.get("habil");
+    const allCached = cColabs && cCanales && cFlujos;
 
     if (allCached) {
-      // Cache fresco: usar datos locales sin tocar GAS
-      S.colabs  = CACHE.get("colabs");
-      S.canales = CACHE.get("canales");
-      S.flujos  = CACHE.get("flujos");
+      // Cache fresco: cero requests a GAS
+      S.colabs    = cColabs;
+      S.canales   = cCanales;
+      S.flujos    = cFlujos;
+      if (cPres)   S.presWeek  = cPres;
+      if (cStats)  S.presStats = cStats;
+      if (cHabil)  S.habil     = cHabil;
+      // Solo refrescar plan+outbox (muy dinámicos, 30s TTL en GAS)
       await refreshPlanAndOutbox();
     } else {
       // Cold: un solo request que trae todo
@@ -669,9 +725,12 @@ async function loadCore() {
       S.habil     = init.habil     || null;
       // agenda carga lazy al primer click en el tab
       // Poblar cache de cliente
-      CACHE.set("colabs",  S.colabs,  5 * 60_000);
-      CACHE.set("canales", S.canales, 10 * 60_000);
-      CACHE.set("flujos",  S.flujos,  2 * 60_000);
+      CACHE.set("colabs",    S.colabs,    5 * 60_000);
+      CACHE.set("canales",   S.canales,   10 * 60_000);
+      CACHE.set("flujos",    S.flujos,    2 * 60_000);
+      if (S.presWeek)  CACHE.set("presWeek",  S.presWeek,  3 * 60_000);
+      if (S.presStats) CACHE.set("presStats", S.presStats, 3 * 60_000);
+      if (S.habil)     CACHE.set("habil",     S.habil,     10 * 60_000);
     }
 
     renderDashboard();
@@ -703,8 +762,10 @@ async function loadCore() {
 
 async function refreshPlanAndOutbox() {
   const [plan, outbox] = await Promise.all([API.planificacionList(), API.slackOutboxList()]);
-  S.plan = plan || [];
+  S.plan   = plan   || [];
   S.outbox = outbox || [];
+  CACHE.set("plan",   S.plan,   30_000);
+  CACHE.set("outbox", S.outbox, 30_000);
 }
 
 async function refreshHabil() {
@@ -3477,6 +3538,9 @@ async function main() {
     CACHE.invalidate("outbox");
     CACHE.invalidate("pres_week");
     CACHE.invalidate("pres_stats");
+    CACHE.invalidate("presWeek");
+    CACHE.invalidate("presStats");
+    CACHE.invalidate("habil");
     await refreshPlanAndOutbox();
     await refreshPresentismo();
     renderDashboard();
