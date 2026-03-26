@@ -502,6 +502,8 @@ select option {
   border-bottom: 1px solid var(--brd);
   vertical-align: middle;
   color: var(--text-1);
+  overflow: visible;
+  position: relative;
 }
 
 .table tr:last-child td { border-bottom: none; }
@@ -676,7 +678,7 @@ tbody .skeleton { margin: 4px 0; }
 }
 
 /* ── MULTISELECT ─────────────────────────────────────────────── */
-.ms { position: relative; min-width: 200px; }
+.ms { position: relative; min-width: 130px; }
 
 .ms-btn {
   display: flex;
@@ -698,17 +700,21 @@ tbody .skeleton { margin: 4px 0; }
 .ms-btn .value { font-weight: 600; font-size: 12px; }
 
 .ms-panel {
-  position: absolute; left: 0; right: 0;
+  position: absolute; left: 0;
   top: calc(100% + 5px);
+  min-width: 180px;
+  width: max-content;
+  max-width: 280px;
   background: var(--surface);
   border: 1px solid var(--brd-2);
   border-radius: var(--r-lg);
   box-shadow: var(--shd-lg);
   padding: 6px;
   display: none;
-  z-index: 10;
+  z-index: 100;
   max-height: 250px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .ms.open .ms-panel { display: block; }
 

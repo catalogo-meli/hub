@@ -3275,6 +3275,10 @@ function renderAgenda() {
           descripcion: payload.descripcion, estado: payload.estado
         });
         await API.agendaUpdate(payload);
+        // Recargar desde GAS para sincronizar con Sheets
+        CACHE.invalidate("agenda");
+        S.agenda = await API.agendaList();
+        CACHE.set("agenda", S.agenda, 5 * 60_000);
         toast("Agenda", "✓ Guardado");
         renderAgenda();
       } catch (e) { setErr(`Agenda: ${e.message || e}`); }
@@ -3298,7 +3302,9 @@ function renderAgenda() {
       renderAgenda();
       try {
         await API.agendaDelete(row);
+        CACHE.invalidate("agenda");
         S.agenda = await API.agendaList();
+        CACHE.set("agenda", S.agenda, 5 * 60_000);
         renderAgenda();
       } catch (e) {
         setErr(`Agenda: ${e.message || e}`);
@@ -3346,7 +3352,9 @@ async function onAgendaAgregar_(ownerParam) {
   try {
     setBusy("Agenda", "Guardando...");
     await API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc });
+    CACHE.invalidate("agenda");
     S.agenda = await API.agendaList();
+    CACHE.set("agenda", S.agenda, 5 * 60_000);
     renderAgenda();
     if ($("agTema")) $("agTema").value = "";
     if ($("agDesc")) $("agDesc").value = "";
@@ -3378,6 +3386,9 @@ async function onAgendaSetHecho_(row, btn) {
   renderAgenda();
   try {
     await API.agendaSetHecho(row);
+    CACHE.invalidate("agenda");
+    S.agenda = await API.agendaList();
+    CACHE.set("agenda", S.agenda, 5 * 60_000);
     toast("Agenda", "✓ Marcado como hecho");
   } catch (e) {
     // Revertir
