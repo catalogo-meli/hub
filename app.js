@@ -642,7 +642,7 @@ function getField(obj, keys) {
 }
 
 function colabRowView(c) {
-  const id = getField(c, ["ID_MELI", "id_meli", "Id_Meli"]);
+  const id = String(getField(c, ["ID_MELI", "id_meli", "Id_Meli"]) || "").trim();
   const nombre = getField(c, ["Nombre", "nombre"]);
   const rol = getField(c, ["Rol", "rol"]);
   const equipo = getField(c, ["Equipo", "equipo"]);
