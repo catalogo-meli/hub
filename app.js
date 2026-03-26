@@ -4224,24 +4224,34 @@ function renderAgenda() {
     });
   });
 
-  // ── Toggle historial ─────────────────────────────────────
-  $("btnAgendaHistToggle")?.addEventListener("click", () => {
-    S.agendaHistCollapsed = !S.agendaHistCollapsed;
-    renderAgenda();
-  });
-
-  $("btnAgendaCopiar")?.addEventListener("click", onAgendaCopiar_);
-
-  // Toggle formulario de nuevo tema
-  $("btnAgFormToggle")?.addEventListener("click", () => {
-    const body = $("agFormBody");
-    const btn  = $("btnAgFormToggle");
-    if (!body) return;
-    const isOpen = body.style.display !== "none";
-    body.style.display = isOpen ? "none" : "block";
-    if (btn) btn.textContent = isOpen ? "✚ Agregar tema" : "✕ Cancelar";
-    if (!isOpen) setTimeout(() => $("agTema")?.focus(), 50);
-  });
+  // Delegación de eventos en host — sobrevive a renderAgenda() que recrea el DOM
+  if (!host._agDelegated) {
+    host._agDelegated = true;
+    host.addEventListener("click", (e) => {
+      // Toggle historial
+      if (e.target.closest("#btnAgendaHistToggle")) {
+        S.agendaHistCollapsed = !S.agendaHistCollapsed;
+        renderAgenda();
+        return;
+      }
+      // Copiar agenda
+      if (e.target.closest("#btnAgendaCopiar")) {
+        onAgendaCopiar_();
+        return;
+      }
+      // Toggle formulario nuevo
+      if (e.target.closest("#btnAgFormToggle")) {
+        const body = $("agFormBody");
+        const btn  = $("btnAgFormToggle");
+        if (!body) return;
+        const isOpen = body.style.display !== "none";
+        body.style.display = isOpen ? "none" : "block";
+        if (btn) btn.textContent = isOpen ? "✚ Agregar tema" : "✕ Cancelar";
+        if (!isOpen) setTimeout(() => $("agTema")?.focus(), 50);
+        return;
+      }
+    });
+  }
 
   // Toggle expand/collapse de tarjetas
   host.querySelectorAll("[data-ag-toggle]").forEach(summary => {
