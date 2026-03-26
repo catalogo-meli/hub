@@ -86,6 +86,10 @@ export const API = {
   // Solo GENERAL (sin POR_FLUJO)
   slackOutboxGenerarGeneral: () => post("slack.outbox.generarGeneral", {}),
   slackOutboxList: () => get("slack.outbox.list"),
+
+  agendaList:    () => get("agenda.list"),
+  agendaAdd:     (data) => post("agenda.add", data),
+  agendaSetHecho:(row) => post("agenda.setHecho", { row }),
   slackOutboxUpdate: (row, canal, channel_id, mensaje, mentions_json) => post("slack.outbox.update", { row: assertRow_(row), canal, channel_id, mensaje, mentions_json }),
   slackOutboxAppend: (fechaISO, tipo, canal, channel_id, mensaje, estado, mentions_json) => post("slack.outbox.append", { fechaISO, tipo, canal, channel_id, mensaje, estado, mentions_json }),
   slackOutboxDelete: (row) => post("slack.outbox.delete", { row: assertRow_(row) }),

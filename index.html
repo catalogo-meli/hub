@@ -1024,6 +1024,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <nav class="tabs" id="tabs">
 <div class="tab active" data-tab="dashboard">Dashboard</div>
 <div class="tab" data-tab="daily">Operativa diaria</div>
+<div class="tab" data-tab="agenda">Agenda</div>
 <div class="tab" data-tab="colabs">Colaboradores</div>
 <div class="tab" data-tab="habil">Habilitaciones</div>
 <div class="tab" data-tab="pres">Presentismo</div>
@@ -1256,6 +1257,19 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <tbody></tbody>
 </table>
 </div>
+</section>
+<!-- Agenda -->
+<section class="card" id="tab_agenda" style="display:none">
+<div class="row">
+<div>
+<h2>Agenda</h2>
+<div class="muted">Temas para dailys y reuniones de equipo.</div>
+</div>
+<div class="spacer"></div>
+<button class="btn" id="btnReloadAgenda">Actualizar</button>
+</div>
+<div class="hr"></div>
+<div id="agendaContent"></div>
 </section>
 <!-- Colaboradores -->
 <section class="card" id="tab_colabs" style="display:none">

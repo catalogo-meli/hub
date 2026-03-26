@@ -499,6 +499,8 @@ const S = {
   _dirty: new Set(),
   sentCollapsed: true,  // Enviados colapsado por defecto
   _habilSel: new Set(),  // IDs seleccionados para acción masiva
+  agenda: [],            // items de la agenda
+  agendaHistCollapsed: true, // historial colapsado por defecto
 };
 
 /* ========= Theme ========= */
@@ -522,7 +524,7 @@ function mountTabs() {
     const activeTab = tabs.querySelector(`[data-tab="${key}"]`);
     if (activeTab) activeTab.classList.add("active");
 
-    ["dashboard", "daily", "colabs", "habil", "pres"].forEach((k) => {
+    ["dashboard", "daily", "agenda", "colabs", "habil", "pres"].forEach((k) => {
       const sec = $(`tab_${k}`);
       if (sec) sec.style.display = k === key ? "" : "none";
     });
@@ -561,6 +563,10 @@ async function lazyLoadTab_(name) {
       CACHE.invalidate("habil");
       await refreshHabil();
       renderHabil();
+    }
+    if (name === "agenda") {
+      S.agenda = await API.agendaList().catch(() => S.agenda || []);
+      renderAgenda();
     }
     if (name === "pres") {
       CACHE.invalidate("pres_week");
@@ -654,6 +660,7 @@ async function loadCore() {
       S.flujos  = init.flujos  || [];
       S.plan    = init.plan    || [];
       S.outbox  = init.outbox  || [];
+      S.agenda  = init.agenda  || [];
       // Poblar cache de cliente
       CACHE.set("colabs",  S.colabs,  5 * 60_000);
       CACHE.set("canales", S.canales, 10 * 60_000);
@@ -2602,10 +2609,11 @@ function renderDashboard() {
       const vday = String(r.vals?.[today] || "").trim();
       const imp = presImpactFromCode_(vday);
       const meta = colabsById.get(r.id_meli);
+      // Usar el rol raw del sheet (igual que counts) para que los keys coincidan
       const role = normRole(meta?.rol || "");
 
-      if (imp.cls !== "bad") {
-        // presente o parcial: suma al conteo por rol
+      // Presente (ok) o Presente parcial (warn = TM/TR, CJ): ambos cuentan como presente
+      if (imp.cls === "ok" || imp.cls === "warn") {
         presentesPorRol.set(role, (presentesPorRol.get(role) || 0) + 1);
       }
 
@@ -2807,6 +2815,266 @@ async function onCopiarMensajePlan_() {
   }
 }
 
+
+/* ========= Agenda del equipo ========= */
+
+const AGENDA_PRIO_EMOJI = { "Urgente": "🔴", "Importante": "🟡", "Normal": "🔵" };
+const AGENDA_TIEMPO_OPTS = ["5", "10", "15", "20", "30", "45", "Si sobra tiempo"];
+
+// Convierte texto con URLs en HTML con links clickeables
+function linkify_(text) {
+  if (!text) return "";
+  const escaped = escapeHtml(text);
+  return escaped.replace(
+    /https?:\/\/[^\s<>"]+/g,
+    url => `<a href="${url}" target="_blank" rel="noopener" style="color:var(--pri);word-break:break-all">${url}</a>`
+  );
+}
+
+function renderAgenda() {
+  const host = $("agendaContent");
+  if (!host) return;
+
+  const items = (S.agenda || []).slice();
+  const pendientes = items.filter(r => r.estado !== "Hecho");
+  const historial  = items.filter(r => r.estado === "Hecho");
+
+  // Ordenar pendientes: Urgente → Importante → resto, luego fecha asc
+  const priOrd = { "Urgente": 0, "Importante": 1 };
+  pendientes.sort((a, b) => {
+    const pa = priOrd[a.prioridad] ?? 2, pb = priOrd[b.prioridad] ?? 2;
+    if (pa !== pb) return pa - pb;
+    return String(a.fecha).localeCompare(String(b.fecha));
+  });
+
+  const rowHtml = (r, showHecho) => {
+    const emoji = AGENDA_PRIO_EMOJI[r.prioridad] || "🔵";
+    const desc = linkify_(r.descripcion);
+    return `
+      <tr data-agenda-row="${r.row}">
+        <td class="nowrap" style="font-size:18px;text-align:center;padding:6px 8px">${emoji}</td>
+        <td class="nowrap">${escapeHtml(r.fecha)}</td>
+        <td>${escapeHtml(r.owner)}</td>
+        <td><b>${escapeHtml(r.tema)}</b>${desc ? `<div style="font-size:12px;margin-top:3px;opacity:0.8">${desc}</div>` : ""}</td>
+        <td class="nowrap">${escapeHtml(r.tiempo ? r.tiempo + (r.tiempo !== "Si sobra tiempo" ? " min" : "") : "—")}</td>
+        ${showHecho ? `<td class="nowrap"><button class="btn ghost" data-hecho="${r.row}" style="font-size:12px;padding:3px 10px">✓ Hecho</button></td>` : "<td></td>"}
+      </tr>
+    `;
+  };
+
+  const thead = `
+    <thead>
+      <tr>
+        <th style="width:36px"></th>
+        <th class="nowrap">Fecha</th>
+        <th>Owner</th>
+        <th>Tema / Descripción</th>
+        <th class="nowrap">Tiempo</th>
+        <th class="nowrap"></th>
+      </tr>
+    </thead>
+  `;
+
+  const pendientesHtml = pendientes.length
+    ? `<table class="table" style="margin-top:8px">${thead}<tbody>${pendientes.map(r => rowHtml(r, true)).join("")}</tbody></table>`
+    : `<div class="muted" style="margin-top:12px;padding:12px">Sin pendientes. ¡Todo al día! 🎉</div>`;
+
+  const histBtnLabel = S.agendaHistCollapsed ? `▶ Ver historial (${historial.length})` : `▼ Ocultar historial`;
+  const histContent  = S.agendaHistCollapsed ? "" : `
+    <table class="table" style="margin-top:8px">
+      ${thead}
+      <tbody>${historial.map(r => rowHtml(r, false)).join("")}</tbody>
+    </table>
+  `;
+
+  host.innerHTML = `
+    <div style="margin-bottom:10px">
+      <div class="row" style="flex-wrap:wrap;gap:8px;align-items:flex-end">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div class="muted" style="font-size:12px">Fecha</div>
+          <input class="input" id="agFecha" type="date" style="max-width:160px" value="${new Date().toISOString().slice(0,10)}"/>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div class="muted" style="font-size:12px">Owner</div>
+          <input class="input" id="agOwner" placeholder="All, Vicky, TLs..." style="max-width:160px"/>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:180px">
+          <div class="muted" style="font-size:12px">Tema *</div>
+          <input class="input" id="agTema" placeholder="Tema a tratar..." />
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div class="muted" style="font-size:12px">Tiempo</div>
+          <select class="input" id="agTiempo" style="max-width:160px">
+            ${AGENDA_TIEMPO_OPTS.map(o => `<option value="${escapeAttr(o)}">${escapeHtml(o)}${o !== "Si sobra tiempo" ? " min" : ""}</option>`).join("")}
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div class="muted" style="font-size:12px">Prioridad</div>
+          <select class="input" id="agPrioridad" style="max-width:140px">
+            <option value="Urgente">🔴 Urgente</option>
+            <option value="Importante" selected>🟡 Importante</option>
+            <option value="Normal">🔵 Normal</option>
+          </select>
+        </div>
+        <button class="btn primary" id="btnAgendaAgregar" type="button">Agregar</button>
+      </div>
+      <div style="margin-top:8px">
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Descripción / Link (opcional)</div>
+        <input class="input" id="agDesc" placeholder="Descripción o link..." style="width:100%"/>
+      </div>
+    </div>
+    <div class="hr"></div>
+    <div class="row" style="align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div class="pill"><b>${pendientes.length}</b> pendiente${pendientes.length !== 1 ? "s" : ""}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost" id="btnAgendaCopiar" type="button">Copiar agenda</button>
+        <button class="btn" id="btnAgendaSlack" type="button">Enviar a Slack</button>
+      </div>
+    </div>
+    ${pendientesHtml}
+    <div class="hr" style="margin-top:16px"></div>
+    <div class="row" style="align-items:center;justify-content:space-between;margin:8px 0">
+      <button class="btn ghost" id="btnAgendaHistToggle" type="button" style="font-size:12px">${histBtnLabel}</button>
+    </div>
+    <div id="agendaHistSection">${histContent}</div>
+  `;
+
+  // Botón agregar
+  $("btnAgendaAgregar")?.addEventListener("click", onAgendaAgregar_);
+
+  // Botones Hecho
+  host.querySelectorAll("[data-hecho]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const row = Number(btn.getAttribute("data-hecho"));
+      await onAgendaSetHecho_(row, btn);
+    });
+  });
+
+  // Toggle historial
+  $("btnAgendaHistToggle")?.addEventListener("click", () => {
+    S.agendaHistCollapsed = !S.agendaHistCollapsed;
+    renderAgenda();
+  });
+
+  // Copiar agenda
+  $("btnAgendaCopiar")?.addEventListener("click", onAgendaCopiar_);
+
+  // Enviar a Slack (abre selector de canal, usa el Outbox)
+  $("btnAgendaSlack")?.addEventListener("click", onAgendaEnviarSlack_);
+}
+
+async function onAgendaAgregar_() {
+  const fecha     = $("agFecha")?.value || "";
+  const owner     = $("agOwner")?.value?.trim() || "All";
+  const tema      = $("agTema")?.value?.trim() || "";
+  const tiempo    = $("agTiempo")?.value || "10";
+  const prioridad = $("agPrioridad")?.value || "Importante";
+  const desc      = $("agDesc")?.value?.trim() || "";
+
+  if (!tema) { setErr("Agenda: el campo Tema es obligatorio."); return; }
+
+  // Convertir fecha de yyyy-MM-dd a dd/MM/yyyy para GAS
+  const fechaGAS = fecha
+    ? fecha.split("-").reverse().join("/")
+    : new Date().toLocaleDateString("es-AR", { day:"2-digit", month:"2-digit", year:"numeric" });
+
+  setErr("");
+  try {
+    setBusy("Agenda", "Guardando...");
+    await API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc });
+    S.agenda = await API.agendaList();
+    renderAgenda();
+    // Limpiar campos (excepto fecha, owner, prioridad)
+    if ($("agTema")) $("agTema").value = "";
+    if ($("agDesc")) $("agDesc").value = "";
+    toast("Agenda", "✓ Tema agregado");
+  } catch (e) {
+    setErr(`Agenda: ${e.message || e}`);
+  } finally {
+    clearBusy();
+  }
+}
+
+async function onAgendaSetHecho_(row, btn) {
+  // Optimistic update
+  const idx = (S.agenda || []).findIndex(r => r.row === row);
+  if (idx >= 0) S.agenda[idx].estado = "Hecho";
+  renderAgenda();
+  try {
+    await API.agendaSetHecho(row);
+    toast("Agenda", "✓ Marcado como hecho");
+  } catch (e) {
+    // Revertir
+    if (idx >= 0) S.agenda[idx].estado = "Pendiente";
+    renderAgenda();
+    setErr(`Agenda: ${e.message || e}`);
+  }
+}
+
+function buildMensajeAgenda_() {
+  const pendientes = (S.agenda || []).filter(r => r.estado !== "Hecho");
+  if (!pendientes.length) return "Sin pendientes en la agenda. ¡Todo al día! 🎉";
+
+  const DIAS = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+  const hoy = new Date();
+  const dia = DIAS[hoy.getDay()];
+
+  let msg = `📋 Agenda del equipo · buen ${dia}!
+`;
+  const priOrd = { "Urgente": 0, "Importante": 1 };
+  const sorted = pendientes.slice().sort((a,b) => (priOrd[a.prioridad]??2)-(priOrd[b.prioridad]??2));
+
+  sorted.forEach(r => {
+    const emoji = AGENDA_PRIO_EMOJI[r.prioridad] || "🔵";
+    const tiempo = r.tiempo ? ` · ${r.tiempo}${r.tiempo !== "Si sobra tiempo" ? " min" : ""}` : "";
+    const owner = r.owner && r.owner !== "All" ? ` (${r.owner})` : "";
+    msg += `
+${emoji} *${r.tema}*${owner}${tiempo}`;
+    if (r.descripcion) msg += `
+${r.descripcion}`;
+  });
+
+  return msg.trim();
+}
+
+async function onAgendaCopiar_() {
+  const msg = buildMensajeAgenda_();
+  try {
+    await navigator.clipboard.writeText(msg);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = msg; ta.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(ta); ta.select();
+    document.execCommand("copy"); document.body.removeChild(ta);
+  }
+  toast("✓ Copiado", "Agenda lista para pegar en Slack");
+}
+
+async function onAgendaEnviarSlack_() {
+  const msg = buildMensajeAgenda_();
+  if (!msg) { setErr("No hay pendientes para enviar."); return; }
+
+  // Reutilizar el selector de canal del Slack Compose
+  // Appendear al Outbox como borrador y llevar al usuario a esa sección
+  try {
+    setBusy("Agenda", "Guardando en Outbox...");
+    const hoy = todayYMD();
+    await API.slackOutboxAppend(hoy, "AGENDA", "", "", msg, "BORRADOR - AGENDA");
+    S.outbox = await API.slackOutboxList();
+    renderOutbox();
+    // Navegar al tab daily sección outbox
+    activateTab("daily");
+    setTimeout(() => {
+      $("daily-outbox")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 300);
+    toast("Agenda", "Borrador guardado en Outbox — elegí el canal y enviá");
+  } catch (e) {
+    setErr(`Agenda: ${e.message || e}`);
+  } finally {
+    clearBusy();
+  }
+}
+
 async function onGenerarPlanificacionYOutbox_() {
   setErr("");
   try {
@@ -2935,6 +3203,19 @@ async function main() {
     await refreshHabil();
     renderHabil();
     toast("Habilitaciones", "Actualizado");
+  });
+
+  $("btnReloadAgenda")?.addEventListener("click", async () => {
+    try {
+      setBusy("Agenda", "Actualizando...");
+      S.agenda = await API.agendaList();
+      renderAgenda();
+      toast("Agenda", "Actualizado");
+    } catch (e) {
+      setErr(`Agenda: ${e.message || e}`);
+    } finally {
+      clearBusy();
+    }
   });
   $("btnReloadPres")?.addEventListener("click", async () => {
     CACHE.invalidate("pres_week");
