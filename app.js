@@ -2706,8 +2706,11 @@ function renderDashboard() {
       const meta = colabsById.get(idNorm);
       const role = normRole(meta?.rol || "");
 
-      // Presente (ok) o Presente parcial (warn = TM/TR, CJ): ambos cuentan como presente
-      // Solo contar si el colaborador tiene un rol conocido (evita "Sin rol" que no aparece en la tabla)
+      // DEBUG TEMPORAL — remover después de confirmar el fix
+      if (idNorm === "ext_ola") {
+        console.debug("[DEBUG ext_ola]", { vday, imp, meta, role, today, vals: r.vals });
+      }
+
       if ((imp.cls === "ok" || imp.cls === "warn") && role !== "Sin rol") {
         presentesPorRol.set(role, (presentesPorRol.get(role) || 0) + 1);
       }
