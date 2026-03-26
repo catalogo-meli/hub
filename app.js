@@ -3603,14 +3603,35 @@ function _startAgendaAutoRefresh_() {
       const newPend = fresh.filter(r => r.estado !== "Hecho").length;
       S.agenda = fresh;
       CACHE.set("agenda", fresh, 5 * 60_000);
+
+      // Siempre actualizar badge y card — no dependen del DOM del formulario
+      _updateAgendaBadge_();
+      _updateKpiAgenda_();
+
+      // Si el formulario tiene contenido, NO re-renderizar para no perder lo que escribe el usuario
+      const formBody  = $("agFormBody");
+      const temaVal   = $("agTema")?.value?.trim();
+      const descVal   = $("agDesc")?.innerText?.trim();
+      const formOpen  = formBody && formBody.style.display !== "none";
+      const formDirty = !!(temaVal || descVal);
+
+      if (formOpen && formDirty) {
+        // Solo notificar si hubo cambios de otros usuarios, sin tocar el DOM
+        if (newPend !== oldPend) {
+          toast("Agenda", newPend > oldPend
+            ? "🔔 +" + (newPend - oldPend) + " tema nuevo de otro usuario"
+            : "🔔 Agenda actualizada por otro usuario");
+        }
+        return; // No re-renderizar
+      }
+
+      // Formulario vacío o cerrado: re-render normal
       renderAgenda();
       if (newPend !== oldPend) {
         toast("Agenda", newPend > oldPend
           ? "+" + (newPend - oldPend) + " tema" + (newPend - oldPend > 1 ? "s nuevos" : " nuevo")
           : "Agenda actualizada");
       }
-      _updateAgendaBadge_();
-      _updateKpiAgenda_();
     } catch (_) {}
   }, 60_000);
 }
