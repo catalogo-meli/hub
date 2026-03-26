@@ -4543,13 +4543,10 @@ async function main() {
     const ownerWrap = $("ag_new_owner_wrap_static");
     if (ownerWrap) {
       ownerWrap.innerHTML = `
-        <div class="ms" id="ag_new_owner_wrap" style="min-width:130px;position:relative;overflow:visible">
-          <div class="ms-btn">
-            <div>
-              <div class="label">Owner</div>
-              <div class="value" data-ms-value>Todos</div>
-            </div>
-            <div class="muted">▾</div>
+        <div class="ms ag-form-owner" id="ag_new_owner_wrap" style="min-width:140px;position:relative;overflow:visible">
+          <div class="ms-btn ag-ctrl" style="display:flex;align-items:center;justify-content:space-between;gap:6px;cursor:pointer">
+            <div class="value" data-ms-value style="font-size:13px">Todos</div>
+            <div style="font-size:10px;color:var(--text-3)">▾</div>
           </div>
           <div class="ms-panel">
             <div data-ms-list>

@@ -968,6 +968,14 @@ tbody .skeleton { margin: 4px 0; }
 }
 .ag-ctrl:focus { outline: none; border-color: var(--pri); }
 
+/* Owner multiselect en formulario — mismo alto que ag-ctrl */
+.ag-form-owner .ms-btn.ag-ctrl {
+  height: 34px;
+  min-width: 140px;
+  padding: 0 10px;
+}
+.ag-form-owner .ms-btn.ag-ctrl:hover { border-color: var(--brd-2); }
+
 /* ── WYSIWYG editor ──────────────────────────────────────── */
 .wysiwyg-editor {
   white-space: pre-wrap;
@@ -1354,22 +1362,23 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
   </button>
   <div id="agFormBody" style="display:none;margin-top:10px;padding:14px;border:1px solid var(--brd-2);border-radius:10px;background:var(--surface-2)">
     <div style="margin-bottom:10px">
-      <div class="row" style="flex-wrap:wrap;gap:8px;align-items:flex-end">
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <div class="muted" style="font-size:12px">Fecha</div>
-          <input class="input" id="agFecha" type="date" style="max-width:160px"/>
+      <!-- Fila de metadatos: todos los controles con ag-ctrl para altura uniforme -->
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <div class="muted" style="font-size:11px;letter-spacing:.04em;text-transform:uppercase">Fecha</div>
+          <input class="ag-ctrl" id="agFecha" type="date" style="width:148px"/>
         </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <div class="muted" style="font-size:12px">Owner</div>
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <div class="muted" style="font-size:11px;letter-spacing:.04em;text-transform:uppercase">Owner</div>
           <div id="ag_new_owner_wrap_static"></div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:180px">
-          <div class="muted" style="font-size:12px">Tema *</div>
-          <input class="input" id="agTema" placeholder="Tema a tratar..."/>
+        <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:200px">
+          <div class="muted" style="font-size:11px;letter-spacing:.04em;text-transform:uppercase">Tema *</div>
+          <input class="input" id="agTema" placeholder="Tema a tratar..." style="height:34px;box-sizing:border-box"/>
         </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <div class="muted" style="font-size:12px">Tiempo</div>
-          <select class="input" id="agTiempo" style="max-width:160px">
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <div class="muted" style="font-size:11px;letter-spacing:.04em;text-transform:uppercase">Tiempo</div>
+          <select class="ag-ctrl" id="agTiempo" style="width:120px">
             <option value="5">5 min</option>
             <option value="10" selected>10 min</option>
             <option value="15">15 min</option>
@@ -1379,15 +1388,21 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
             <option value="Si sobra tiempo">Si sobra tiempo</option>
           </select>
         </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <div class="muted" style="font-size:12px">Prioridad</div>
-          <select class="input" id="agPrioridad" style="max-width:140px">
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <div class="muted" style="font-size:11px;letter-spacing:.04em;text-transform:uppercase">Prioridad</div>
+          <select class="ag-ctrl" id="agPrioridad" style="width:140px">
             <option value="Urgente">🔴 Urgente</option>
             <option value="Importante" selected>🟡 Importante</option>
             <option value="Normal">🔵 Normal</option>
           </select>
         </div>
-        <button class="btn primary" id="btnAgendaAgregar" type="button">Agregar</button>
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <div style="font-size:11px;opacity:0">&nbsp;</div>
+          <button class="ag-ctrl btn primary" id="btnAgendaAgregar" type="button"
+            style="height:34px;padding:0 18px;font-size:13px;font-weight:600;white-space:nowrap">
+            Agregar
+          </button>
+        </div>
       </div>
       <div style="margin-top:8px">
         <div class="muted" style="font-size:12px;margin-bottom:4px">Descripción</div>
