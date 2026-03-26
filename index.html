@@ -415,6 +415,20 @@ a.pill:hover {
 
 .kpi:hover { border-color: var(--brd-2); }
 
+.kpi-agenda {
+  background: var(--pri-dim);
+  border-color: var(--pri-brd);
+  cursor: pointer;
+  transition: background .15s, border-color .15s, transform .1s;
+}
+.kpi-agenda:hover {
+  background: rgba(62,123,250,.18);
+  border-color: var(--pri);
+  transform: translateY(-1px);
+}
+.kpi-agenda .v { color: var(--pri); }
+.kpi-agenda .l { color: var(--pri); opacity: .8; }
+
 /* Dashboard KPIs: .v + .l */
 .kpi .v {
   font-family: var(--mono);
@@ -925,6 +939,25 @@ tbody .skeleton { margin: 4px 0; }
 /* ── MENTIONS ────────────────────────────────────────────────── */
 .mention-wrap { position: relative; }
 
+/* ── WYSIWYG editor ──────────────────────────────────────── */
+.wysiwyg-editor {
+  white-space: pre-wrap;
+  word-break: break-word;
+  outline: none;
+  border: 1px solid var(--brd-2);
+  border-radius: var(--r);
+  background: var(--input-bg, var(--card2));
+  transition: border-color .15s;
+}
+.wysiwyg-editor:focus { border-color: var(--pri); }
+.wysiwyg-editor:empty:before {
+  content: attr(data-placeholder);
+  color: var(--text-3);
+  pointer-events: none;
+}
+.wysiwyg-editor ul, .wysiwyg-editor ol { margin: 2px 0 2px 18px; padding: 0; }
+.wysiwyg-editor li { margin: 1px 0; }
+
 .mention-dd {
   position: fixed;
   min-width: 320px; max-width: 500px;
@@ -1038,8 +1071,8 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="errbar" id="errBar"></div>
 <nav class="tabs" id="tabs">
 <div class="tab active" data-tab="dashboard">Dashboard</div>
-<div class="tab" data-tab="daily">Operativa diaria</div>
 <div class="tab" data-tab="agenda">Agenda</div>
+<div class="tab" data-tab="daily">Operativa diaria</div>
 <div class="tab" data-tab="colabs">Colaboradores</div>
 <div class="tab" data-tab="habil">Habilitaciones</div>
 <div class="tab" data-tab="pres">Presentismo</div>
@@ -1499,7 +1532,14 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
       </div>
       <div>
         <div class="muted" style="font-size:12px;margin-bottom:4px">Ubicación *</div>
-        <input class="input" id="cmUbic" placeholder="AMBA, MDP, TANDIL..."/>
+        <select class="input" id="cmUbic">
+          <option value="">— Seleccioná —</option>
+          <option value="AMBA">AMBA</option>
+          <option value="MDP">MDP</option>
+          <option value="TANDIL">TANDIL</option>
+          <option value="__otra__">Otra...</option>
+        </select>
+        <input class="input" id="cmUbicOtra" placeholder="Escribí la ubicación" style="display:none;margin-top:6px"/>
       </div>
       <div>
         <div class="muted" style="font-size:12px;margin-bottom:4px">Fecha Ingreso *</div>

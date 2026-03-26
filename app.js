@@ -569,6 +569,8 @@ function mountTabs() {
       const sec = $(`tab_${k}`);
       if (sec) sec.style.display = k === key ? "" : "none";
     });
+    // Detener auto-refresh de agenda si se sale del tab
+    if (key !== "agenda") _stopAgendaAutoRefresh_();
 
     // Render inmediato con datos ya cargados
     if (key === "dashboard") renderDashboard();
@@ -617,6 +619,8 @@ async function lazyLoadTab_(name) {
         }
       }
       renderAgenda();
+      _startAgendaAutoRefresh_();
+      _updateKpiAgenda_();
     }
     if (name === "pres") {
       CACHE.invalidate("pres_week");
@@ -797,14 +801,16 @@ async function loadCore() {
     }).catch(() => {});
   }
   // Pre-cachear agenda en background si no está en cache todavía
-  // (así el primer click en Agenda tab es instantáneo)
   if (!CACHE.get("agenda")) {
     API.agendaList().then(d => {
       if (d?.length) {
         S.agenda = d;
         CACHE.set("agenda", d, 5 * 60_000);
+        _updateAgendaBadge_();
       }
     }).catch(() => {});
+  } else {
+    _updateAgendaBadge_();
   }
 }
 
@@ -2362,8 +2368,10 @@ async function openColabModal_(editId = null) {
   }
 
   // Limpiar / poblar campos
-  const campos = ["cmIdMeli","cmNombre","cmRol","cmEquipo","cmUbic","cmFechaIngreso","cmMailProd","cmMailExt","cmTag"];
+  const campos = ["cmIdMeli","cmNombre","cmRol","cmEquipo","cmFechaIngreso","cmMailProd","cmMailExt","cmTag"];
   campos.forEach(id => { const el = $(id); if (el) el.value = ""; });
+  if ($("cmUbic")) $("cmUbic").value = "";
+  if ($("cmUbicOtra")) { $("cmUbicOtra").value = ""; $("cmUbicOtra").style.display = "none"; }
 
   if (editId) {
     const v = colabRowView((S.colabs || []).find(c => {
@@ -2377,7 +2385,17 @@ async function openColabModal_(editId = null) {
       // Rol y Equipo: primero poblar el select, luego seleccionar el valor
       if ($("cmRol") && v.rol) $("cmRol").value = v.rol;
       if ($("cmEquipo") && v.equipo) $("cmEquipo").value = v.equipo;
-      set_("cmUbic",         v.ubic);
+      // Ubicación: si es valor conocido, seleccionar; sino mostrar input libre
+      if ($("cmUbic")) {
+        const knownUbic = ["AMBA", "MDP", "TANDIL"];
+        if (knownUbic.includes(v.ubic)) {
+          $("cmUbic").value = v.ubic;
+          if ($("cmUbicOtra")) $("cmUbicOtra").style.display = "none";
+        } else if (v.ubic) {
+          $("cmUbic").value = "__otra__";
+          if ($("cmUbicOtra")) { $("cmUbicOtra").style.display = ""; $("cmUbicOtra").value = v.ubic; }
+        }
+      }
       set_("cmMailProd",     v.mailProd);
       set_("cmMailExt",      v.mailExt);
       // Fecha ingreso: convertir a yyyy-MM-dd para input type=date
@@ -2413,7 +2431,10 @@ async function saveColabModal_() {
   const nombre        = $("cmNombre")?.value?.trim() || "";
   const rol           = $("cmRol")?.value?.trim() || "";
   const equipo        = $("cmEquipo")?.value?.trim() || "";
-  const ubicacion     = $("cmUbic")?.value?.trim() || "";
+  const ubicSel = $("cmUbic")?.value || "";
+  const ubicacion = ubicSel === "__otra__"
+    ? ($("cmUbicOtra")?.value?.trim() || "")
+    : ubicSel.trim();
   const fecha_ingreso = $("cmFechaIngreso")?.value || "";
   const mail_prod     = $("cmMailProd")?.value?.trim() || "";
   const mail_ext      = $("cmMailExt")?.value?.trim() || "";
@@ -3038,6 +3059,10 @@ function renderDashboard() {
       <span style="font-size:18px">${statusEmoji}</span>
       <span><b>${statusLabel}</b> — ${pres} de ${total} presentes hoy · ${flujosActivos} flujo${flujosActivos !== 1 ? "s" : ""} activo${flujosActivos !== 1 ? "s" : ""}${slackPendientes > 0 ? ` · <span style="color:var(--warn)">${slackPendientes} mensaje${slackPendientes !== 1 ? "s" : ""} pendiente${slackPendientes !== 1 ? "s" : ""} Slack</span>` : ""}</span>
     </div>
+    <div class="kpi kpi-agenda" id="kpiAgenda" title="Ir a Agenda">
+      <div class="v" style="font-size:22px" id="kpiAgendaNum">—</div>
+      <div class="l" id="kpiAgendaLabel">Agenda</div>
+    </div>
     <div class="kpi"><div class="v">${total}</div><div class="l">En nómina</div></div>
     <div class="kpi"><div class="v">${pres}</div><div class="l">Presentes hoy</div></div>
     <div class="kpi"><div class="v">${analistasHoy}</div><div class="l">Analistas disponibles</div></div>
@@ -3046,8 +3071,38 @@ function renderDashboard() {
   `;
 
   tb.innerHTML = rowsRoles.map((r) => `<tr><td>${escapeHtml(r.rol)}</td><td class="right">${r.nomina}</td><td class="right">${r.presentes}</td></tr>`).join("");
+
+  // Actualizar card de Agenda
+  _updateKpiAgenda_();
 }
 
+
+/* ========= Agenda KPI card ========= */
+function _updateKpiAgenda_() {
+  const numEl   = $("kpiAgendaNum");
+  const labelEl = $("kpiAgendaLabel");
+  const card    = $("kpiAgenda");
+  if (!numEl || !labelEl) return;
+
+  const pending = (S.agenda || []).filter(r =>
+    r.estado !== "Hecho" && r.estado !== "Bloqueado"
+  ).length;
+
+  numEl.textContent = pending;
+  if (pending === 0) {
+    labelEl.textContent = "Agenda al día ✓";
+  } else {
+    labelEl.textContent = pending === 1 ? "Tema en agenda" : "Temas en agenda";
+  }
+
+  // Click: navegar al tab Agenda
+  if (card && !card._agClickBound) {
+    card._agClickBound = true;
+    card.addEventListener("click", () => {
+      document.querySelector('[data-tab="agenda"]')?.click();
+    });
+  }
+}
 
 /* ========= Generar planificación (también genera outbox) ========= */
 
@@ -3238,6 +3293,132 @@ function linkify_(text) {
 }
 
 
+
+// ══════════════════════════════════════════════════════════════
+// WYSIWYG Editor helpers
+// ══════════════════════════════════════════════════════════════
+
+// Markdown → HTML (para mostrar en el editor contenteditable)
+function mdToHtml_(md) {
+  if (!md) return "";
+  let h = md
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  h = h.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  h = h.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  h = h.replace(/__(.+?)__/g, "<u>$1</u>");
+  // Listas al final para no interferir con otros patrones
+  h = h.replace(/^- (.+)$/gm, "<li>$1</li>");
+  h = h.replace(/^\d+\. (.+)$/gm, "<li data-ol>$1</li>");
+  h = h.replace(/(<li[^>]*>.*<\/li>\n?)+/gs, m => {
+    const isOl = m.includes("data-ol");
+    const tag = isOl ? "ol" : "ul";
+    return `<${tag} style="margin:2px 0 2px 16px;padding:0">${m.replace(/ data-ol/g, "")}</${tag}>`;
+  });
+  h = h.replace(/\n/g, "<br>");
+  return h;
+}
+
+// HTML (contenteditable) → Markdown (para guardar en Sheets)
+function htmlToMd_(html) {
+  if (!html) return "";
+  let md = html;
+  // Listas
+  md = md.replace(/<li>(.*?)<\/li>/gi, (_, c) => "- " + c + "\n");
+  md = md.replace(/<\/?[uo]l[^>]*>/gi, "");
+  // Formato
+  md = md.replace(/<strong>(.*?)<\/strong>/gi, "**$1**");
+  md = md.replace(/<b>(.*?)<\/b>/gi, "**$1**");
+  md = md.replace(/<em>(.*?)<\/em>/gi, "*$1*");
+  md = md.replace(/<i>(.*?)<\/i>/gi, "*$1*");
+  md = md.replace(/<u>(.*?)<\/u>/gi, "__$1__");
+  // Saltos de línea
+  md = md.replace(/<br\s*\/?>/gi, "\n");
+  md = md.replace(/<div>/gi, "\n").replace(/<\/div>/gi, "");
+  md = md.replace(/<p>/gi, "\n").replace(/<\/p>/gi, "\n");
+  // Limpiar tags restantes y entidades HTML
+  md = md.replace(/<[^>]+>/g, "");
+  md = md.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ");
+  // Limpiar líneas vacías múltiples
+  md = md.replace(/\n{3,}/g, "\n\n").trim();
+  return md;
+}
+
+// Montar editor WYSIWYG sobre un div contenteditable
+function mountWysiwyg_(editorId, toolbarId, emojiId) {
+  const editor = $(editorId);
+  const toolbar = $(toolbarId);
+  const emojiBtn = $(emojiId);
+  if (!editor) return;
+
+  // Auto-resize
+  const resize = () => {
+    editor.style.minHeight = "48px";
+  };
+  editor.addEventListener("input", resize);
+  resize();
+
+  // Formato con execCommand
+  const fmt = (cmd, val) => {
+    editor.focus();
+    document.execCommand(cmd, false, val || null);
+  };
+
+  if (toolbar) {
+    toolbar.querySelectorAll("[data-cmd]").forEach(btn => {
+      btn.addEventListener("mousedown", e => {
+        e.preventDefault();
+        const cmd = btn.getAttribute("data-cmd");
+        if (cmd === "insertUnorderedList") fmt("insertUnorderedList");
+        else if (cmd === "insertOrderedList") fmt("insertOrderedList");
+        else fmt(cmd);
+      });
+    });
+  }
+
+  // Emoji picker
+  const EMOJIS = ["👍","👎","✅","❌","⚠️","🔴","🟡","🟢","🔵","⭐","🎯","🚀","💡","📌","🔧","📊","📅","👤","💬","🔔","⏰","📝","🗂️","✍️","🤝","💪","🎉","🙌","👀","❓","❗","➡️","⬅️","⬆️","⬇️"];
+
+  if (emojiBtn) {
+    const picker = document.createElement("div");
+    picker.style.cssText = "position:fixed;background:var(--surface);border:1px solid var(--brd-2);border-radius:8px;padding:8px;display:none;flex-wrap:wrap;gap:4px;width:260px;z-index:9999;box-shadow:var(--shd-lg)";
+    EMOJIS.forEach(em => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = em;
+      b.style.cssText = "font-size:20px;padding:3px;border:none;background:none;cursor:pointer;border-radius:4px;line-height:1";
+      b.addEventListener("click", () => {
+        editor.focus();
+        document.execCommand("insertText", false, em);
+        picker.style.display = "none";
+      });
+      picker.appendChild(b);
+    });
+    document.body.appendChild(picker);
+
+    emojiBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      const r = emojiBtn.getBoundingClientRect();
+      if (picker.style.display === "none") {
+        picker.style.display = "flex";
+        picker.style.top = (r.bottom + 4) + "px";
+        picker.style.left = Math.min(r.left, window.innerWidth - 270) + "px";
+      } else {
+        picker.style.display = "none";
+      }
+    });
+    document.addEventListener("click", () => { picker.style.display = "none"; });
+  }
+
+  return {
+    getValue: () => htmlToMd_(editor.innerHTML),
+    setValue: (md) => { editor.innerHTML = mdToHtml_(md); resize(); },
+    clear: () => { editor.innerHTML = ""; resize(); },
+  };
+}
+
+// Instancia global del editor del formulario de nueva entrada
+let _agDescEditor_ = null;
+
 // ── Editor Markdown toolbar ──────────────────────────────────
 function applyMdFormat_(ta, cmd) {
   if (!ta) return;
@@ -3279,6 +3460,50 @@ function autoResizeTextarea_(ta) {
   if (!ta) return;
   ta.style.height = "auto";
   ta.style.height = Math.max(48, ta.scrollHeight) + "px";
+}
+
+
+// ── Agenda auto-refresh ──────────────────────────────────────
+let _agendaRefreshTimer_ = null;
+
+function _startAgendaAutoRefresh_() {
+  _stopAgendaAutoRefresh_();
+  _agendaRefreshTimer_ = setInterval(async () => {
+    try {
+      const fresh = await API.agendaList();
+      if (!fresh) return;
+      const oldPend = (S.agenda || []).filter(r => r.estado !== "Hecho").length;
+      const newPend = fresh.filter(r => r.estado !== "Hecho").length;
+      S.agenda = fresh;
+      CACHE.set("agenda", fresh, 5 * 60_000);
+      renderAgenda();
+      if (newPend !== oldPend) {
+        toast("Agenda", newPend > oldPend
+          ? "+" + (newPend - oldPend) + " tema" + (newPend - oldPend > 1 ? "s nuevos" : " nuevo")
+          : "Agenda actualizada");
+      }
+      _updateAgendaBadge_();
+      _updateKpiAgenda_();
+    } catch (_) {}
+  }, 60_000);
+}
+
+function _stopAgendaAutoRefresh_() {
+  if (_agendaRefreshTimer_) { clearInterval(_agendaRefreshTimer_); _agendaRefreshTimer_ = null; }
+}
+
+function _updateAgendaBadge_() {
+  const pending = (S.agenda || []).filter(r => r.estado !== "Hecho" && r.estado !== "Bloqueado").length;
+  const tab = document.querySelector('[data-tab="agenda"]');
+  if (!tab) return;
+  tab.querySelector(".agenda-badge")?.remove();
+  if (pending > 0) {
+    const badge = document.createElement("span");
+    badge.className = "agenda-badge";
+    badge.textContent = pending;
+    badge.style.cssText = "background:var(--pri);color:#fff;border-radius:10px;font-size:10px;font-weight:700;padding:1px 5px;margin-left:5px;vertical-align:middle";
+    tab.appendChild(badge);
+  }
 }
 
 function renderAgenda() {
@@ -3392,8 +3617,11 @@ function renderAgenda() {
           })()}
         </td>
         <td class="nowrap">${escapeHtml(r.tiempo ? r.tiempo + (r.tiempo !== "Si sobra tiempo" ? " min" : "") : "—")}</td>
-        <td class="nowrap">
-          <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
+        <td class="nowrap" style="white-space:nowrap">
+          <div style="display:flex;gap:4px">
+            <button class="btn ghost" data-ag-edit-hist="${r.row}" style="font-size:11px;padding:2px 6px" title="Editar">✏️</button>
+            <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
+          </div>
         </td>
       </tr>`;
   };
@@ -3460,14 +3688,15 @@ function renderAgenda() {
       </div>
       <div style="margin-top:8px">
         <div class="muted" style="font-size:12px;margin-bottom:4px">Descripción</div>
-        <div style="display:flex;gap:4px;margin-bottom:4px">
-          <button type="button" class="btn ghost" data-md-form="bold"      style="font-size:12px;padding:2px 8px;font-weight:700">B</button>
-          <button type="button" class="btn ghost" data-md-form="italic"    style="font-size:12px;padding:2px 8px;font-style:italic">I</button>
-          <button type="button" class="btn ghost" data-md-form="underline" style="font-size:12px;padding:2px 8px;text-decoration:underline">S</button>
-          <button type="button" class="btn ghost" data-md-form="ul"        style="font-size:12px;padding:2px 8px">• Lista</button>
-          <button type="button" class="btn ghost" data-md-form="ol"        style="font-size:12px;padding:2px 8px">1. Lista</button>
+        <div id="agDescToolbar" style="display:flex;gap:3px;margin-bottom:4px;flex-wrap:wrap;align-items:center">
+          <button type="button" class="btn ghost" data-cmd="bold"                style="font-size:12px;padding:2px 8px;font-weight:700" title="Negrita">B</button>
+          <button type="button" class="btn ghost" data-cmd="italic"              style="font-size:12px;padding:2px 8px;font-style:italic" title="Cursiva">I</button>
+          <button type="button" class="btn ghost" data-cmd="underline"           style="font-size:12px;padding:2px 8px;text-decoration:underline" title="Subrayado">S</button>
+          <button type="button" class="btn ghost" data-cmd="insertUnorderedList" style="font-size:12px;padding:2px 8px" title="Viñetas">• Lista</button>
+          <button type="button" class="btn ghost" data-cmd="insertOrderedList"   style="font-size:12px;padding:2px 8px" title="Lista numerada">1. Lista</button>
+          <button type="button" class="btn ghost" id="agDescEmoji"               style="font-size:14px;padding:2px 8px" title="Emojis">😊</button>
         </div>
-        <textarea class="input" id="agDesc" placeholder="Escribí la descripción..." rows="2" style="width:100%;resize:none;min-height:48px;font-family:inherit;overflow:hidden"></textarea>
+        <div id="agDesc" contenteditable="true" class="input wysiwyg-editor" style="min-height:60px;padding:8px;font-family:inherit;font-size:13px;line-height:1.5;overflow:auto;cursor:text" data-placeholder="Escribí la descripción..."></div>
       </div>
       <div style="margin-top:6px">
         <div class="muted" style="font-size:12px;margin-bottom:4px">Links (pegá una URL)</div>
@@ -3577,17 +3806,8 @@ function renderAgenda() {
   // Montar ms del formulario nuevo
   mountAgendaOwnerMs_("ag_new_owner_wrap");
 
-  // Toolbar formulario nuevo
-  const agDescEl = $("agDesc");
-  if (agDescEl) {
-    agDescEl.addEventListener("input", () => autoResizeTextarea_(agDescEl));
-    host.querySelectorAll("[data-md-form]").forEach(btn => {
-      btn.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        applyMdFormat_(agDescEl, btn.getAttribute("data-md-form"));
-      });
-    });
-  }
+  // Montar editor WYSIWYG del formulario nuevo
+  _agDescEditor_ = mountWysiwyg_("agDesc", "agDescToolbar", "agDescEmoji");
 
   // ── Links píldoras en el formulario nuevo ───────────────
   (function mountLinkInput_(inputId, wrapId) {
@@ -3717,6 +3937,24 @@ function renderAgenda() {
   });
 
   // ── Botones eliminar (×) ─────────────────────────────────
+  // Editar desde historial (abre fila editable inline)
+  host.querySelectorAll("[data-ag-edit-hist]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const row = Number(btn.getAttribute("data-ag-edit-hist"));
+      const idx = (S.agenda || []).findIndex(r => r.row === row);
+      if (idx < 0) return;
+      // Mover al array de pendientes temporalmente para editar
+      S.agenda[idx].estado = "Para hacer";
+      S.agendaHistCollapsed = false;
+      renderAgenda();
+      // Scroll a la fila
+      setTimeout(() => {
+        const tr = host.querySelector(`tr[data-agenda-row="${row}"]`);
+        tr?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 100);
+    });
+  });
+
   host.querySelectorAll("[data-ag-del]").forEach(btn => {
     btn.addEventListener("click", async () => {
       const row = Number(btn.getAttribute("data-ag-del"));
@@ -3768,7 +4006,7 @@ async function onAgendaAgregar_(ownerParam) {
   const tema      = $("agTema")?.value?.trim() || "";
   const tiempo    = $("agTiempo")?.value || "10";
   const prioridad = $("agPrioridad")?.value || "Importante";
-  const descText  = $("agDesc")?.value?.trim() || "";
+  const descText  = _agDescEditor_ ? _agDescEditor_.getValue() : ($("agDesc")?.innerText?.trim() || "");
   const linkPills = Array.from($("agLinksWrap")?.querySelectorAll("[data-link-pill]") || [])
     .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
   const desc = joinDescLinks_(descText, linkPills);
@@ -3789,7 +4027,7 @@ async function onAgendaAgregar_(ownerParam) {
     CACHE.set("agenda", S.agenda, 5 * 60_000);
     renderAgenda();
     if ($("agTema")) $("agTema").value = "";
-    if ($("agDesc")) $("agDesc").value = "";
+    if (_agDescEditor_) _agDescEditor_.clear();
     const linkWrap = $("agLinksWrap");
     if (linkWrap) linkWrap.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
     toast("Agenda", "✓ Tema agregado");
@@ -4004,6 +4242,14 @@ async function main() {
   $("colabModalClose")?.addEventListener("click",  closeColabModal_);
   $("colabModalCancel")?.addEventListener("click", closeColabModal_);
   $("colabModalSave")?.addEventListener("click",   saveColabModal_);
+
+  // Mostrar/ocultar input libre de Ubicación
+  $("cmUbic")?.addEventListener("change", () => {
+    const otra = $("cmUbicOtra");
+    if (!otra) return;
+    otra.style.display = $("cmUbic").value === "__otra__" ? "" : "none";
+    if ($("cmUbic").value === "__otra__") otra.focus();
+  });
   $("colabModal")?.addEventListener("click", (e) => { if (e.target === $("colabModal")) closeColabModal_(); });
   $("colabDeleteCancel")?.addEventListener("click",  closeDeleteModal_);
   $("colabDeleteConfirm")?.addEventListener("click", deleteColabsExecute_);
