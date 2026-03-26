@@ -2850,6 +2850,14 @@ function joinDescLinks_(text, urls) {
 const AGENDA_PRIO_EMOJI = { "Urgente": "🔴", "Importante": "🟡", "Normal": "🔵" };
 const AGENDA_TIEMPO_OPTS = ["5", "10", "15", "20", "30", "45", "Si sobra tiempo"];
 const AGENDA_OWNERS = ["Cele", "Eze", "Jose", "Mati L.", "Mati M.", "Vicky"];
+const AGENDA_ESTADOS = ["Para hacer", "En progreso", "En espera", "Bloqueado", "Hecho"];
+const AGENDA_ESTADO_CLS = {
+  "Para hacer": "ok",
+  "En progreso": "warn",
+  "En espera":  "",
+  "Bloqueado":  "bad",
+  "Hecho":      "muted",
+};
 
 // Convierte texto con URLs en HTML con links clickeables
 function linkify_(text) {
@@ -2866,14 +2874,17 @@ function renderAgenda() {
   if (!host) return;
 
   const items = (S.agenda || []).slice();
-  const pendientes = items.filter(r => r.estado !== "Hecho");
-  const historial  = items.filter(r => r.estado === "Hecho");
+  const HISTORIAL_ESTADOS = new Set(["Hecho", "Bloqueado"]);
+  const pendientes = items.filter(r => !HISTORIAL_ESTADOS.has(r.estado));
+  const historial  = items.filter(r =>  HISTORIAL_ESTADOS.has(r.estado));
 
+  // Orden: prioridad → fecha descendente (más reciente arriba)
   const priOrd = { "Urgente": 0, "Importante": 1 };
   pendientes.sort((a, b) => {
     const pa = priOrd[a.prioridad] ?? 2, pb = priOrd[b.prioridad] ?? 2;
     if (pa !== pb) return pa - pb;
-    return String(a.fecha).localeCompare(String(b.fecha));
+    // fecha desc: más reciente arriba
+    return String(b.fecha).localeCompare(String(a.fecha));
   });
 
   // ── Owner multiselect helper ─────────────────────────────
@@ -2920,7 +2931,10 @@ function renderAgenda() {
         </td>
         <td>${ownerSelectHtml(r.owner, "ag_owner_" + r.row)}</td>
         <td>
-          <input class="input" data-ag-tema value="${escapeAttr(r.tema)}" style="font-size:13px;min-width:180px"/>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:3px">
+            <input class="input" data-ag-tema value="${escapeAttr(r.tema)}" style="font-size:13px;flex:1"/>
+            <span class="pill ${AGENDA_ESTADO_CLS[r.estado] || ""}" style="font-size:11px;white-space:nowrap">${escapeHtml(r.estado || "Para hacer")}</span>
+          </div>
           <textarea class="input" data-ag-desc rows="2" placeholder="Descripción..." style="font-size:11px;margin-top:3px;width:100%;resize:vertical;min-height:40px;font-family:inherit">${escapeHtml(parseDescLinks_(r.descripcion).text)}</textarea>
           <div data-ag-links-wrap style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--card2));margin-top:3px">
             ${parseDescLinks_(r.descripcion).urls.map(u => `<span class="pill" style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px" data-link-pill="${escapeAttr(u)}"><a href="${escapeAttr(u)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(u)}">×</span></span>`).join("")}
@@ -2933,7 +2947,9 @@ function renderAgenda() {
         <td class="nowrap" style="white-space:nowrap">
           <div style="display:flex;gap:4px;align-items:center">
             <button class="btn ghost" data-ag-save="${r.row}" style="font-size:11px;padding:3px 8px" title="Guardar cambios">💾</button>
-            <button class="btn ghost" data-hecho="${r.row}" style="font-size:11px;padding:3px 8px" title="Marcar como hecho">✓</button>
+            <select class="input" data-ag-estado style="font-size:11px;padding:2px 4px;min-width:100px">
+              ${AGENDA_ESTADOS.map(e => `<option value="${e}" ${r.estado === e ? "selected" : ""}>${e}</option>`).join("")}
+            </select>
             <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
           </div>
         </td>
@@ -3171,17 +3187,19 @@ function renderAgenda() {
         row,
         fecha,
         owner,
-        tema:        tr.querySelector("[data-ag-tema]")?.value?.trim() || "",
-        tiempo:      tr.querySelector("[data-ag-tiempo]")?.value       || "",
-        prioridad:   tr.querySelector("[data-ag-prio]")?.value         || "",
+        tema:        tr.querySelector("[data-ag-tema]")?.value?.trim()  || "",
+        tiempo:      tr.querySelector("[data-ag-tiempo]")?.value        || "",
+        prioridad:   tr.querySelector("[data-ag-prio]")?.value          || "",
         descripcion: joinDescLinks_(descTxt, rowLinks),
+        estado:      tr.querySelector("[data-ag-estado]")?.value        || "Para hacer",
       };
       try {
         // Optimistic update
         const idx = (S.agenda||[]).findIndex(r => r.row === row);
         if (idx >= 0) Object.assign(S.agenda[idx], {
           fecha: payload.fecha, owner: payload.owner, tema: payload.tema,
-          tiempo: payload.tiempo, prioridad: payload.prioridad, descripcion: payload.descripcion
+          tiempo: payload.tiempo, prioridad: payload.prioridad,
+          descripcion: payload.descripcion, estado: payload.estado
         });
         await API.agendaUpdate(payload);
         toast("Agenda", "✓ Guardado");
