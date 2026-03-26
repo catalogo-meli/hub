@@ -3678,75 +3678,82 @@ function renderAgenda() {
   const rowHtmlEditable = (r) => {
     const estadoNorm = (!r.estado || r.estado === "Pendiente") ? "Para hacer" : r.estado;
     const estadoCls  = AGENDA_ESTADO_CLS[estadoNorm] || "ok";
+    const prioEmoji  = AGENDA_PRIO_EMOJI[r.prioridad] || "🔵";
+    const ownerShort = r.owner ? String(r.owner).split(",")[0].trim().split(" ")[0] : "—";
+    const tiempoShort = r.tiempo ? (r.tiempo === "Si sobra tiempo" ? "Si sobra" : r.tiempo + " min") : "—";
     const tiempoOpts = AGENDA_TIEMPO_OPTS.map(o =>
       `<option value="${escapeAttr(o)}" ${r.tiempo === o ? "selected" : ""}>${escapeHtml(o)}${o !== "Si sobra tiempo" ? " min" : ""}</option>`
     ).join("");
     const prioOpts = ["Urgente","Importante","Normal"].map(p =>
       `<option value="${p}" ${r.prioridad === p ? "selected" : ""}>${AGENDA_PRIO_EMOJI[p]} ${p}</option>`
     ).join("");
+    const hasDesc = !!(parseDescLinks_(r.descripcion).text);
+    const hasLinks = parseDescLinks_(r.descripcion).urls.length > 0;
 
     return `
-      <div class="ag-card" data-agenda-row="${r.row}" style="border:1px solid var(--brd);border-radius:10px;padding:12px 14px;margin-bottom:8px;background:var(--surface-2)">
+      <div class="ag-card" data-agenda-row="${r.row}"
+        style="border:1px solid var(--brd);border-radius:10px;margin-bottom:6px;background:var(--surface-2);overflow:hidden;transition:border-color .15s">
 
-        <!-- BANDA 1: metadatos en una línea -->
-        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
-
-          <!-- Prioridad -->
-          <select class="input" data-ag-prio
-            style="font-size:16px;padding:0 2px;border:none;background:transparent;cursor:pointer;width:36px;min-width:36px;text-align:center">
-            ${prioOpts}
-          </select>
-
-          <!-- Fecha -->
-          <input class="input" data-ag-fecha type="date" value="${escapeAttr(_fechaToISO_(r.fecha))}"
-            style="font-size:12px;padding:3px 8px;max-width:150px"/>
-
-          <!-- Owner -->
-          <div style="min-width:140px;max-width:200px">
-            ${ownerSelectHtml(r.owner, "ag_owner_" + r.row)}
-          </div>
-
-          <!-- Tiempo -->
-          <select class="input" data-ag-tiempo style="font-size:12px;padding:3px 8px;max-width:130px">
-            ${tiempoOpts}
-          </select>
-
-          <!-- Pill de estado con dropdown -->
-          <div style="position:relative" data-estado-wrap="${r.row}">
-            <span class="pill ${estadoCls}" data-ag-estado-pill="${r.row}"
-              style="cursor:pointer;font-size:11px;padding:3px 10px;user-select:none;white-space:nowrap">
-              ${escapeHtml(estadoNorm)} ▾
-            </span>
-            <input type="hidden" data-ag-estado value="${escapeAttr(estadoNorm)}"/>
-            <div data-estado-menu="${r.row}"
-              style="display:none;position:fixed;background:var(--surface);border:1px solid var(--brd-2);border-radius:8px;box-shadow:var(--shd-lg);z-index:9999;min-width:140px;padding:4px 0;overflow:hidden">
-              ${AGENDA_ESTADOS.map(e => `
-                <div data-estado-opt="${escapeAttr(e)}" data-estado-for="${r.row}"
-                  style="padding:7px 14px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:8px;transition:background .1s"
-                  onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background=''">
-                  <span class="pill ${AGENDA_ESTADO_CLS[e] || "ok"}" style="font-size:10px;padding:1px 6px">${escapeHtml(e)}</span>
-                </div>`).join("")}
-            </div>
-          </div>
-
-          <!-- Spacer + save status + delete -->
-          <div style="flex:1"></div>
-          <span class="ag-save-status" data-save-status="${r.row}" style="font-size:10px;color:var(--text-3)"></span>
-          <button class="xbtn" data-ag-del="${r.row}" title="Eliminar" style="flex-shrink:0">×</button>
+        <!-- MODO LECTURA: siempre visible, click expande -->
+        <div class="ag-row-summary" data-ag-toggle="${r.row}"
+          style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;user-select:none">
+          <span style="font-size:17px;flex-shrink:0">${prioEmoji}</span>
+          <span style="flex:1;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.tema)}</span>
+          <span class="pill ${estadoCls}" data-ag-estado-pill="${r.row}"
+            style="cursor:pointer;font-size:11px;padding:2px 9px;flex-shrink:0;white-space:nowrap" title="Cambiar estado">
+            ${escapeHtml(estadoNorm)}
+          </span>
+          <span style="font-size:11px;color:var(--text-3);flex-shrink:0;white-space:nowrap">${escapeHtml(ownerShort)}</span>
+          <span style="font-size:11px;color:var(--text-3);flex-shrink:0;white-space:nowrap">${escapeHtml(tiempoShort)}</span>
+          ${hasDesc || hasLinks ? `<span style="font-size:10px;color:var(--text-3)" title="Tiene descripción">📝</span>` : ""}
+          <span class="ag-expand-icon" style="font-size:11px;color:var(--text-3);flex-shrink:0">▸</span>
         </div>
 
-        <!-- BANDA 2: contenido -->
-        <input class="input" data-ag-tema value="${escapeAttr(r.tema)}"
-          style="font-size:14px;font-weight:500;width:100%;margin-bottom:8px"/>
+        <!-- Dropdown estado (position:fixed) -->
+        <div style="position:relative;display:inline-block" data-estado-wrap="${r.row}">
+          <input type="hidden" data-ag-estado value="${escapeAttr(estadoNorm)}"/>
+          <div data-estado-menu="${r.row}"
+            style="display:none;position:fixed;background:var(--surface);border:1px solid var(--brd-2);border-radius:8px;box-shadow:var(--shd-lg);z-index:9999;min-width:150px;padding:4px 0">
+            ${AGENDA_ESTADOS.map(e => `
+              <div data-estado-opt="${escapeAttr(e)}" data-estado-for="${r.row}"
+                style="padding:7px 14px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:8px"
+                onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background=''">
+                <span class="pill ${AGENDA_ESTADO_CLS[e] || "ok"}" style="font-size:10px;padding:2px 8px">${escapeHtml(e)}</span>
+              </div>`).join("")}
+          </div>
+        </div>
 
-        <div class="input wysiwyg-editor" data-ag-desc contenteditable="true"
-          style="font-size:12px;width:100%;min-height:40px;font-family:inherit;line-height:1.6;padding:8px;box-sizing:border-box;cursor:text"
-          data-placeholder="Descripción...">${mdToHtml_(parseDescLinks_(r.descripcion).text)}</div>
+        <!-- MODO EDICIÓN: se muestra al expandir -->
+        <div class="ag-row-detail" data-ag-detail="${r.row}" style="display:none;padding:0 14px 14px;border-top:1px solid var(--brd)">
 
-        <div data-ag-links-wrap
-          style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--card2));margin-top:6px">
-          ${parseDescLinks_(r.descripcion).urls.map(u => `<span class="pill" style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px" data-link-pill="${escapeAttr(u)}"><a href="${escapeAttr(u)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(u)}">×</span></span>`).join("")}
-          <input class="input" data-ag-link-input placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:120px;padding:0;font-size:11px"/>
+          <!-- Controles uniformes -->
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 0 10px">
+            <select class="ag-ctrl" data-ag-prio title="Prioridad" style="width:auto">
+              ${prioOpts}
+            </select>
+            <input class="ag-ctrl" data-ag-fecha type="date" value="${escapeAttr(_fechaToISO_(r.fecha))}" style="width:140px"/>
+            <div style="min-width:150px;max-width:200px">${ownerSelectHtml(r.owner, "ag_owner_" + r.row)}</div>
+            <select class="ag-ctrl" data-ag-tiempo style="width:auto">${tiempoOpts}</select>
+            <div style="flex:1"></div>
+            <span class="ag-save-status" data-save-status="${r.row}" style="font-size:10px;color:var(--text-3)"></span>
+            <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
+          </div>
+
+          <!-- Tema -->
+          <input class="input" data-ag-tema value="${escapeAttr(r.tema)}"
+            style="font-size:13px;font-weight:500;width:100%;margin-bottom:8px;box-sizing:border-box"/>
+
+          <!-- Descripción WYSIWYG -->
+          <div class="input wysiwyg-editor" data-ag-desc contenteditable="true"
+            style="font-size:12px;width:100%;min-height:36px;font-family:inherit;line-height:1.6;padding:8px;box-sizing:border-box;cursor:text"
+            data-placeholder="Descripción...">${mdToHtml_(parseDescLinks_(r.descripcion).text)}</div>
+
+          <!-- Links -->
+          <div data-ag-links-wrap
+            style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--card2));margin-top:6px">
+            ${parseDescLinks_(r.descripcion).urls.map(u => `<span class="pill" style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px" data-link-pill="${escapeAttr(u)}"><a href="${escapeAttr(u)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(u)}">×</span></span>`).join("")}
+            <input class="input" data-ag-link-input placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:120px;padding:0;font-size:11px"/>
+          </div>
         </div>
 
       </div>`;
@@ -3792,6 +3799,13 @@ function renderAgenda() {
 
   // ── Owner multiselect para el formulario de carga ────────
   host.innerHTML = `
+    <!-- Formulario colapsable -->
+    <div id="agFormWrap" style="margin-bottom:12px">
+      <button class="btn ghost" id="btnAgFormToggle" type="button"
+        style="font-size:13px;padding:8px 14px;border:1px dashed var(--brd-2);width:100%;text-align:left;color:var(--text-2);border-radius:8px">
+        ✚ Agregar tema
+      </button>
+      <div id="agFormBody" style="display:none;margin-top:10px;padding:14px;border:1px solid var(--brd-2);border-radius:10px;background:var(--surface-2)">
     <div style="margin-bottom:10px">
       <div class="row" style="flex-wrap:wrap;gap:8px;align-items:flex-end">
         <div style="display:flex;flex-direction:column;gap:4px">
@@ -3839,6 +3853,8 @@ function renderAgenda() {
         <div id="agLinksWrap" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:32px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg,var(--card2))">
           <input id="agLinkInput" class="input" placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:180px;padding:0"/>
         </div>
+      </div>
+    </div>
       </div>
     </div>
     <div class="hr"></div>
@@ -4215,6 +4231,34 @@ function renderAgenda() {
   });
 
   $("btnAgendaCopiar")?.addEventListener("click", onAgendaCopiar_);
+
+  // Toggle formulario de nuevo tema
+  $("btnAgFormToggle")?.addEventListener("click", () => {
+    const body = $("agFormBody");
+    const btn  = $("btnAgFormToggle");
+    if (!body) return;
+    const isOpen = body.style.display !== "none";
+    body.style.display = isOpen ? "none" : "block";
+    if (btn) btn.textContent = isOpen ? "✚ Agregar tema" : "✕ Cancelar";
+    if (!isOpen) setTimeout(() => $("agTema")?.focus(), 50);
+  });
+
+  // Toggle expand/collapse de tarjetas
+  host.querySelectorAll("[data-ag-toggle]").forEach(summary => {
+    summary.addEventListener("click", (e) => {
+      // Si el click fue en la pill de estado, no expandir la tarjeta
+      if (e.target.closest("[data-ag-estado-pill]")) return;
+      const rowId = summary.getAttribute("data-ag-toggle");
+      const detail = host.querySelector(`[data-ag-detail="${rowId}"]`);
+      const icon   = summary.querySelector(".ag-expand-icon");
+      const card   = summary.closest(".ag-card");
+      if (!detail) return;
+      const isOpen = detail.style.display !== "none";
+      detail.style.display = isOpen ? "none" : "block";
+      if (icon) icon.textContent = isOpen ? "▸" : "▾";
+      if (card) card.style.borderColor = isOpen ? "" : "var(--pri-brd)";
+    });
+  });
 
   // Siempre sincronizar badge y card con el estado actual
   _updateAgendaBadge_();

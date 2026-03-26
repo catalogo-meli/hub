@@ -939,6 +939,27 @@ tbody .skeleton { margin: 4px 0; }
 /* ── MENTIONS ────────────────────────────────────────────────── */
 .mention-wrap { position: relative; }
 
+/* ── Agenda cards ───────────────────────────────────────── */
+.ag-card { transition: border-color .15s, box-shadow .1s; }
+.ag-card:hover { border-color: var(--brd-2); }
+.ag-row-summary:hover { background: rgba(255,255,255,.02); border-radius: 10px; }
+.ag-expand-icon { transition: transform .15s; }
+
+/* Controles uniformes en el panel de edición */
+.ag-ctrl {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  border: 1px solid var(--brd);
+  border-radius: var(--r);
+  background: var(--input-bg, var(--card2));
+  color: var(--text-1);
+  cursor: pointer;
+  line-height: 32px;
+  box-sizing: border-box;
+}
+.ag-ctrl:focus { outline: none; border-color: var(--pri); }
+
 /* ── WYSIWYG editor ──────────────────────────────────────── */
 .wysiwyg-editor {
   white-space: pre-wrap;
