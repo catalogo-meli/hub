@@ -3190,8 +3190,7 @@ function renderMarkdown_(text) {
   // Subrayado
   html = html.replace(/__(.+?)__/g, "<u>$1</u>");
   // Saltos de línea
-  html = html.replace(/
-/g, "<br>");
+  html = html.replace(/\n/g, "<br>");
   return html;
 }
 
