@@ -2862,6 +2862,9 @@ const AGENDA_ESTADO_CLS = {
   "En espera":  "",
   "Bloqueado":  "bad",
   "Hecho":      "muted",
+  // Legacy: normalizar estados viejos del sheet
+  "Pendiente":  "ok",
+  "":           "ok",
 };
 
 // Convierte texto con URLs en HTML con links clickeables
@@ -2938,7 +2941,7 @@ function renderAgenda() {
         <td>
           <div style="display:flex;gap:6px;align-items:center;margin-bottom:3px">
             <input class="input" data-ag-tema value="${escapeAttr(r.tema)}" style="font-size:13px;flex:1"/>
-            <span class="pill ${AGENDA_ESTADO_CLS[r.estado] || ""}" style="font-size:11px;white-space:nowrap">${escapeHtml(r.estado || "Para hacer")}</span>
+            <span class="pill ${AGENDA_ESTADO_CLS[r.estado] || "ok"}" style="font-size:11px;white-space:nowrap">${escapeHtml(!r.estado || r.estado === "Pendiente" ? "Para hacer" : r.estado)}</span>
           </div>
           <textarea class="input" data-ag-desc rows="2" placeholder="Descripción..." style="font-size:11px;margin-top:3px;width:100%;resize:vertical;min-height:40px;font-family:inherit">${escapeHtml(parseDescLinks_(r.descripcion).text)}</textarea>
           <div data-ag-links-wrap style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--card2));margin-top:3px">
@@ -2953,7 +2956,11 @@ function renderAgenda() {
           <div style="display:flex;gap:4px;align-items:center">
             <button class="btn ghost" data-ag-save="${r.row}" style="font-size:11px;padding:3px 8px" title="Guardar cambios">💾</button>
             <select class="input" data-ag-estado style="font-size:11px;padding:2px 4px;min-width:100px">
-              ${AGENDA_ESTADOS.map(e => `<option value="${e}" ${r.estado === e ? "selected" : ""}>${e}</option>`).join("")}
+              ${AGENDA_ESTADOS.map(e => {
+                // Normalizar "Pendiente" legacy → "Para hacer"
+                const estadoNorm = (!r.estado || r.estado === "Pendiente") ? "Para hacer" : r.estado;
+                return `<option value="${e}" ${estadoNorm === e ? "selected" : ""}>${e}</option>`;
+              }).join("")}
             </select>
             <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
           </div>
@@ -3280,15 +3287,24 @@ async function onAgendaAgregar_(ownerParam) {
     await API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc });
     S.agenda = await API.agendaList();
     renderAgenda();
-    // Limpiar campos (excepto fecha, owner, prioridad)
     if ($("agTema")) $("agTema").value = "";
     if ($("agDesc")) $("agDesc").value = "";
-    // Limpiar píldoras de links
     const linkWrap = $("agLinksWrap");
     if (linkWrap) linkWrap.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
     toast("Agenda", "✓ Tema agregado");
   } catch (e) {
-    setErr(`Agenda: ${e.message || e}`);
+    // GAS puede escribir la fila y fallar al devolver JSON (deployment viejo)
+    // En ese caso recargar igual para mostrar lo que se guardó
+    try {
+      S.agenda = await API.agendaList();
+      renderAgenda();
+      if ($("agTema")) $("agTema").value = "";
+      if ($("agDesc")) $("agDesc").value = "";
+      const lw = $("agLinksWrap");
+      if (lw) lw.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
+      toast("Agenda", "✓ Guardado");
+    } catch (_) {}
+    if (!String(e.message || e).includes("Non-JSON")) setErr(`Agenda: ${e.message || e}`);
   } finally {
     clearBusy();
   }
