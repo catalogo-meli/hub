@@ -4262,19 +4262,26 @@ function _fechaToISO_(ddmmyyyy) {
 async function onAgendaAgregar_(ownerParam) {
   if (_agendaAddInProgress_) return; // prevenir doble click
   _agendaAddInProgress_ = true;
-  const fecha     = $("agFecha")?.value || "";
+
+  const fechaEl   = $("agFecha");
+  const temaEl    = $("agTema");
+  const tiempoEl  = $("agTiempo");
+  const prioEl    = $("agPrioridad");
+
+  const fecha     = fechaEl?.value || "";
   const owner     = ownerParam || "Todos";
-  const tema      = $("agTema")?.value?.trim() || "";
-  const tiempo    = $("agTiempo")?.value || "10";
-  const prioridad = $("agPrioridad")?.value || "Importante";
+  const tema      = temaEl?.value?.trim() || "";
+  const tiempo    = tiempoEl?.value || "10";
+  const prioridad = prioEl?.value || "Importante";
   const descText  = _agDescEditor_ ? _agDescEditor_.getValue() : ($("agDesc")?.innerText?.trim() || "");
   const linkPills = Array.from($("agLinksWrap")?.querySelectorAll("[data-link-pill]") || [])
     .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
   const desc = joinDescLinks_(descText, linkPills);
 
+  console.log("[AGENDA ADD] payload:", { fecha, owner, tema, tiempo, prioridad, desc: desc.slice(0,50) });
+  console.log("[AGENDA ADD] elements:", { fechaEl: !!fechaEl, temaEl: !!temaEl, tiempoEl: !!tiempoEl, prioEl: !!prioEl });
+
   if (!tema) {
-    // Highlight del campo Tema
-    const temaEl = $("agTema");
     if (temaEl) { temaEl.style.borderColor = "var(--err)"; temaEl.focus(); setTimeout(() => { temaEl.style.borderColor = ""; }, 2000); }
     setErr("El campo Tema es obligatorio.");
     _agendaAddInProgress_ = false;
@@ -4323,6 +4330,7 @@ async function onAgendaAgregar_(ownerParam) {
   } catch (e) {
     if (btnAgregar) { btnAgregar.disabled = false; btnAgregar.textContent = "Agregar"; }
     const msg = String(e?.message || e);
+    console.error("[AGENDA ADD] error:", msg);
 
     if (msg.includes("Non-JSON") || msg.includes("lock") || msg.includes("timeout")) {
       // GAS probablemente escribió la fila pero falló al responder
