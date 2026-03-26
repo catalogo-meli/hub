@@ -3876,6 +3876,7 @@ async function main() {
   document.head.appendChild(s);
 })();
 
+window.__getS = () => S; // DEBUG — remover después
 document.addEventListener("DOMContentLoaded", () => {
   main().catch((e) => {
     setErr(`Error al cargar: ${e.message || e}`);
