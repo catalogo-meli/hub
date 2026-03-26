@@ -635,8 +635,17 @@ async function lazyLoadTab_(name) {
 
 /* ========= Helpers: data mapping ========= */
 function getField(obj, keys) {
+  if (!obj) return "";
+  // Búsqueda exacta primero (rápida)
   for (const k of keys) {
-    if (obj && obj[k] != null && obj[k] !== "") return obj[k];
+    if (obj[k] != null && obj[k] !== "") return obj[k];
+  }
+  // Fallback: buscar ignorando espacios en las keys del objeto
+  // (necesario cuando el header del Sheets tiene espacios al final)
+  const objKeysNorm = Object.keys(obj).map(k => ({ orig: k, norm: k.trim() }));
+  for (const k of keys) {
+    const match = objKeysNorm.find(ok => ok.norm === k.trim());
+    if (match && obj[match.orig] != null && obj[match.orig] !== "") return obj[match.orig];
   }
   return "";
 }
@@ -2706,11 +2715,6 @@ function renderDashboard() {
       const meta = colabsById.get(idNorm);
       const role = normRole(meta?.rol || "");
 
-      // DEBUG TEMPORAL — remover después de confirmar el fix
-      if (idNorm === "ext_ola") {
-        console.debug("[DEBUG ext_ola]", { vday, imp, meta, role, today, vals: r.vals });
-      }
-
       if ((imp.cls === "ok" || imp.cls === "warn") && role !== "Sin rol") {
         presentesPorRol.set(role, (presentesPorRol.get(role) || 0) + 1);
       }
@@ -3876,7 +3880,6 @@ async function main() {
   document.head.appendChild(s);
 })();
 
-window.__getS = () => S; // DEBUG — remover después
 document.addEventListener("DOMContentLoaded", () => {
   main().catch((e) => {
     setErr(`Error al cargar: ${e.message || e}`);
