@@ -379,6 +379,32 @@ header {
 .pill.warn { background: var(--warn-dim); border-color: var(--warn-brd); color: var(--warn-txt); }
 .pill.bad  { background: var(--err-dim);  border-color: var(--err-brd);  color: var(--err-txt);  }
 
+/* ── Labels de formulario unificados ────────────────────── */
+.form-label {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 3px;
+  display: block;
+}
+
+/* ── Estados vacíos ──────────────────────────────────────── */
+.empty-state {
+  text-align: center;
+  padding: 24px 16px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.empty-state strong {
+  display: block;
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  margin-bottom: 4px;
+}
+
 /* ── Agenda estados ──────────────────────────────────────── */
 .pill.ag-todo    { background: var(--pri-dim);              border-color: var(--pri-brd);              color: var(--pri);                    }
 .pill.ag-wip     { background: var(--warn-dim);             border-color: var(--warn-brd);             color: var(--warn-txt);               }
@@ -947,6 +973,20 @@ tbody .skeleton { margin: 4px 0; }
 /* ── MENTIONS ────────────────────────────────────────────────── */
 .mention-wrap { position: relative; }
 
+/* ── Tipografía: escala unificada ────────────────────────── */
+/*
+  --fs-xs:  11px  → labels, badges, pills
+  --fs-sm:  12px  → texto secundario, tablas
+  --fs-md:  13px  → texto base, inputs
+  --fs-lg:  14px  → títulos de card, items destacados
+*/
+:root {
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 14px;
+}
+
 /* ── Agenda cards ───────────────────────────────────────── */
 .ag-card { transition: border-color .15s, box-shadow .1s; }
 .ag-card:hover { border-color: var(--brd-2); }
@@ -1111,7 +1151,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="tab" data-tab="agenda">Agenda</div>
 <div class="tab" data-tab="daily">Operativa diaria</div>
 <div class="tab" data-tab="colabs">Colaboradores</div>
-<div class="tab" data-tab="habil">Habilitaciones</div>
+<div class="tab" data-tab="habil">Asignaciones</div>
 <div class="tab" data-tab="pres">Presentismo</div>
 </nav>
 <main class="grid" style="margin-top:16px">
@@ -1120,7 +1160,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="row">
 <div>
 <h2>Dashboard</h2>
-<div class="muted">Indicadores rápidos.</div>
+<div class="muted" style="font-size:var(--fs-sm)">Resumen del equipo para el día de hoy.</div>
 </div>
 <div class="spacer"></div>
 <button class="btn" id="btnReloadDash">Actualizar</button>
@@ -1136,8 +1176,8 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <thead>
 <tr>
 <th class="sortable" data-sort="rol">Rol <span class="srt"></span></th>
-<th class="right sortable" data-sort="nomina">En nómina <span class="srt"></span></th>
-<th class="right sortable" data-sort="presentes">Presentes hoy <span class="srt"></span></th>
+<th class="right sortable" data-sort="nomina">En nómina<span class="srt"></span></th>
+<th class="right sortable" data-sort="presentes">Presentes hoy<span class="srt"></span></th>
 </tr>
 </thead>
 <tbody></tbody>
@@ -1149,11 +1189,11 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="row">
 <div>
 <h2>Operativa diaria</h2>
-<div class="muted">Configuración de flujos</div>
+<div class="muted">Flujos operativos</div>
 </div>
 <div class="spacer"></div>
-<button class="btn primary" id="btnGenerarPlan">Generar planificación</button>
-<button class="btn" id="btnCopiarPlan" title="Copia el resumen del día para pegar en Slack">Copiar mensaje planificación</button>
+<button class="btn primary" id="btnGenerarPlan">Generar planificación del día</button>
+<button class="btn" id="btnCopiarPlan" title="Copia el resumen del día para pegar en Slack">Copiar mensaje</button>
 </div>
 <!-- Sub-nav para navegación rápida dentro del tab -->
 <div class="row" style="gap:6px;margin-top:4px;flex-wrap:wrap">
@@ -1163,7 +1203,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="hr"></div>
 <div id="daily-flujos"></div>
 <div class="row">
-<div class="pill"><b>Perfiles requeridos</b></div>
+<div class="pill"><b>Perfiles</b></div>
 <div class="spacer"></div>
 <div class="pill" id="dailyStatus">Listo</div>
 <div class="pill warn" id="dailyAssignAlert" title="Basado en Presentismo (presentes hoy)"></div>
@@ -1174,9 +1214,9 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <thead>
 <tr>
 <th>Flujo</th>
-<th class="nowrap" style="text-align:center;min-width:140px">Notificar por Slack</th>
+<th class="nowrap" style="text-align:center;min-width:140px">Notificar</th>
 <th class="nowrap" style="min-width:240px">Canal Slack</th>
-<th class="right nowrap">Perfiles requeridos</th>
+<th class="right nowrap">Perfiles</th>
 <th class="right nowrap">Acciones</th>
 </tr>
 </thead>
@@ -1185,7 +1225,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <tr>
 <td style="min-width:240px">
 <div class="row" style="gap:10px">
-<input class="input" id="newFlujoName" placeholder="+ Nuevo flujo..."/>
+<input class="input" id="newFlujoName" placeholder="Nombre del nuevo flujo..."/>
 <button class="btn primary" id="btnAddFlujo">Agregar</button>
 </div>
 </td>
@@ -1199,10 +1239,10 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 </div>
 <div class="card" id="dailyDraftsWrap" style="margin-top:14px;display:none">
 <div class="row" style="margin-bottom:8px;align-items:center">
-<div class="pill"><b>Borradores generados</b></div>
+<div class="pill"><b>Borradores</b></div>
 <div class="pill" id="dailyDraftsMeta"></div>
 <div class="spacer"></div>
-<button class="btn" id="btnDailyDraftsGo" type="button">Editar en Borradores</button>
+<button class="btn" id="btnDailyDraftsGo" type="button">Editar</button>
 <button class="btn" id="btnDailyDraftsToggle" type="button">Ver detalle</button>
 </div>
 <div class="muted" style="font-size:12px;margin:6px 2px 0 2px">
@@ -1226,7 +1266,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="flow-grid" id="planGrid" style="margin-top:12px"></div>
 <div class="hr"></div>
 <h2 id="daily-slack" style="margin-top:0">Mensajes de Slack</h2>
-<div class="muted">Gestión de comunicación</div>
+<div class="muted" style="font-size:var(--fs-sm)">Programá y enviá mensajes al equipo por Slack.</div>
 <!-- Compose (siempre disponible) -->
 <div class="flow-col" id="slackCompose" style="margin-top:12px">
 <div class="slack-compose-grid">
@@ -1239,7 +1279,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div>
 <div class="muted" style="font-size:12px;margin-bottom:6px">Mensaje</div>
 <div style="position:relative">
-<textarea class="input" id="slackComposeMsg" placeholder="Escribí el mensaje..." style="padding-right:56px"></textarea>
+<textarea class="input" id="slackComposeMsg" placeholder="Escribí el mensaje para Slack..." style="padding-right:56px"></textarea>
 <button class="btn icon-btn" id="btnEmoji" style="position:absolute;right:10px;top:10px" title="Emojis" type="button">😀</button>
 <div class="card" id="emojiModal" style="display:none;position:absolute;right:0;top:50px;min-width:380px;max-width:460px;padding:10px;z-index:120">
 <div class="row" style="gap:8px;align-items:center">
@@ -1263,7 +1303,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 </div>
 <div class="card mention-box" style="padding:10px">
 <div class="mention-wrap" style="position:relative">
-<input autocomplete="off" class="input" id="slackMentionSearch" placeholder="Buscar por nombre o mail productora..."/>
+<input autocomplete="off" class="input" id="slackMentionSearch" placeholder="Buscar por nombre o mail..."/>
 <div class="card mention-dd" id="slackMentionResults" style="display:none"></div>
 </div>
 <div class="row" id="slackMentionPills" style="flex-wrap:wrap;gap:6px;margin-top:8px"></div>
@@ -1324,8 +1364,8 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="hr"></div>
 <div class="row" style="align-items:center;justify-content:space-between">
 <div style="display:flex;align-items:center;gap:10px">
-<div class="pill"><b>Enviados</b> <span class="muted" style="font-weight:400">(últimas 2 semanas)</span></div>
-<button class="btn ghost" id="btnToggleSent" type="button" style="font-size:12px;padding:3px 10px">▶ Mostrar</button>
+<div class="pill"><b>Enviados</b> <span class="muted" style="font-weight:400">Últimas 2 semanas</span></div>
+<button class="btn ghost" id="btnToggleSent" type="button" style="font-size:12px;padding:3px 10px">Ver enviados</button>
 </div>
 <button class="btn ghost" id="btnRefreshSent" type="button">Refrescar</button>
 </div>
@@ -1348,7 +1388,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="row">
 <div>
 <h2>Agenda</h2>
-<div class="muted">Temas para dailys y reuniones de equipo.</div>
+<div class="muted" style="font-size:var(--fs-sm)">Temas para el daily y reuniones de equipo.</div>
 </div>
 <div class="spacer"></div>
 <button class="btn" id="btnReloadAgenda">Actualizar</button>
@@ -1374,7 +1414,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
         </div>
         <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:200px">
           <div class="muted" style="font-size:11px;letter-spacing:.04em;text-transform:uppercase">Tema *</div>
-          <input class="input" id="agTema" placeholder="Tema a tratar..." style="height:34px;box-sizing:border-box"/>
+          <input class="input" id="agTema" placeholder="¿De qué trata este tema?" style="height:34px;box-sizing:border-box"/>
         </div>
         <div style="display:flex;flex-direction:column;gap:3px">
           <div class="muted" style="font-size:11px;letter-spacing:.04em;text-transform:uppercase">Tiempo</div>
@@ -1416,7 +1456,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
         </div>
         <div id="agDesc" contenteditable="true" class="input wysiwyg-editor"
           style="min-height:60px;padding:8px;font-family:inherit;font-size:13px;line-height:1.5;overflow:auto;cursor:text"
-          data-placeholder="Escribí la descripción..."></div>
+          data-placeholder="Agregá contexto, links o detalles..."></div>
       </div>
       <div style="margin-top:6px">
         <div class="muted" style="font-size:12px;margin-bottom:4px">Links (pegá todos los necesarios)</div>
@@ -1435,7 +1475,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="row">
 <div>
 <h2>Colaboradores</h2>
-<div class="muted">Filtrá por rol/equipo y buscá por nombre, ID o mail.</div>
+<div class="muted" style="font-size:var(--fs-sm)">Buscá por nombre, rol o equipo.</div>
 </div>
 <div class="spacer"></div>
 <button class="btn" id="btnReloadColabs">Actualizar</button>
@@ -1454,7 +1494,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="pill" id="colabsSelPill"><b>Seleccionados</b> 0</div>
 <div class="spacer"></div>
 <div class="selbar">
-<button class="btn primary" id="btnColabAgregar">+ Agregar colaborador</button>
+<button class="btn primary" id="btnColabAgregar">+ Nuevo colaborador</button>
 <button class="btn bad" id="btnColabEliminar" style="display:none">× Eliminar seleccionados</button>
 <button class="btn" id="btnCopySelIds">Copiar IDs</button>
 <button class="btn" id="btnCopySelMailProd">Copiar Mail Productora</button>
@@ -1487,7 +1527,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="row">
 <div>
 <h2>Habilitaciones</h2>
-<div class="muted">Habilitar / Fijo por usuario y flujo.</div>
+<div class="muted" style="font-size:var(--fs-sm)">Definí qué flujos puede operar cada persona.</div>
 </div>
 <div class="spacer"></div>
 <button class="btn" id="btnReloadHabil">Actualizar</button>
@@ -1531,7 +1571,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="row">
 <div>
 <h2>Presentismo</h2>
-<div class="muted">Semana (Lun–Vie). Feriados destacados. Licencias con rango.</div>
+<div class="muted" style="font-size:var(--fs-sm)">Presencia semanal del equipo. Incluye feriados y licencias.</div>
 </div>
 <div class="spacer"></div>
 <button class="btn" id="btnReloadPres">Actualizar</button>
@@ -1620,18 +1660,18 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div id="colabModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;overflow:auto">
   <div style="background:var(--surface);border-radius:var(--r-lg);max-width:580px;width:calc(100% - 32px);margin:48px auto;padding:28px;box-shadow:var(--shd-lg)">
     <div class="row" style="margin-bottom:20px">
-      <h2 id="colabModalTitle" style="margin:0">Agregar colaborador</h2>
+      <h2 id="colabModalTitle" style="margin:0">Nuevo colaborador</h2>
       <div class="spacer"></div>
       <button class="xbtn" id="colabModalClose" style="font-size:20px">×</button>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div>
         <div class="muted" style="font-size:12px;margin-bottom:4px">ID_MELI *</div>
-        <input class="input" id="cmIdMeli" placeholder="ext_apellido"/>
+        <input class="input" id="cmIdMeli" placeholder="ej: ext_garcia"/>
       </div>
       <div>
         <div class="muted" style="font-size:12px;margin-bottom:4px">Nombre *</div>
-        <input class="input" id="cmNombre" placeholder="Nombre completo"/>
+        <input class="input" id="cmNombre" placeholder="Nombre y apellido"/>
       </div>
       <div>
         <div class="muted" style="font-size:12px;margin-bottom:4px">Rol *</div>
@@ -1650,7 +1690,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
           <option value="TANDIL">TANDIL</option>
           <option value="__otra__">Otra...</option>
         </select>
-        <input class="input" id="cmUbicOtra" placeholder="Escribí la ubicación" style="display:none;margin-top:6px"/>
+        <input class="input" id="cmUbicOtra" placeholder="ej: AMBA, MDP, Tandil..." style="display:none;margin-top:6px"/>
       </div>
       <div>
         <div class="muted" style="font-size:12px;margin-bottom:4px">Fecha Ingreso *</div>
@@ -1666,7 +1706,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
       </div>
       <div>
         <div class="muted" style="font-size:12px;margin-bottom:4px">TAG <span class="muted">(opcional)</span></div>
-        <input class="input" id="cmTag" placeholder="NJA, NRF..."/>
+        <input class="input" id="cmTag" placeholder="ej: NJA, NRF (tags de identificación)"/>
       </div>
     </div>
     <div class="hr" style="margin:20px 0"></div>
@@ -1680,7 +1720,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <!-- Modal Confirmar Eliminación -->
 <div id="colabDeleteModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000">
   <div style="background:var(--surface);border-radius:var(--r-lg);max-width:480px;width:calc(100% - 32px);margin:120px auto;padding:28px;box-shadow:var(--shd-lg)">
-    <h2 style="margin:0 0 12px">¿Eliminar colaboradores?</h2>
+    <h2 style="margin:0 0 12px">¿Eliminás estos colaboradores?</h2>
     <p class="muted" style="margin:0 0 8px">Esta acción eliminará las siguientes personas de <b>Colaboradores</b> y <b>Presentismo</b>. No se puede deshacer.</p>
     <div id="colabDeleteList" style="margin:12px 0;max-height:160px;overflow:auto"></div>
     <div class="hr" style="margin:16px 0"></div>

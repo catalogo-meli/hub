@@ -632,7 +632,7 @@ async function lazyLoadTab_(name) {
       renderDashboard();
     }
   } catch (e) {
-    setErr(`Error cargando ${name}: ${e.message || e}`);
+    setErr(`No se pudo cargar la sección. Intentá de nuevo.`);
   } finally {
     clearBusy();
   }
@@ -778,9 +778,9 @@ async function loadCore() {
     // Actualizar multiselects de roles con los datos reales de colabs
     _refreshRoleFilters_();
 
-    toast("Listo", "Datos cargados");
+    toast("HUB", "✓ Datos actualizados");
   } catch (e) {
-    setErr(`Error: ${e.message || e}`);
+    setErr("Ocurrió un error inesperado. Intentá de nuevo.");
   } finally {
     clearBusy();
   }
@@ -831,7 +831,7 @@ async function refreshPlanAndOutbox() {
 
 async function refreshHabil() {
   try { S.habil = await API.habilitacionesList(); }
-  catch (e) { setErr(`Habilitaciones: ${e.message || e}`); S.habil = null; }
+  catch (e) { setErr("No se pudo guardar la asignación. Intentá de nuevo."); S.habil = null; }
 }
 
 function todayYMD() {
@@ -840,6 +840,35 @@ function todayYMD() {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+
+// ── Modal de confirmación propio (reemplaza el confirm nativo) ──────────────
+function hubConfirm_(mensaje, labelConfirmar = "Eliminar", labelCancelar = "Cancelar") {
+  return new Promise(resolve => {
+    // Reusar modal si ya existe
+    let overlay = document.getElementById("_hubConfirmOverlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "_hubConfirmOverlay";
+      overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px";
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `
+      <div style="background:var(--surface);border:1px solid var(--brd-2);border-radius:12px;padding:24px 28px;max-width:400px;width:100%;box-shadow:var(--shd-lg)">
+        <div style="font-size:14px;font-weight:500;color:var(--text-1);margin-bottom:8px">¿Confirmás esta acción?</div>
+        <div style="font-size:13px;color:var(--text-2);margin-bottom:20px;line-height:1.5">${mensaje}</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button id="_hubConfirmCancel" class="btn ghost" style="min-width:80px">${labelCancelar}</button>
+          <button id="_hubConfirmOk" class="btn" style="min-width:80px;background:var(--err);border-color:var(--err);color:#fff">${labelConfirmar}</button>
+        </div>
+      </div>`;
+    overlay.style.display = "flex";
+    const close = (result) => { overlay.style.display = "none"; resolve(result); };
+    document.getElementById("_hubConfirmOk").onclick     = () => close(true);
+    document.getElementById("_hubConfirmCancel").onclick  = () => close(false);
+    overlay.onclick = (e) => { if (e.target === overlay) close(false); };
+  });
 }
 
 async function refreshPresentismo() {
@@ -853,12 +882,12 @@ async function refreshPresentismo() {
     if (weekResult.status === "fulfilled") {
       S.presWeek = weekResult.value;
     } else {
-      setErr(`Presentismo: ${weekResult.reason?.message || weekResult.reason}`);
+      setErr("No se pudo cargar el presentismo. Recargá la página.");
       S.presWeek = null;
     }
     S.presStats = statsResult.status === "fulfilled" ? statsResult.value : null;
   } catch (e) {
-    setErr(`Presentismo: ${e.message || e}`);
+    setErr("No se pudo actualizar el presentismo. Intentá de nuevo.");
     S.presWeek = null;
     S.presStats = null;
   }
@@ -895,7 +924,7 @@ function saveFlujoOptimistic(flujo, perfiles, channel_id) {
       if (el) el.textContent = "✓ Guardado";
       setTimeout(() => { if (el && el.textContent === "✓ Guardado") el.textContent = "Listo"; }, 1500);
     } catch (e) {
-      setErr(`Error al guardar ${flujo}: ${e.message || e}`);
+      setErr(`No se pudo guardar el flujo ${flujo}. Intentá de nuevo.`);
       if (el) el.textContent = "Error";
       // Revertir valor local al fallar
       const flujos = await API.flujosList().catch(() => null);
@@ -970,7 +999,7 @@ async function onFlujoDelete(flujo) {
     renderFlujos();
     toast("Borrado", flujo);
   } catch (e) {
-    setErr(`Flujos: ${e.message || e}`);
+    setErr("No se pudo guardar el flujo. Intentá de nuevo.");
   } finally {
     $("dailyStatus").textContent = "Listo";
   }
@@ -1017,7 +1046,7 @@ function renderFlujos() {
           </td>
           <td style="min-width:240px">
             <div class="flow-channel ${invalid ? "invalid" : ""}" data-ch-wrap>
-              <input class="input" data-ch-inp placeholder="Seleccionar canal..." value="${escapeAttr(ch.canal || "")}" ${incluir ? "" : "disabled"} />
+              <input class="input" data-ch-inp placeholder="Canal de Slack..." value="${escapeAttr(ch.canal || "")}" ${incluir ? "" : "disabled"} />
               <div class="dd" data-ch-dd></div>
               <div class="err">Seleccioná un canal.</div>
             </div>
@@ -1151,7 +1180,7 @@ function renderFlujos() {
     }
 
     tr.querySelector("[data-del]")?.addEventListener("click", async () => {
-      if (!confirm(`Eliminar flujo "${unescapeAttr(flujo)}"?`)) return;
+      if (!await hubConfirm_(`¿Querés eliminar el flujo "${unescapeAttr(flujo)}"? Esta acción no se puede deshacer.`, "Sí, eliminar")) return;
       await onFlujoDelete(unescapeAttr(flujo));
     });
   });
@@ -1194,7 +1223,7 @@ function renderPlan() {
   const plan = (S.plan || []).filter((r) => r?.flujo);
   if (!plan.length) {
     host.innerHTML = emptyState_(
-      "Sin planificación generada para hoy.",
+      "No hay planificación para hoy. Usá Generar planificación del día para crearla.",
       "📋",
       "Generar planificación",
       "emptyStateBtnGenerar"
@@ -1369,7 +1398,7 @@ async function generarMensajePorFlujo_(flujo, btn = null) {
     }
 
     const items = (S.plan || []).filter((x) => x?.flujo === flujo && x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES");
-    if (!items.length) return toast("Mensaje", "No hay perfiles asignados");
+    if (!items.length) return toast("Mensajes", "Este flujo no tiene perfiles asignados.");
 
     // map slack ids
     const map = new Map((S.colabs || []).map((c) => {
@@ -1389,13 +1418,13 @@ async function generarMensajePorFlujo_(flujo, btn = null) {
     S.outbox = await API.slackOutboxList();
     renderOutbox();
     renderPlan();
-    toast("Outbox", `Mensaje generado: ${flujo} · ${items.length} perfiles`);
+    toast("Mensajes", `✓ Mensaje generado: ${flujo} · ${items.length} perfil${items.length !== 1 ? "es" : ""}`);
   } catch (e) {
-    setErr(`Mensaje por flujo: ${e.message || e}`);
+    setErr("No se pudo generar el mensaje. Intentá de nuevo.");
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.textContent = "Generar mensaje";
+      btn.textContent = "Generar mensajes";
     }
   }
 }
@@ -1434,9 +1463,9 @@ const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
     const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
     await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
     // no refresco todo para no “parpadear”; solo toast
-    toast("Outbox", "Guardado");
+    toast("Mensajes", "✓ Borrador guardado");
   } catch (e) {
-    setErr(`Outbox: ${e.message || e}`);
+    setErr("No se pudo guardar el mensaje. Intentá de nuevo.");
   }
 }, 500);
 
@@ -1547,11 +1576,11 @@ function renderOutbox() {
 
   tbDrafts.innerHTML = drafts.length
     ? drafts.map((r) => rowHtml(r, { mode: "draft" })).join("")
-    : `<tr><td colspan="5" class="muted">Sin borradores.</td></tr>`;
+    : `<tr><td colspan="5" class="muted" style="text-align:center;padding:16px">No hay borradores. Generá mensajes desde Planificación del día.</td></tr>`;
 
   tbScheduled.innerHTML = scheduled.length
     ? scheduled.map((r) => rowHtml(r, { mode: "scheduled" })).join("")
-    : `<tr><td colspan="5" class="muted">Sin mensajes programados.</td></tr>`;
+    : `<tr><td colspan="5" class="muted" style="text-align:center;padding:16px">No hay mensajes programados.</td></tr>`;
 
   // Sent (read-only)
   const sentRowHtml = (r) => {
@@ -1589,7 +1618,7 @@ function renderOutbox() {
         if (!S.sentCollapsed) {
           tbSent.innerHTML = sent.length
             ? sent.map(sentRowHtml).join("")
-            : `<tr><td colspan="4" class="muted">Sin mensajes enviados en las últimas 2 semanas.</td></tr>`;
+            : `<tr><td colspan="4" class="muted" style="text-align:center;padding:16px">No hay mensajes enviados en las últimas 2 semanas.</td></tr>`;
         }
       });
     }
@@ -1598,7 +1627,7 @@ function renderOutbox() {
   if (!S.sentCollapsed) {
     tbSent.innerHTML = sent.length
       ? sent.map(sentRowHtml).join("")
-      : `<tr><td colspan="4" class="muted">Sin mensajes enviados en las últimas 2 semanas.</td></tr>`;
+      : `<tr><td colspan="4" class="muted" style="text-align:center;padding:16px">No hay mensajes enviados en las últimas 2 semanas.</td></tr>`;
   } else {
     tbSent.innerHTML = "";
   }
@@ -1610,9 +1639,9 @@ function renderOutbox() {
         setErr("");
         S.outbox = await API.slackOutboxList();
         renderOutbox();
-        toast("Outbox", "Actualizado");
+        toast("Mensajes", "✓ Mensaje actualizado");
       } catch (e) {
-        setErr(`Outbox: ${e.message || e}`);
+        setErr("No se pudo guardar el mensaje. Intentá de nuevo.");
       }
     });
   }
@@ -1629,16 +1658,16 @@ function renderOutbox() {
       tr.querySelector("[data-del]")?.addEventListener("click", async () => {
         setErr("");
         try {
-          if (!confirm("Eliminar este mensaje?")) return;
+          if (!await hubConfirm_("¿Eliminás este mensaje? No se puede recuperar.", "Sí, eliminar")) return;
           await API.slackOutboxDelete(row);
           // Patch optimista: eliminar localmente sin esperar re-fetch
           S.outbox = (S.outbox || []).filter((x) => Number(x.row) !== Number(row));
           renderOutbox();
-          toast("Outbox", "Eliminado");
+          toast("Mensajes", "✓ Mensaje eliminado");
           // Sync background
           API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
         } catch (e) {
-          setErr(`Eliminar: ${e.message || e}`);
+          setErr("No se pudo eliminar. Intentá de nuevo.");
         }
       });
 
@@ -1660,9 +1689,9 @@ function renderOutbox() {
           await API.slackOutboxProgramar(row, v);
           // Patch optimista: marcar como PROGRAMADO localmente
           patchOutbox_(row, { estado: `PROGRAMADO ${v}`, channel_id: sel.value, canal, mensaje: txt.value });
-          toast("Outbox", "Programado");
+          toast("Mensajes", "✓ Mensaje programado");
         } catch (e) {
-          setErr(`Programar: ${e.message || e}`);
+          setErr("No se pudo programar el mensaje. Intentá de nuevo.");
         }
       });
 
@@ -1671,8 +1700,8 @@ function renderOutbox() {
         try {
           await API.slackOutboxDesprogramar(row);
           patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
-          toast("Outbox", "Mensaje desprogramado");
-        } catch (e) { setErr(`Outbox: ${e.message || e}`); }
+          toast("Mensajes", "✓ Mensaje desprogramado");
+        } catch (e) { setErr("No se pudo guardar el mensaje. Intentá de nuevo."); }
       });
 
       tr.querySelector("[data-send]")?.addEventListener("click", async () => {
@@ -1683,7 +1712,7 @@ function renderOutbox() {
           await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
           await onOutboxSend(row);
         } catch (e) {
-          setErr(`Enviar: ${e.message || e}`);
+          setErr("No se pudo enviar. Intentá de nuevo.");
         }
       });
     });
@@ -1760,10 +1789,10 @@ function renderDailyDrafts_() {
       if (!r) return;
       try {
         await navigator.clipboard.writeText(String(r.mensaje || ""));
-        toast("Copiado", "Mensaje en portapapeles");
+        toast("Copiado", "✓ Mensaje listo para pegar");
       } catch {
         // fallback: selecciono texto
-        toast("Copiar", "No se pudo copiar automáticamente");
+        toast("Copiado", "No se pudo copiar. Seleccioná y copiá manualmente.");
       }
     });
   });
@@ -1772,14 +1801,14 @@ function renderDailyDrafts_() {
     b.addEventListener("click", async () => {
       const row = Number(b.getAttribute("data-del"));
       if (!row) return;
-      if (!confirm("Eliminar este borrador?")) return;
+      if (!await hubConfirm_("¿Eliminás este borrador? No se puede recuperar.", "Sí, eliminar")) return;
       try {
         await API.slackOutboxDelete(row);
         S.outbox = await API.slackOutboxList();
         renderOutbox();
-        toast("Outbox", "Eliminado");
+        toast("Mensajes", "✓ Mensaje eliminado");
       } catch (e) {
-        setErr(`Eliminar borrador: ${e.message || e}`);
+        setErr("No se pudo eliminar el borrador. Intentá de nuevo.");
       }
     });
   });
@@ -1883,7 +1912,7 @@ function mountSlackCompose_() {
         </span>`
           )
           .join("")
-      : `<span class="muted" style="font-size:12px">Sin menciones.</span>`;
+      : `<span class="muted" style="font-size:12px">Sin menciones agregadas.</span>`;
 
     mentionPills.querySelectorAll("[data-rm]").forEach((b) => {
       b.addEventListener("click", () => {
@@ -1928,7 +1957,7 @@ function mountSlackCompose_() {
     if (!hits.length) {
       posMentionPanel();
       mentionResults.style.display = "block";
-      mentionResults.innerHTML = `<div class="muted" style="font-size:12px;padding:6px">Sin resultados.</div>`;
+      mentionResults.innerHTML = `<div class="muted" style="font-size:12px;padding:6px">No se encontraron personas con ese nombre.</div>`;
       return;
     }
     posMentionPanel();
@@ -2044,7 +2073,7 @@ function mountSlackCompose_() {
     renderPills();
     if (mentionSearch) mentionSearch.value = "";
     closeMentionResults();
-    toast("Compose", "Listo");
+    toast("Mensajes", "✓ Listo");
   };
 
   btnClear.addEventListener("click", clearCompose);
@@ -2059,11 +2088,11 @@ function mountSlackCompose_() {
       const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
       await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
       clearCompose();
-      toast("Outbox", "Borrador guardado");
+      toast("Mensajes", "✓ Borrador guardado");
       // Sync en background
       API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
     } catch (e) {
-      setErr(`Borrador: ${e.message || e}`);
+      setErr("No se pudo guardar el borrador. Intentá de nuevo.");
     }
   });
 
@@ -2085,11 +2114,11 @@ function mountSlackCompose_() {
       // 2) send
       await API.slackSendRow(newest.row);
       clearCompose();
-      toast("Slack", "Enviado");
+      toast("Mensajes", "✓ Mensaje enviado por Slack");
       // Sync background
       API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
     } catch (e) {
-      setErr(`Enviar: ${e.message || e}`);
+      setErr("No se pudo enviar. Intentá de nuevo.");
     }
   });
 
@@ -2113,11 +2142,11 @@ function mountSlackCompose_() {
       // 2) programar
       await API.slackOutboxProgramar(newest.row, v);
       clearCompose();
-      toast("Outbox", "Mensaje programado");
+      toast("Mensajes", "✓ Mensaje programado");
       // Sync background
       API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
     } catch (e) {
-      setErr(`Programar: ${e.message || e}`);
+      setErr("No se pudo programar el mensaje. Intentá de nuevo.");
     }
   });
   // Emojis: paleta operativa (vista unificada).
@@ -2159,7 +2188,7 @@ const renderEmojiPanel = () => {
 
     emojiGroups.innerHTML = `
       <div class="emoji-grid">${items.map((x) => `<button type="button" class="emoji-btn" data-e="${escapeAttr(x.e)}">${escapeHtml(x.e)}</button>`).join("")}</div>
-      ${q && !items.length ? `<div class="muted" style="font-size:12px;margin-top:10px">Sin resultados.</div>` : ""}
+      ${q && !items.length ? `<div class="muted" style="font-size:12px;margin-top:10px">No encontramos ese emoji. Probá con otra palabra.</div>` : ""}
     `;
 
     emojiGroups.querySelectorAll("[data-e]").forEach((b) => {
@@ -2226,14 +2255,14 @@ const renderEmojiPanel = () => {
 async function onOutboxSend(row) {
   setErr("");
   try {
-    setBusy("Slack", "Enviando mensaje...");
+    setBusy("Mensajes", "Enviando por Slack...");
     await API.slackSendRow(row);
     // Patch optimista: marcar como ENVIADO localmente
     const stamp = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
     patchOutbox_(row, { estado: `ENVIADO ✅ ${stamp}` });
-    toast("Slack", "Enviado");
+    toast("Mensajes", "✓ Mensaje enviado por Slack");
   } catch (e) {
-    setErr(`Slack: ${e.message || e}`);
+    setErr("No se pudo enviar el mensaje. Intentá de nuevo.");
   } finally {
     clearBusy();
   }
@@ -2277,7 +2306,7 @@ function renderColabs() {
   }
 
   if (!sorted.length) {
-    tb.innerHTML = `<tr><td colspan="9" class="muted">Sin resultados.</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="9" class="muted" style="text-align:center;padding:16px">No se encontraron colaboradores con ese filtro.</td></tr>`;
     return;
   }
 
@@ -2465,7 +2494,7 @@ async function saveColabModal_() {
 
   setErr("");
   try {
-    setBusy("Colaboradores", _colabModalMode_ === "add" ? "Agregando..." : "Guardando...");
+    setBusy("Colaboradores", _colabModalMode_ === "add" ? "Guardando colaborador..." : "Guardando cambios...");
 
     const payload = { id_meli, nombre, rol, equipo, ubicacion, mail_prod, mail_ext, fecha_ingreso, tag };
 
@@ -2486,7 +2515,7 @@ async function saveColabModal_() {
     renderDashboard();
     closeColabModal_();
   } catch (e) {
-    setErr(`Colaboradores: ${e.message || e}`);
+    setErr("No se pudo guardar el colaborador. Intentá de nuevo.");
   } finally {
     clearBusy();
   }
@@ -2530,7 +2559,7 @@ async function deleteColabsExecute_() {
     renderDashboard();
     toast("Colaboradores", `✓ ${ids.length} colaborador${ids.length > 1 ? "es" : ""} eliminado${ids.length > 1 ? "s" : ""}`);
   } catch (e) {
-    setErr(`Colaboradores: ${e.message || e}`);
+    setErr("No se pudo guardar el colaborador. Intentá de nuevo.");
   } finally {
     clearBusy();
   }
@@ -2601,7 +2630,7 @@ function renderHabil() {
   });
 
   if (!filtered.length) {
-    body.innerHTML = `<tr><td colspan="${2 + flujos.length}" class="muted">Sin resultados.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="${2 + flujos.length}" class="muted" style="text-align:center;padding:16px">No se encontraron colaboradores con ese filtro.</td></tr>`;
     _syncHabilBulkBar_();
     return;
   }
@@ -2715,9 +2744,9 @@ async function setHabilitacion(idMeli, flujo, habilitado, fijo) {
   try {
     await API.habilitacionesSet(idMeli, flujo, !!habilitado, !!fijo);
     CACHE.invalidate("habil");
-    toast("Habilitaciones", "✓");
+    toast("Asignaciones", "✓ Cambio guardado");
   } catch (e) {
-    setErr(`Habilitaciones: ${e.message || e}`);
+    setErr("No se pudo guardar la asignación. Intentá de nuevo.");
     // Revertir: recargar desde el servidor
     S.habil = await API.habilitacionesList().catch(() => S.habil);
     renderHabil();
@@ -2838,7 +2867,7 @@ function renderPresentismo() {
 
   const tbody = tbl.querySelector("tbody");
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="${1 + days.length}" class="muted">Sin resultados.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${1 + days.length}" class="muted" style="text-align:center;padding:16px">No hay registros para esta semana.</td></tr>`;
     return;
   }
 
@@ -2913,9 +2942,9 @@ async function onSetLicencia() {
     await refreshPresentismo();
     renderPresentismo();
     renderDashboard();
-    toast("Presentismo", "Licencia guardada");
+    toast("Presentismo", "✓ Licencia guardada");
   } catch (e) {
-    setErr(`Presentismo: ${e.message || e}`);
+    setErr("No se pudo actualizar el presentismo. Intentá de nuevo.");
   } finally {
     clearBusy();
   }
@@ -3882,7 +3911,7 @@ function renderAgenda() {
           <!-- Descripción WYSIWYG -->
           <div class="input wysiwyg-editor" data-ag-desc contenteditable="true"
             style="font-size:12px;width:100%;min-height:36px;font-family:inherit;line-height:1.6;padding:8px;box-sizing:border-box;cursor:text"
-            data-placeholder="Descripción...">${mdToHtml_(parseDescLinks_(r.descripcion).text)}</div>
+            data-placeholder="Agregá contexto o detalles...">${mdToHtml_(parseDescLinks_(r.descripcion).text)}</div>
 
           <!-- Links -->
           <div data-ag-links-wrap
@@ -3925,7 +3954,7 @@ function renderAgenda() {
 
   const pendientesHtml = pendientes.length
     ? `<div style="margin-top:10px">${pendientes.map(r => rowHtmlEditable(r)).join("")}</div>`
-    : `<div class="muted" style="margin-top:12px;padding:12px">Sin pendientes. ¡Todo al día! 🎉</div>`;
+    : `<div class="muted" style="margin-top:12px;padding:16px;text-align:center">No hay temas pendientes. ¡Todo al día! 🎉</div>`;
 
   const histBtnLabel = S.agendaHistCollapsed ? `▶ Ver historial (${historial.length})` : `▼ Ocultar historial`;
   const histThead = `<thead><tr>
@@ -4189,7 +4218,7 @@ function renderAgenda() {
   host.querySelectorAll("[data-ag-del]").forEach(btn => {
     btn.addEventListener("click", async () => {
       const row = Number(btn.getAttribute("data-ag-del"));
-      if (!confirm("¿Eliminar este tema de la agenda?")) return;
+      if (!await hubConfirm_("¿Eliminás este tema de la agenda? No se puede recuperar.", "Sí, eliminar")) return;
       const idx = (S.agenda||[]).findIndex(r => r.row === row);
       if (idx >= 0) S.agenda.splice(idx, 1);
       CACHE.invalidate("agenda");
@@ -4338,7 +4367,7 @@ async function onAgendaAgregar_(ownerParam) {
       const agFormBtn  = $("btnAgFormToggle");
       if (agFormBody) agFormBody.style.display = "none";
       if (agFormBtn)  agFormBtn.textContent = "✚ Agregar tema";
-      toast("Agenda", "✓ Guardado");
+      toast("Agenda", "✓ Cambios guardados");
       _agendaAddInProgress_ = false;
       // Re-fetch demorado para no competir con el lock
       setTimeout(() => {
@@ -4424,7 +4453,7 @@ async function onAgendaCopiar_() {
 async function onGenerarPlanificacionYOutbox_() {
   setErr("");
   try {
-    setBusy("Operativa diaria", "Generando planificación...");
+    setBusy("Planificación del día", "Generando...");
     $("dailyStatus").textContent = "Generando...";
     await API.planificacionGenerar();
     // Solo mensaje GENERAL (los POR_FLUJO se generan desde cada flujo)
@@ -4434,7 +4463,7 @@ async function onGenerarPlanificacionYOutbox_() {
     renderPlan();
     renderOutbox();
     renderDashboard();
-    toast("OK", "Planificación + Outbox generados");
+    toast("Planificación del día", "✓ Planificación y mensajes generados");
   } catch (e) {
     setErr(`Planificación/Outbox: ${e.message || e}`);
   } finally {
@@ -4491,7 +4520,7 @@ async function main() {
 
   $("btnAddFlujo")?.addEventListener("click", async () => {
     const name = $("newFlujoName")?.value?.trim() || "";
-    if (!name) return setErr("Flujos: escribí el nombre del flujo.");
+    if (!name) return setErr("Escribí el nombre del flujo.");
 
     if ((S.flujos || []).some(f => String(f.flujo).trim().toLowerCase() === name.toLowerCase())) {
       return setErr(`Flujos: ya existe un flujo con el nombre "${name}".`);
@@ -4519,7 +4548,7 @@ async function main() {
         }
       });
     } catch (e) {
-      setErr(`Flujos: ${e.message || e}`);
+      setErr("No se pudo guardar el flujo. Intentá de nuevo.");
     } finally {
       $("dailyStatus").textContent = "Listo";
     }
@@ -4537,7 +4566,7 @@ async function main() {
     await refreshPlanAndOutbox();
     await refreshPresentismo();
     renderDashboard();
-    toast("Dashboard", "Actualizado");
+    toast("Dashboard", "✓ Actualizado");
   });
   $("btnReloadColabs")?.addEventListener("click", async () => {
     CACHE.invalidate("colabs");
@@ -4545,7 +4574,7 @@ async function main() {
     CACHE.set("colabs", S.colabs, 5 * 60_000);
     renderColabs();
     renderDashboard();
-    toast("Colaboradores", "Actualizado");
+    toast("Colaboradores", "✓ Actualizado");
   });
 
   // CRUD colaboradores
@@ -4570,7 +4599,7 @@ async function main() {
     S.habil = null; // forzar re-fetch
     await refreshHabil();
     renderHabil();
-    toast("Habilitaciones", "Actualizado");
+    toast("Asignaciones", "✓ Actualizado");
   });
 
   // ── Formulario de nueva entrada (estático, montado una sola vez) ──
@@ -4655,7 +4684,7 @@ async function main() {
       setBusy("Agenda", "Actualizando...");
       S.agenda = await API.agendaList();
       renderAgenda();
-      toast("Agenda", "Actualizado");
+      toast("Agenda", "✓ Actualizado");
     } catch (e) {
       setErr(`Agenda: ${e.message || e}`);
     } finally {
@@ -4671,7 +4700,7 @@ async function main() {
     renderPresentismo();
     renderDashboard();
     clearBusy();
-    toast("Presentismo", "Actualizado");
+    toast("Presentismo", "✓ Actualizado");
   });
 
   $("btnSetLicencia")?.addEventListener("click", onSetLicencia);
@@ -4723,9 +4752,9 @@ async function main() {
     const flujosSel = _habilBulkFlujoMs
       ? Array.from(_habilBulkFlujoMs._state?.selected || [])
       : [];
-    if (!flujosSel.length) { setErr("Elegí al menos un flujo en la barra."); return; }
+    if (!flujosSel.length) { setErr("Seleccioná al menos un flujo para continuar."); return; }
 
-    setBusy("Habilitaciones", `Aplicando a ${sel.length} colaboradores...`);
+    setBusy("Asignaciones", `Aplicando a ${sel.length} colaborador${sel.length !== 1 ? "es" : ""}...`);
     setErr("");
 
     try {
@@ -4758,9 +4787,9 @@ async function main() {
       }
       await Promise.all(calls);
       CACHE.invalidate("habil");
-      toast("Habilitaciones", `✓ Aplicado a ${sel.length} colaboradores en ${flujosSel.length} flujo${flujosSel.length > 1 ? "s" : ""}`);
+      toast("Asignaciones", `✓ Aplicado a ${sel.length} colaboradores en ${flujosSel.length} flujo${flujosSel.length > 1 ? "s" : ""}`);
     } catch (e) {
-      setErr(`Habilitaciones: ${e.message || e}`);
+      setErr("No se pudo guardar la asignación. Intentá de nuevo.");
       S.habil = await API.habilitacionesList().catch(() => S.habil);
       renderHabil();
     } finally {
@@ -4827,17 +4856,17 @@ async function main() {
 
   $("btnCopySelIds")?.addEventListener("click", () => {
     const rows = getSelectedColabs_();
-    if (!rows.length) return toast("Copiar", "No hay seleccionados");
+    if (!rows.length) return toast("Copiar", "Seleccioná al menos un colaborador.");
     copyToClipboard(rows.map((r) => r.id).join("\n"));
   });
   $("btnCopySelMailProd")?.addEventListener("click", () => {
     const rows = getSelectedColabs_().map((r) => r.mailProd).filter(Boolean);
-    if (!rows.length) return toast("Copiar", "No hay mails seleccionados");
+    if (!rows.length) return toast("Copiar", "Seleccioná al menos un colaborador.");
     copyToClipboard(rows.join("\n"));
   });
   $("btnCopySelMailExt")?.addEventListener("click", () => {
     const rows = getSelectedColabs_().map((r) => r.mailExt).filter(Boolean);
-    if (!rows.length) return toast("Copiar", "No hay mails seleccionados");
+    if (!rows.length) return toast("Copiar", "Seleccioná al menos un colaborador.");
     copyToClipboard(rows.join("\n"));
   });
 
