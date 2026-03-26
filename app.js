@@ -3647,9 +3647,11 @@ function renderAgenda() {
 
 // Convierte "dd/MM/yyyy" → "yyyy-MM-dd" para input type=date
 function _fechaToISO_(ddmmyyyy) {
-  const m = String(ddmmyyyy || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const s = String(ddmmyyyy || "");
+  // Soporta dd/MM/yyyy y dd-MM-yyyy (ambos separadores)
+  const m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
   if (m) return `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
-  return ddmmyyyy || "";
+  return s;
 }
 
 async function onAgendaAgregar_(ownerParam) {
