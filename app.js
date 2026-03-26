@@ -4278,8 +4278,6 @@ async function onAgendaAgregar_(ownerParam) {
     .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
   const desc = joinDescLinks_(descText, linkPills);
 
-  console.log("[AGENDA ADD] payload:", { fecha, owner, tema, tiempo, prioridad, desc: desc.slice(0,50) });
-  console.log("[AGENDA ADD] elements:", { fechaEl: !!fechaEl, temaEl: !!temaEl, tiempoEl: !!tiempoEl, prioEl: !!prioEl });
 
   if (!tema) {
     if (temaEl) { temaEl.style.borderColor = "var(--err)"; temaEl.focus(); setTimeout(() => { temaEl.style.borderColor = ""; }, 2000); }
@@ -4330,7 +4328,6 @@ async function onAgendaAgregar_(ownerParam) {
   } catch (e) {
     if (btnAgregar) { btnAgregar.disabled = false; btnAgregar.textContent = "Agregar"; }
     const msg = String(e?.message || e);
-    console.error("[AGENDA ADD] error:", msg);
 
     if (msg.includes("Non-JSON") || msg.includes("lock") || msg.includes("timeout")) {
       // GAS probablemente escribió la fila pero falló al responder
