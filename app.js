@@ -693,6 +693,20 @@ function applySectionFilter(list, f) {
 }
 
 /* ========= Data load ========= */
+
+// Referencias globales a los multiselects de roles para poder actualizarlos
+let _msRolesCol_ = null;
+let _msRolesHab_ = null;
+let _msRolesPres_ = null;
+
+function _refreshRoleFilters_() {
+  const roles = [...new Set((S.colabs || []).map(c => colabRowView(c).rol).filter(Boolean))].sort();
+  if (roles.length === 0) return;
+  _msRolesCol_?.updateItems(roles);
+  _msRolesHab_?.updateItems(roles);
+  _msRolesPres_?.updateItems(roles);
+}
+
 async function loadCore() {
   setErr("");
   try {
@@ -756,6 +770,9 @@ async function loadCore() {
     renderPlan();
     renderOutbox();
 
+    // Actualizar multiselects de roles con los datos reales de colabs
+    _refreshRoleFilters_();
+
     toast("Listo", "Datos cargados");
   } catch (e) {
     setErr(`Error: ${e.message || e}`);
@@ -766,6 +783,9 @@ async function loadCore() {
   // Todo viene del hubInit en cold start.
   // En cache hit (allCached), habil y presWeek no vienen → refreshear en background.
   if (!S.habil) refreshHabil().catch(() => {});
+
+  // Actualizar filtros de roles con datos frescos (por si vinieron del cache)
+  _refreshRoleFilters_();
 
   if (S.presWeek) {
     mountPresentismoSelect();
@@ -3681,13 +3701,17 @@ async function main() {
 
   // Filters
   // Roles dinámicos: extraídos de S.colabs, ordenados, únicos
+  // Roles dinámicos desde S.colabs — se actualizan al cambiar colabs
   const getRolesDynamic_ = () => [...new Set((S.colabs || []).map(c => colabRowView(c).rol).filter(Boolean))].sort();
-  const rolesListHab = ["Analista KV", "Analista PM", "Analista QA"]; // habilitaciones: solo analistas
+  // Habilitaciones: todos los roles (dinámico igual que Colaboradores)
+  const getRolesHab_ = () => getRolesDynamic_();
 
-  const msRolesCol = mountMultiSelect("msRolesColabs", { title: "Roles", items: getRolesDynamic_(), onChange: (set) => { S.fColabs.roles = set; renderColabs(); }});
+  _msRolesCol_ = mountMultiSelect("msRolesColabs", { title: "Roles", items: getRolesDynamic_(), onChange: (set) => { S.fColabs.roles = set; renderColabs(); }});
+  const msRolesCol = _msRolesCol_;
   const msEquipCol = mountMultiSelect("msEquiposColabs", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fColabs.equipos = set; renderColabs(); }});
 
-  const msRolesHab = mountMultiSelect("msRolesHabil", { title: "Roles", items: rolesListHab, onChange: (set) => { S.fHabil.roles = set; renderHabil(); }});
+  _msRolesHab_ = mountMultiSelect("msRolesHabil", { title: "Roles", items: getRolesHab_(), onChange: (set) => { S.fHabil.roles = set; renderHabil(); }});
+  const msRolesHab = _msRolesHab_;
   const msEquipHab = mountMultiSelect("msEquiposHabil", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fHabil.equipos = set; renderHabil(); }});
 
   // Filtro de flujo: mismo componente multi-select que Roles/Equipo.
@@ -3784,7 +3808,8 @@ async function main() {
     _syncBulkFlujoItems_();
   };
 
-  const msRolesPres = mountMultiSelect("msRolesPres", { title: "Roles", items: getRolesDynamic_(), onChange: (set) => { S.fPres.roles = set; renderPresentismo(); }});
+  _msRolesPres_ = mountMultiSelect("msRolesPres", { title: "Roles", items: getRolesDynamic_(), onChange: (set) => { S.fPres.roles = set; renderPresentismo(); }});
+  const msRolesPres = _msRolesPres_;
   const msEquipPres = mountMultiSelect("msEquiposPres", { title: "Equipo", items: EQUIPOS_PRESET, onChange: (set) => { S.fPres.equipos = set; renderPresentismo(); }});
 
   mountSearch("searchColabs", "searchColabsWrap", "clearSearchColabs", (q) => { S.fColabs.q = q; renderColabs(); });
