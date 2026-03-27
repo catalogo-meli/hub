@@ -1606,6 +1606,31 @@ function renderOutbox() {
     const row = r.row;
     const canalNombre = (S.canales || []).find(function(c){ return c.channel_id === chId; })?.canal || chId || "—";
 
+    // _fp: fecha programada formateada — calculada aquí para que _estDisp pueda usarla
+    let _fp = "—";
+    if (r.programado_para) {
+      const _raw = String(r.programado_para).trim();
+      const _mISO = _raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+      const _mDMY = _raw.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+      if (_mISO) {
+        _fp = _mISO[3] + "/" + _mISO[2] + "/" + _mISO[1] + " " + _mISO[4] + ":" + _mISO[5];
+      } else if (_mDMY) {
+        _fp = _mDMY[1] + "/" + _mDMY[2] + "/" + _mDMY[3] + " " + _mDMY[4] + ":" + _mDMY[5];
+      } else {
+        const _d = new Date(_raw);
+        if (!isNaN(_d.getTime())) {
+          const _dd = String(_d.getDate()).padStart(2,"0");
+          const _mm = String(_d.getMonth()+1).padStart(2,"0");
+          const _yy = _d.getFullYear();
+          const _HH = String(_d.getHours()).padStart(2,"0");
+          const _MM = String(_d.getMinutes()).padStart(2,"0");
+          _fp = _dd + "/" + _mm + "/" + _yy + " " + _HH + ":" + _MM;
+        } else {
+          _fp = _raw;
+        }
+      }
+    }
+
     const actions = (() => {
       // Drafts: enviar / programar + eliminar
       if (mode === "draft") {
@@ -1621,31 +1646,7 @@ function renderOutbox() {
         `;
       }
 
-      // Scheduled: fecha legible + lápiz editar + X eliminar
-      let _fp = "—";
-      if (r.programado_para) {
-        const _raw = String(r.programado_para).trim();
-        const _mISO = _raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-        const _mDMY = _raw.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
-        if (_mISO) {
-          _fp = _mISO[3] + "/" + _mISO[2] + "/" + _mISO[1] + " " + _mISO[4] + ":" + _mISO[5];
-        } else if (_mDMY) {
-          _fp = _mDMY[1] + "/" + _mDMY[2] + "/" + _mDMY[3] + " " + _mDMY[4] + ":" + _mDMY[5];
-        } else {
-          // Fallback: intentar parsear como Date (cuando GAS devuelve Date.toString)
-          const _d = new Date(_raw);
-          if (!isNaN(_d.getTime())) {
-            const _dd = String(_d.getDate()).padStart(2,"0");
-            const _mm = String(_d.getMonth()+1).padStart(2,"0");
-            const _yy = _d.getFullYear();
-            const _HH = String(_d.getHours()).padStart(2,"0");
-            const _MM = String(_d.getMinutes()).padStart(2,"0");
-            _fp = _dd + "/" + _mm + "/" + _yy + " " + _HH + ":" + _MM;
-          } else {
-            _fp = _raw;
-          }
-        }
-      }
+      // Scheduled: lápiz editar + X eliminar (fecha se muestra en col estado)
       const _editPanel =
         '<div data-edit-panel style="display:none;margin-top:8px;padding:10px;' +
         'border:1px solid var(--brd-2);border-radius:8px;background:var(--surface-2)">' +
