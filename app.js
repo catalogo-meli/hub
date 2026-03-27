@@ -1532,13 +1532,14 @@ const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
   setErr("");
   try {
     const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
+    // Patch optimista para preservar canal al re-render
+    patchOutbox_(row, { channel_id, canal, mensaje });
     await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
-    // no refresco todo para no “parpadear”; solo toast
-    toast("Mensajes", "✓ Cambios guardados");
+    toast("Mensajes", "✓ Guardado");
   } catch (e) {
-    setErr("No se pudo completar la acción. Intentá de nuevo.");
+    setErr("No se pudo guardar. Intentá de nuevo.");
   }
-}, 500);
+}, 1000);
 
 function renderOutbox() {
   const tbDrafts = $("tblDrafts")?.querySelector("tbody");
@@ -1574,16 +1575,25 @@ function renderOutbox() {
 
   const formatEstado = (estado) => {
     const s = String(estado || "");
-    const m = s.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/);
-    if (!m) return s;
-    const d = new Date(m[1]);
-    if (isNaN(d.getTime())) return s;
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const yyyy = d.getFullYear();
-    const HH = String(d.getHours()).padStart(2, "0");
-    const MM = String(d.getMinutes()).padStart(2, "0");
-    return s.replace(m[1], `${dd}/${mm}/${yyyy} ${HH}:${MM}`);
+    // Caso: "PROGRAMADO 2026-03-31T09:47" o con segundos/Z
+    const mProg = s.match(/^PROGRAMADO\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/i);
+    if (mProg) {
+      const [yyyy, mo, dd, HH, MM] = mProg[1].split(/[-T:]/);
+      return `📅 ${dd}/${mo} a las ${HH}:${MM}`;
+    }
+    // Caso: timestamp ISO en cualquier parte del string
+    const mIso = s.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)/);
+    if (mIso) {
+      const d = new Date(mIso[1]);
+      if (!isNaN(d.getTime())) {
+        const dd = String(d.getDate()).padStart(2, "0");
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const HH = String(d.getHours()).padStart(2, "0");
+        const MM = String(d.getMinutes()).padStart(2, "0");
+        return s.replace(mIso[1], `${dd}/${mm} ${HH}:${MM}`);
+      }
+    }
+    return s;
   };
 
   const rowHtml = (r, { mode }) => {
@@ -1614,34 +1624,62 @@ function renderOutbox() {
         `;
       }
 
-      // Scheduled: mostrar canal como texto + botón desprogramar + eliminar
+      // Scheduled: vista compacta con lápiz (editar) y X (eliminar)
       const canalNombre = (S.canales || []).find(c => c.channel_id === chId)?.canal || chId || "—";
+      // Formatear fecha programada de forma legible
+      let fechaLegible = "—";
+      if (r.programado_para) {
+        const [datePart, timePart] = r.programado_para.split("T");
+        if (datePart && timePart) {
+          const [yyyy, mo, dd] = datePart.split("-");
+          const [HH, MM] = timePart.split(":");
+          fechaLegible = `${dd}/${mo}/${yyyy} ${HH}:${MM}`;
+        }
+      }
       return `
-        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-          <div style="font-size:12px;color:var(--text-2)">Canal: <b>${escapeHtml(canalNombre)}</b></div>
-          <input class="input" type="datetime-local" data-when value="${escapeAttr(r.programado_para || "")}" style="max-width:220px" disabled />
-          <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
-            <button class="xbtn" data-del title="Eliminar">×</button>
-            <button class="btn ghost" data-desch style="font-size:11px;padding:3px 8px">Desprogramar</button>
+        <div style="display:flex;gap:6px;align-items:center;justify-content:flex-end">
+          <span style="font-size:12px;color:var(--text-2)">📅 ${escapeHtml(fechaLegible)}</span>
+          <button class="btn ghost" data-edit-prog title="Editar fecha/canal"
+            style="font-size:13px;padding:3px 8px;line-height:1">✏️</button>
+          <button class="xbtn" data-del title="Eliminar">×</button>
+        </div>
+        <!-- Panel de edición, oculto por defecto -->
+        <div data-edit-panel style="display:none;margin-top:8px;padding:10px;border:1px solid var(--brd-2);border-radius:8px;background:var(--surface-2)">
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Canal</div>
+            <select class="input" data-edit-ch style="font-size:12px">${channelOptionsHtml(chId)}</select>
+            <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Fecha y hora</div>
+            <input class="input" type="datetime-local" data-edit-when value="${escapeAttr(r.programado_para || "")}" style="font-size:12px"/>
+            <div style="display:flex;gap:6px;justify-content:flex-end">
+              <button class="btn ghost" data-edit-cancel style="font-size:12px">Cancelar</button>
+              <button class="btn primary" data-edit-save style="font-size:12px">Guardar cambios</button>
+            </div>
           </div>
         </div>
       `;
     })();
 
-    const disableEdits = mode !== "draft";
+    const isDraft = mode === "draft";
 
     return `
       <tr data-row="${row}" data-mode="${mode}">
-        <td class="nowrap">${escapeHtml(date)}</td>
+        <td class="nowrap" style="font-size:12px;color:var(--text-3)">${escapeHtml(date)}</td>
         <td>
-          <select data-ch ${disableEdits ? "disabled" : ""}>${channelOptionsHtml(chId)}</select>
-          ${!chId && r.canal ? `<div style="font-size:10px;color:var(--err-txt);margin-top:2px">⚠ Canal no configurado</div>` : ""}
+          ${isDraft
+            ? `<select data-ch>${channelOptionsHtml(chId)}</select>${!chId && r.canal ? `<div style="font-size:10px;color:var(--err-txt);margin-top:2px">⚠ Sin canal</div>` : ""}`
+            : `<span style="font-size:12px;font-weight:500">${escapeHtml((S.canales||[]).find(c=>c.channel_id===chId)?.canal || chId || "—")}</span>`
+          }
         </td>
         <td>
-          <textarea data-msg ${disableEdits ? "disabled" : ""}>${escapeHtml(msg)}</textarea>
+          ${isDraft
+            ? `<textarea data-msg style="min-height:60px">${escapeHtml(msg)}</textarea>`
+            : `<div style="font-size:12px;max-width:520px;white-space:pre-wrap;color:var(--text-2)">${escapeHtml(msg)}</div>`
+          }
         </td>
-        <td class="nowrap"><span class="${badge}">${escapeHtml(formatEstado(rawEstado))}</span></td>
-        <td class="right nowrap">${actions}</td>
+        <td class="nowrap">
+          ${isDraft ? `<span class="${badge}">${escapeHtml(formatEstado(rawEstado))}</span>` : ""}
+        </td>
+        <td class="right">${actions}</td>
       </tr>
     `;
   };
@@ -1742,9 +1780,50 @@ function renderOutbox() {
         }
       });
 
-      if (mode !== "draft") return;
+      // ── Mensajes programados: lápiz edita, guardar reprograma ──
+      if (mode === "scheduled") {
+        const editBtn    = tr.querySelector("[data-edit-prog]");
+        const editPanel  = tr.querySelector("[data-edit-panel]");
+        const editCh     = tr.querySelector("[data-edit-ch]");
+        const editWhen   = tr.querySelector("[data-edit-when]");
+        const editSave   = tr.querySelector("[data-edit-save]");
+        const editCancel = tr.querySelector("[data-edit-cancel]");
 
-      const triggerSave = () => outboxAutosave(row, sel.value, txt.value);
+        editBtn?.addEventListener("click", () => {
+          editPanel.style.display = editPanel.style.display === "none" ? "block" : "none";
+          editBtn.textContent = editPanel.style.display !== "none" ? "✕" : "✏️";
+        });
+        editCancel?.addEventListener("click", () => {
+          editPanel.style.display = "none";
+          editBtn.textContent = "✏️";
+        });
+        editSave?.addEventListener("click", async () => {
+          const newChId = editCh?.value || "";
+          const newWhen = (editWhen?.value || "").trim();
+          if (!newWhen) { setErr("Elegí fecha y hora para programar."); return; }
+          const newCanal = (S.canales || []).find(c => c.channel_id === newChId)?.canal || "";
+          // Optimistic
+          patchOutbox_(row, { channel_id: newChId, canal: newCanal, programado_para: newWhen,
+            estado: `PROGRAMADO ${newWhen}` });
+          editPanel.style.display = "none";
+          editBtn.textContent = "✏️";
+          toast("Mensajes", "✓ Mensaje reprogramado");
+          try {
+            await Promise.all([
+              API.slackOutboxUpdate(row, newCanal, newChId, (S.outbox||[]).find(x=>Number(x.row)===row)?.mensaje || ""),
+              API.slackOutboxProgramar(row, newWhen),
+            ]);
+          } catch (e) {
+            setErr("No se pudo reprogramar. Intentá de nuevo.");
+          }
+        });
+        return;
+      }
+
+      // ── Borradores: auto-save debounce 1s ──────────────────
+      const sel = tr.querySelector("[data-ch]");
+      const txt = tr.querySelector("[data-msg]");
+      const triggerSave = () => outboxAutosave(row, sel?.value, txt?.value);
       sel?.addEventListener("change", triggerSave);
       txt?.addEventListener("input", triggerSave);
       txt?.addEventListener("blur", triggerSave);
