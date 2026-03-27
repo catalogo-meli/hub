@@ -1661,24 +1661,23 @@ function renderOutbox() {
 
     const isDraft = mode === "draft";
 
+    // Variables intermedias — evitar backticks anidados a 3 niveles
+    const canalNombreProg = escapeHtml((S.canales||[]).find(c=>c.channel_id===chId)?.canal || chId || "—");
+    const sinCanalWarn = (!chId && r.canal) ? '<div style="font-size:10px;color:var(--err-txt);margin-top:2px">⚠ Sin canal</div>' : "";
+    const tdCanal = isDraft
+      ? ('<select data-ch>' + channelOptionsHtml(chId) + '</select>' + sinCanalWarn)
+      : ('<span style="font-size:12px;font-weight:500">' + canalNombreProg + '</span>');
+    const tdMensaje = isDraft
+      ? ('<textarea data-msg style="min-height:60px">' + escapeHtml(msg) + '</textarea>')
+      : ('<div style="font-size:12px;max-width:520px;white-space:pre-wrap;color:var(--text-2)">' + escapeHtml(msg) + '</div>');
+    const tdEstado = isDraft ? ('<span class="' + badge + '">' + escapeHtml(formatEstado(rawEstado)) + '</span>') : "";
+
     return `
       <tr data-row="${row}" data-mode="${mode}">
         <td class="nowrap" style="font-size:12px;color:var(--text-3)">${escapeHtml(date)}</td>
-        <td>
-          ${isDraft
-            ? `<select data-ch>${channelOptionsHtml(chId)}</select>${!chId && r.canal ? `<div style="font-size:10px;color:var(--err-txt);margin-top:2px">⚠ Sin canal</div>` : ""}`
-            : `<span style="font-size:12px;font-weight:500">${escapeHtml((S.canales||[]).find(c=>c.channel_id===chId)?.canal || chId || "—")}</span>`
-          }
-        </td>
-        <td>
-          ${isDraft
-            ? `<textarea data-msg style="min-height:60px">${escapeHtml(msg)}</textarea>`
-            : `<div style="font-size:12px;max-width:520px;white-space:pre-wrap;color:var(--text-2)">${escapeHtml(msg)}</div>`
-          }
-        </td>
-        <td class="nowrap">
-          ${isDraft ? `<span class="${badge}">${escapeHtml(formatEstado(rawEstado))}</span>` : ""}
-        </td>
+        <td>${tdCanal}</td>
+        <td>${tdMensaje}</td>
+        <td class="nowrap">${tdEstado}</td>
         <td class="right">${actions}</td>
       </tr>
     `;
