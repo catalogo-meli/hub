@@ -1580,6 +1580,15 @@ function renderOutbox() {
     // ISO en cualquier parte
     const mIso = s.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
     if (mIso) return s.replace(mIso[0], mIso[3] + "/" + mIso[2] + "/" + mIso[1] + " " + mIso[4] + ":" + mIso[5]);
+    // Fallback: si contiene una fecha parseable (Date.toString de GAS)
+    const _d = new Date(s);
+    if (!isNaN(_d.getTime())) {
+      const _dd = String(_d.getDate()).padStart(2,"0");
+      const _mm = String(_d.getMonth()+1).padStart(2,"0");
+      const _HH = String(_d.getHours()).padStart(2,"0");
+      const _MM = String(_d.getMinutes()).padStart(2,"0");
+      return "\uD83D\uDCC5 " + _dd + "/" + _mm + " a las " + _HH + ":" + _MM;
+    }
     return s;
   };
 
@@ -1616,16 +1625,25 @@ function renderOutbox() {
       let _fp = "—";
       if (r.programado_para) {
         const _raw = String(r.programado_para).trim();
-        // Formato ISO: "2026-03-31T09:47" o "2026-03-31T09:47:00"
         const _mISO = _raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-        // Formato dd/MM/yyyy HH:mm (como guarda GAS)
         const _mDMY = _raw.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
         if (_mISO) {
           _fp = _mISO[3] + "/" + _mISO[2] + "/" + _mISO[1] + " " + _mISO[4] + ":" + _mISO[5];
         } else if (_mDMY) {
           _fp = _mDMY[1] + "/" + _mDMY[2] + "/" + _mDMY[3] + " " + _mDMY[4] + ":" + _mDMY[5];
         } else {
-          _fp = _raw; // fallback: mostrar tal cual
+          // Fallback: intentar parsear como Date (cuando GAS devuelve Date.toString)
+          const _d = new Date(_raw);
+          if (!isNaN(_d.getTime())) {
+            const _dd = String(_d.getDate()).padStart(2,"0");
+            const _mm = String(_d.getMonth()+1).padStart(2,"0");
+            const _yy = _d.getFullYear();
+            const _HH = String(_d.getHours()).padStart(2,"0");
+            const _MM = String(_d.getMinutes()).padStart(2,"0");
+            _fp = _dd + "/" + _mm + "/" + _yy + " " + _HH + ":" + _MM;
+          } else {
+            _fp = _raw;
+          }
         }
       }
       const _editPanel =
@@ -1640,10 +1658,10 @@ function renderOutbox() {
         '<button class="btn ghost" data-edit-cancel style="font-size:12px">Cancelar</button>' +
         '<button class="btn primary" data-edit-save style="font-size:12px">Guardar cambios</button>' +
         '</div></div></div>';
+      // Solo lápiz y X en la columna de acciones
       return (
         '<div style="display:flex;gap:6px;align-items:center;justify-content:flex-end">' +
-        '<span style="font-size:12px;color:var(--text-2)">\uD83D\uDCC5 ' + escapeHtml(_fp) + '</span>' +
-        '<button class="btn ghost" data-edit-prog title="Editar" style="font-size:13px;padding:3px 8px">\u270F\uFE0F</button>' +
+        '<button class="btn ghost" data-edit-prog title="Editar fecha/canal" style="font-size:13px;padding:3px 8px">\u270F\uFE0F</button>' +
         '<button class="xbtn" data-del title="Eliminar">\u00D7</button>' +
         '</div>' + _editPanel
       );
@@ -1657,7 +1675,10 @@ function renderOutbox() {
     const _msgDisp = isDraft
       ? ('<textarea data-msg style="min-height:60px">' + escapeHtml(msg) + '</textarea>')
       : ('<div style="font-size:12px;max-width:520px;white-space:pre-wrap;color:var(--text-2)">' + escapeHtml(msg) + '</div>');
-    const _estDisp = isDraft ? ('<span class="' + badge + '">' + escapeHtml(formatEstado(rawEstado)) + '</span>') : "";
+    // Draft: badge de estado. Scheduled: fecha programada legible en la columna estado
+    const _estDisp = isDraft
+      ? ('<span class="' + badge + '">' + escapeHtml(formatEstado(rawEstado)) + '</span>')
+      : ('<span style="font-size:12px;color:var(--text-2);white-space:nowrap">\uD83D\uDCC5 ' + escapeHtml(_fp) + '</span>');
 
     return `
       <tr data-row="${row}" data-mode="${mode}">
@@ -1823,11 +1844,13 @@ function renderOutbox() {
         // Cancelar autosave pendiente para evitar race condition en GAS
         outboxAutosave.cancel && outboxAutosave.cancel();
         try {
-          // Primero guardar estado actual, luego programar (secuencial para evitar conflictos)
           await API.slackOutboxUpdate(row, canal, chVal, txtVal);
           await API.slackOutboxProgramar(row, v);
-          // Optimistic recién cuando GAS confirmó
-          patchOutbox_(row, { estado: "PROGRAMADO " + v, channel_id: chVal, canal, mensaje: txtVal, programado_para: v });
+          // Fetch final — cache invalidado por slackOutboxProgramar_ en GAS
+          const fresh = await API.slackOutboxList();
+          if (fresh) { S.outbox = fresh; }
+          else { patchOutbox_(row, { estado: "PROGRAMADO " + v, channel_id: chVal, canal, mensaje: txtVal, programado_para: v }); }
+          renderOutbox();
           toast("Mensajes", "✓ Mensaje programado");
         } catch (e) {
           setErr("No se pudo programar. Intentá de nuevo.");
@@ -2299,13 +2322,18 @@ function mountSlackCompose_() {
     toast("Mensajes", "✓ Mensaje programado");
 
     try {
+      // 1. Crear fila en Sheets
       await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
+      // 2. Obtener la fila recién creada (cache invalidado por append)
       const fresh = await API.slackOutboxList();
       if (!fresh) throw new Error("Sin respuesta de GAS.");
-      S.outbox = fresh;
       const newest = fresh.slice().sort((a,b) => (b.row||0)-(a.row||0))[0];
-      if (newest?.row) await API.slackOutboxProgramar(newest.row, v);
-      S.outbox = await API.slackOutboxList() || fresh;
+      if (!newest?.row) throw new Error("No se encontró la fila creada.");
+      // 3. Programar (invalida cache en GAS)
+      await API.slackOutboxProgramar(newest.row, v);
+      // 4. Fetch final — cache ya fue invalidado por slackOutboxProgramar
+      const confirmed = await API.slackOutboxList();
+      S.outbox = confirmed || fresh;
       renderOutbox();
     } catch (e) {
       S.outbox = (S.outbox || []).filter(x => x.row !== tempRow);
