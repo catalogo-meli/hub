@@ -1574,16 +1574,15 @@ function renderOutbox() {
 
   const formatEstado = (estado) => {
     const s = String(estado || "");
-    const mProg = s.match(/^PROGRAMADO\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/i);
-    if (mProg) {
-      const p = mProg[1].split(/[-T:]/);
-      return "\uD83D\uDCC5 " + p[2] + "/" + p[1] + " a las " + p[3] + ":" + p[4];
-    }
-    const mIso = s.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
-    if (mIso) {
-      const p = mIso[1].split(/[-T:]/);
-      return s.replace(mIso[1], p[2] + "/" + p[1] + "/" + p[0] + " " + p[3] + ":" + p[4]);
-    }
+    // "PROGRAMADO ⏰ 31/03/2026 09:47" (formato GAS dd/MM/yyyy)
+    const mProgDMY = s.match(/^PROGRAMADO.*?(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/i);
+    if (mProgDMY) return "\uD83D\uDCC5 " + mProgDMY[1] + "/" + mProgDMY[2] + " a las " + mProgDMY[4] + ":" + mProgDMY[5];
+    // "PROGRAMADO 2026-03-31T09:47" (formato ISO)
+    const mProgISO = s.match(/^PROGRAMADO\s+(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/i);
+    if (mProgISO) return "\uD83D\uDCC5 " + mProgISO[3] + "/" + mProgISO[2] + " a las " + mProgISO[4] + ":" + mProgISO[5];
+    // ISO en cualquier parte
+    const mIso = s.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (mIso) return s.replace(mIso[0], mIso[3] + "/" + mIso[2] + "/" + mIso[1] + " " + mIso[4] + ":" + mIso[5]);
     return s;
   };
 
@@ -1599,6 +1598,7 @@ function renderOutbox() {
     const chId = r.channel_id || "";
     const msg = r.mensaje || "";
     const row = r.row;
+    const canalNombre = (S.canales || []).find(function(c){ return c.channel_id === chId; })?.canal || chId || "—";
 
     const actions = (() => {
       // Drafts: enviar / programar + eliminar
@@ -1616,13 +1616,19 @@ function renderOutbox() {
       }
 
       // Scheduled: fecha legible + lápiz editar + X eliminar
-      const canalNombre = (S.canales || []).find(c => c.channel_id === chId)?.canal || chId || "—";
       let _fp = "—";
       if (r.programado_para) {
-        const _pp = r.programado_para.split("T");
-        if (_pp[0] && _pp[1]) {
-          const _dd = _pp[0].split("-"); const _tt = _pp[1].split(":");
-          _fp = _dd[2] + "/" + _dd[1] + "/" + _dd[0] + " " + _tt[0] + ":" + _tt[1];
+        const _raw = String(r.programado_para).trim();
+        // Formato ISO: "2026-03-31T09:47" o "2026-03-31T09:47:00"
+        const _mISO = _raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+        // Formato dd/MM/yyyy HH:mm (como guarda GAS)
+        const _mDMY = _raw.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+        if (_mISO) {
+          _fp = _mISO[3] + "/" + _mISO[2] + "/" + _mISO[1] + " " + _mISO[4] + ":" + _mISO[5];
+        } else if (_mDMY) {
+          _fp = _mDMY[1] + "/" + _mDMY[2] + "/" + _mDMY[3] + " " + _mDMY[4] + ":" + _mDMY[5];
+        } else {
+          _fp = _raw; // fallback: mostrar tal cual
         }
       }
       const _editPanel =
@@ -1805,22 +1811,23 @@ function renderOutbox() {
 
       tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
         setErr("");
-        const v = (when?.value || "").trim();
+        // Leer valores del DOM ANTES de cualquier re-render
+        const v       = (when ? when.value : "").trim();
+        const chVal   = sel ? sel.value : "";
+        const txtVal  = txt ? txt.value : "";
         if (!v) { setErr("Elegí fecha y hora para programar."); return; }
-        const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
-        // Optimistic inmediato
-        patchOutbox_(row, { estado: `PROGRAMADO ${v}`, channel_id: sel.value, canal, mensaje: txt.value });
+        const canal = (S.canales || []).find((c) => c.channel_id === chVal)?.canal || "";
+        // Optimistic
+        patchOutbox_(row, { estado: "PROGRAMADO " + v, channel_id: chVal, canal, mensaje: txtVal, programado_para: v });
         toast("Mensajes", "✓ Mensaje programado");
         try {
-          // Guardar canal + programar en paralelo
           await Promise.all([
-            API.slackOutboxUpdate(row, canal, sel.value, txt.value),
+            API.slackOutboxUpdate(row, canal, chVal, txtVal),
             API.slackOutboxProgramar(row, v),
           ]);
         } catch (e) {
-          // Revertir si falla
           patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
-          setErr("No se pudo programar el mensaje. Intentá de nuevo.");
+          setErr("No se pudo programar. Intentá de nuevo.");
         }
       });
 
