@@ -1754,19 +1754,24 @@ function renderOutbox() {
       const txt = tr.querySelector("[data-msg]");
       const when = tr.querySelector("[data-when]");
 
-      tr.querySelector("[data-del]")?.addEventListener("click", async () => {
+      tr.querySelector("[data-del]")?.addEventListener("click", async (e) => {
+        e.stopPropagation();
         setErr("");
-        try {
-          if (!await hubConfirm_("¿Eliminás este mensaje? No se puede recuperar.", "Sí, eliminar")) return;
-          await API.slackOutboxDelete(row);
-          // Patch optimista: eliminar localmente sin esperar re-fetch
-          S.outbox = (S.outbox || []).filter((x) => Number(x.row) !== Number(row));
+        // Confirmar antes de cualquier acción
+        const confirmed = await hubConfirm_("¿Eliminás este mensaje? No se puede recuperar.", "Sí, eliminar");
+        if (!confirmed) return;
+        // Optimistic inmediato — sin esperar GAS
+        const prevOutbox = [...(S.outbox || [])];
+        S.outbox = (S.outbox || []).filter((x) => Number(x.row) !== Number(row));
+        renderOutbox();
+        toast("Mensajes", "✓ Mensaje eliminado");
+        // API en background
+        API.slackOutboxDelete(row).catch((e) => {
+          // Revertir si falla
+          S.outbox = prevOutbox;
           renderOutbox();
-          toast("Mensajes", "✓ Mensaje eliminado");
-          // Sin re-fetch — el optimistic ya removió la fila
-        } catch (e) {
           setErr("No se pudo eliminar. Intentá de nuevo.");
-        }
+        });
       });
 
       if (mode === "scheduled") {
