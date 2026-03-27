@@ -842,6 +842,65 @@ function todayYMD() {
   return `${y}-${m}-${day}`;
 }
 
+
+// ── Modal de confirmación propio ────────────────────────────
+// Reemplaza el confirm() nativo del browser.
+// Uso: if (!await hubConfirm_("¿Seguro?", "Sí, eliminar")) return;
+function hubConfirm_(mensaje, labelConfirmar = "Confirmar", labelCancelar = "Cancelar") {
+  return new Promise(resolve => {
+    let overlay = document.getElementById("_hubConfirmOverlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "_hubConfirmOverlay";
+      overlay.style.cssText = [
+        "position:fixed", "inset:0", "z-index:99999",
+        "background:rgba(0,0,0,.55)", "display:flex",
+        "align-items:center", "justify-content:center", "padding:16px"
+      ].join(";");
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `
+      <div style="background:var(--surface);border:1px solid var(--brd-2);border-radius:12px;
+        padding:24px 28px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.4)">
+        <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:10px">
+          Confirmá la acción
+        </div>
+        <div style="font-size:13px;color:var(--text-2);margin-bottom:22px;line-height:1.6">
+          ${mensaje}
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button id="_hubConfirmCancel" class="btn ghost" style="min-width:90px">
+            ${labelCancelar}
+          </button>
+          <button id="_hubConfirmOk" class="btn"
+            style="min-width:90px;background:var(--err,#e5534b);border-color:var(--err,#e5534b);color:#fff;font-weight:600">
+            ${labelConfirmar}
+          </button>
+        </div>
+      </div>`;
+    overlay.style.display = "flex";
+
+    const close = (result) => {
+      overlay.style.display = "none";
+      resolve(result);
+    };
+
+    document.getElementById("_hubConfirmOk").onclick    = () => close(true);
+    document.getElementById("_hubConfirmCancel").onclick = () => close(false);
+    overlay.onclick = (e) => { if (e.target === overlay) close(false); };
+
+    // Escape cierra
+    const onKey = (e) => {
+      if (e.key === "Escape") { close(false); document.removeEventListener("keydown", onKey); }
+      if (e.key === "Enter")  { close(true);  document.removeEventListener("keydown", onKey); }
+    };
+    document.addEventListener("keydown", onKey);
+
+    // Foco en botón cancelar por seguridad (evita Enter accidental)
+    setTimeout(() => document.getElementById("_hubConfirmCancel")?.focus(), 50);
+  });
+}
+
 async function refreshPresentismo() {
   // Siempre carga la semana en curso. Lanza week + stats en paralelo.
   try {
@@ -1644,7 +1703,7 @@ function renderOutbox() {
       tr.querySelector("[data-del]")?.addEventListener("click", async () => {
         setErr("");
         try {
-          if (!confirm("Eliminar este mensaje?")) return;
+          if (!await hubConfirm_("¿Eliminás este mensaje? No se puede recuperar.", "Sí, eliminar")) return;
           await API.slackOutboxDelete(row);
           // Patch optimista: eliminar localmente sin esperar re-fetch
           S.outbox = (S.outbox || []).filter((x) => Number(x.row) !== Number(row));
@@ -1787,7 +1846,7 @@ function renderDailyDrafts_() {
     b.addEventListener("click", async () => {
       const row = Number(b.getAttribute("data-del"));
       if (!row) return;
-      if (!confirm("Eliminar este borrador?")) return;
+      if (!await hubConfirm_("¿Eliminás este borrador? No se puede recuperar.", "Sí, eliminar")) return;
       try {
         await API.slackOutboxDelete(row);
         S.outbox = await API.slackOutboxList();
@@ -2588,9 +2647,9 @@ function renderHabil() {
       return `<span style="display:inline-flex;align-items:center;border-radius:var(--r-full);
           border:1px solid ${isActive ? "var(--pri)" : "var(--brd)"};
           background:${isActive ? "var(--pri-dim)" : "var(--surface-2)"};
-          overflow:hidden;transition:var(--t)">
+          transition:var(--t)">
         <button type="button" data-chip-flujo="${escapeAttr(f)}"
-          style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;
+          style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px 3px 10px;
             background:transparent;border:none;
             color:${isActive ? "var(--pri)" : "var(--text-2)"};
             font-size:11px;cursor:pointer;transition:var(--t);white-space:nowrap" title="Filtrar por ${escapeAttr(f)}">
@@ -2599,9 +2658,13 @@ function renderHabil() {
             padding:1px 6px;border-radius:99px;font-size:10px">${total}</span>
         </button>
         <button type="button" data-chip-del-flujo="${escapeAttr(f)}"
-          style="padding:3px 7px 3px 3px;background:transparent;border:none;border-left:1px solid ${isActive ? "var(--pri-brd)" : "var(--brd)"};
-            color:var(--text-3);cursor:pointer;font-size:11px;line-height:1;transition:var(--t)"
-          title="Eliminar flujo ${escapeAttr(f)}" onmouseover="this.style.color='var(--err)'" onmouseout="this.style.color='var(--text-3)'">×</button>
+          style="padding:4px 8px 4px 4px;background:transparent;border:none;
+            border-left:1px solid ${isActive ? "var(--pri-brd)" : "var(--brd-2)"};
+            color:var(--text-3);cursor:pointer;font-size:12px;line-height:1;
+            transition:color .1s;flex-shrink:0"
+          title="Eliminar flujo ${escapeAttr(f)}"
+          onmouseover="this.style.color='var(--err-txt,#f47067)'"
+          onmouseout="this.style.color='var(--text-3)'">×</button>
       </span>`;
     }).join("");
 
@@ -2622,7 +2685,8 @@ function renderHabil() {
 
     chipsWrap.innerHTML = chipsHtml + inputChip;
 
-    // Click en × del chip → eliminar flujo con confirmación
+    // Delegación en chipsWrap — un solo listener, sobrevive a re-renders
+    // Listeners directos — se registran en cada render porque chipsWrap se reconstruye
     chipsWrap.querySelectorAll("[data-chip-del-flujo]").forEach(btn => {
       btn.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -2631,17 +2695,20 @@ function renderHabil() {
         const advertencia = total > 0
           ? ` Hay ${total} colaborador${total !== 1 ? "es" : ""} habilitado${total !== 1 ? "s" : ""} en este flujo.`
           : "";
-        if (!await hubConfirm_(
-          `¿Eliminás el flujo "${f}"?${advertencia} Se quitará de Operativa y de Asignaciones. No se puede deshacer.`,
+        const ok = await hubConfirm_(
+          `¿Eliminás el flujo "${f}"?${advertencia}
+
+Se quitará de Operativa diaria y de Asignaciones. Esta acción no se puede deshacer.`,
           "Sí, eliminar"
-        )) return;
+        );
+        if (!ok) return;
         await onFlujoDelete(f);
       });
     });
 
-    // Click en chip → filtrar por ese flujo (toggle)
     chipsWrap.querySelectorAll("[data-chip-flujo]").forEach(btn => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
         const f = btn.getAttribute("data-chip-flujo");
         if (!S.fHabil.flujos) S.fHabil.flujos = new Set();
         if (S.fHabil.flujos.has(f)) {
@@ -2710,11 +2777,14 @@ function renderHabil() {
         }
       };
 
-      btnNuevo.addEventListener("click", doAdd);
-      inputNuevo.addEventListener("keydown", e => {
-        if (e.key === "Enter") { e.preventDefault(); doAdd(); }
-        if (e.key === "Escape") { inputNuevo.value = ""; inputNuevo.blur(); }
-      });
+      if (!btnNuevo._bound) {
+        btnNuevo._bound = true;
+        btnNuevo.addEventListener("click", doAdd);
+        inputNuevo.addEventListener("keydown", e => {
+          if (e.key === "Enter") { e.preventDefault(); doAdd(); }
+          if (e.key === "Escape") { inputNuevo.value = ""; inputNuevo.blur(); }
+        });
+      }
     }
   }
 
@@ -4407,7 +4477,7 @@ function renderAgenda() {
   host.querySelectorAll("[data-ag-del]").forEach(btn => {
     btn.addEventListener("click", async () => {
       const row = Number(btn.getAttribute("data-ag-del"));
-      if (!confirm("¿Eliminar este tema de la agenda?")) return;
+      if (!await hubConfirm_("¿Eliminás este tema de la agenda? No se puede recuperar.", "Sí, eliminar")) return;
       const idx = (S.agenda||[]).findIndex(r => r.row === row);
       if (idx >= 0) S.agenda.splice(idx, 1);
       CACHE.invalidate("agenda");
