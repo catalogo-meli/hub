@@ -970,15 +970,24 @@ function validateFlujosSlackConfig_(rows) {
 async function onFlujoDelete(flujo) {
   setErr("");
   try {
-    $("dailyStatus").textContent = "Borrando...";
+    $("dailyStatus") && ($("dailyStatus").textContent = "Eliminando...");
     await API.flujosDelete(flujo);
-    S.flujos = await API.flujosList();
+
+    // Refrescar flujos y habilitaciones en paralelo
+    const [fl, hab] = await Promise.all([
+      API.flujosList(),
+      API.habilitacionesList(),
+    ]);
+    if (fl)  { S.flujos = fl;  CACHE.set("flujos", fl,  2  * 60_000); }
+    if (hab) { S.habil  = hab; CACHE.set("habil",  hab, 10 * 60_000); }
+
     renderFlujos();
-    toast("Borrado", flujo);
+    renderHabil();   // actualizar Asignaciones también
+    toast("Asignaciones", `✓ Flujo "${flujo}" eliminado.`);
   } catch (e) {
-    setErr(`Flujos: ${e.message || e}`);
+    setErr("No se pudo eliminar el flujo. Intentá de nuevo.");
   } finally {
-    $("dailyStatus").textContent = "Listo";
+    $("dailyStatus") && ($("dailyStatus").textContent = "Listo");
   }
 }
 
@@ -1157,7 +1166,7 @@ function renderFlujos() {
     }
 
     tr.querySelector("[data-del]")?.addEventListener("click", async () => {
-      if (!confirm(`Eliminar flujo "${unescapeAttr(flujo)}"?`)) return;
+      if (!await hubConfirm_(`¿Eliminás el flujo "${unescapeAttr(flujo)}"? Se quitará de Operativa y de Asignaciones. No se puede deshacer.`, "Sí, eliminar")) return;
       await onFlujoDelete(unescapeAttr(flujo));
     });
   });
@@ -2576,16 +2585,24 @@ function renderHabil() {
     const chipsHtml = flujos.map(f => {
       const total = (S.habil.rows || []).filter(r => r[`H_${f}`]).length;
       const isActive = activeFlujoFilter === f;
-      return `<button type="button" data-chip-flujo="${escapeAttr(f)}"
-        style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:var(--r-full);
+      return `<span style="display:inline-flex;align-items:center;border-radius:var(--r-full);
           border:1px solid ${isActive ? "var(--pri)" : "var(--brd)"};
           background:${isActive ? "var(--pri-dim)" : "var(--surface-2)"};
-          color:${isActive ? "var(--pri)" : "var(--text-2)"};
-          font-size:11px;cursor:pointer;transition:var(--t);white-space:nowrap" title="Filtrar por ${escapeAttr(f)}">
-        <span style="font-weight:600">${escapeHtml(f)}</span>
-        <span style="background:${isActive ? "var(--pri)" : "var(--surface)"};color:${isActive ? "#fff" : "var(--text-3)"};
-          padding:1px 6px;border-radius:99px;font-size:10px">${total}</span>
-      </button>`;
+          overflow:hidden;transition:var(--t)">
+        <button type="button" data-chip-flujo="${escapeAttr(f)}"
+          style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;
+            background:transparent;border:none;
+            color:${isActive ? "var(--pri)" : "var(--text-2)"};
+            font-size:11px;cursor:pointer;transition:var(--t);white-space:nowrap" title="Filtrar por ${escapeAttr(f)}">
+          <span style="font-weight:600">${escapeHtml(f)}</span>
+          <span style="background:${isActive ? "var(--pri)" : "var(--surface)"};color:${isActive ? "#fff" : "var(--text-3)"};
+            padding:1px 6px;border-radius:99px;font-size:10px">${total}</span>
+        </button>
+        <button type="button" data-chip-del-flujo="${escapeAttr(f)}"
+          style="padding:3px 7px 3px 3px;background:transparent;border:none;border-left:1px solid ${isActive ? "var(--pri-brd)" : "var(--brd)"};
+            color:var(--text-3);cursor:pointer;font-size:11px;line-height:1;transition:var(--t)"
+          title="Eliminar flujo ${escapeAttr(f)}" onmouseover="this.style.color='var(--err)'" onmouseout="this.style.color='var(--text-3)'">×</button>
+      </span>`;
     }).join("");
 
     // Input inline para nuevo flujo — mismo estilo que los chips
@@ -2604,6 +2621,23 @@ function renderHabil() {
       </span>`;
 
     chipsWrap.innerHTML = chipsHtml + inputChip;
+
+    // Click en × del chip → eliminar flujo con confirmación
+    chipsWrap.querySelectorAll("[data-chip-del-flujo]").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const f = btn.getAttribute("data-chip-del-flujo");
+        const total = (S.habil?.rows || []).filter(r => r[`H_${f}`]).length;
+        const advertencia = total > 0
+          ? ` Hay ${total} colaborador${total !== 1 ? "es" : ""} habilitado${total !== 1 ? "s" : ""} en este flujo.`
+          : "";
+        if (!await hubConfirm_(
+          `¿Eliminás el flujo "${f}"?${advertencia} Se quitará de Operativa y de Asignaciones. No se puede deshacer.`,
+          "Sí, eliminar"
+        )) return;
+        await onFlujoDelete(f);
+      });
+    });
 
     // Click en chip → filtrar por ese flujo (toggle)
     chipsWrap.querySelectorAll("[data-chip-flujo]").forEach(btn => {
@@ -2631,33 +2665,48 @@ function renderHabil() {
         const nombre = inputNuevo.value.trim();
         if (!nombre) { inputNuevo.focus(); return; }
         if ((S.flujos || []).some(f => String(f.flujo || f).trim().toLowerCase() === nombre.toLowerCase())) {
-          setErr(`Ya existe un flujo llamado "${nombre}".`);
+          setErr(`Ya existe un flujo con ese nombre. Elegí otro.`);
           return;
         }
+
+        // Feedback inmediato en el botón
         btnNuevo.disabled = true;
-        btnNuevo.textContent = "...";
+        btnNuevo.textContent = "✓";
+        btnNuevo.style.color = "var(--ok-txt)";
+        inputNuevo.disabled = true;
+        inputNuevo.style.opacity = "0.5";
+        setErr("");
+
         try {
+          // Crear flujo
           await API.flujosUpsert(nombre, 0, "");
-          // Refrescar flujos y habilitaciones en paralelo
-          const [fl] = await Promise.all([
+
+          // Refrescar flujos y habilitaciones en paralelo — un solo par de requests
+          const [fl, hab] = await Promise.all([
             API.flujosList(),
-            refreshHabil(),
+            API.habilitacionesList(),
           ]);
-          if (fl) { S.flujos = fl; }
-          CACHE.invalidate("habil");
-          S.habil = await API.habilitacionesList();
+          if (fl)  { S.flujos = fl;  CACHE.set("flujos", fl, 2 * 60_000); }
+          if (hab) { S.habil  = hab; CACHE.set("habil",  hab, 10 * 60_000); }
+
           inputNuevo.value = "";
+          renderFlujos();   // actualizar Operativa diaria también
           renderHabil();
-          // Hacer foco en el chip del nuevo flujo
-          const newChip = chipsWrap.querySelector(`[data-chip-flujo="${CSS.escape(nombre)}"]`);
-          if (newChip) newChip.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          toast("Asignaciones", `✓ Flujo "${nombre}" creado. Ya podés asignar colaboradores.`);
-          setErr("");
+
+          // Scroll al chip del nuevo flujo
+          requestAnimationFrame(() => {
+            const newChip = chipsWrap.querySelector(`[data-chip-flujo="${CSS.escape(nombre)}"]`);
+            if (newChip) newChip.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          });
+          toast("Asignaciones", `✓ Flujo "${nombre}" creado. Habilitá colaboradores desde la tabla.`);
         } catch (e) {
-          setErr(`No se pudo crear el flujo. Intentá de nuevo.`);
+          setErr("No se pudo crear el flujo. Intentá de nuevo.");
         } finally {
           btnNuevo.disabled = false;
           btnNuevo.textContent = "+";
+          btnNuevo.style.color = "";
+          inputNuevo.disabled = false;
+          inputNuevo.style.opacity = "";
         }
       };
 
@@ -4607,7 +4656,7 @@ async function onGenerarPlanificacionYOutbox_() {
   } catch (e) {
     setErr(`Planificación/Outbox: ${e.message || e}`);
   } finally {
-    $("dailyStatus").textContent = "Listo";
+    ($("dailyStatus") && ($("dailyStatus").textContent = "Listo"));
     clearBusy();
   }
 }
@@ -4667,11 +4716,11 @@ async function main() {
     }
 
     try {
-      $("dailyStatus").textContent = "Guardando...";
+      ($("dailyStatus") && ($("dailyStatus").textContent = "Guardando..."));
       await API.flujosUpsert(name, 0, "");
       S.flujos = await API.flujosList();
       renderFlujos();
-      toast("Flujo agregado", name);
+      toast("Operativa diaria", `✓ Flujo "${name}" creado.`);
       $("newFlujoName").value = "";
       // Scroll al nuevo flujo y foco en input de perfiles
       requestAnimationFrame(() => {
@@ -4690,7 +4739,7 @@ async function main() {
     } catch (e) {
       setErr(`Flujos: ${e.message || e}`);
     } finally {
-      $("dailyStatus").textContent = "Listo";
+      ($("dailyStatus") && ($("dailyStatus").textContent = "Listo"));
     }
   });
 
