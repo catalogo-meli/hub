@@ -1510,14 +1510,10 @@ async function generarMensajePorFlujo_(flujo, btn = null) {
 // y dispara un re-fetch silencioso en background para sincronizar.
 function patchOutbox_(row, changes) {
   const idx = (S.outbox || []).findIndex((x) => Number(x.row) === Number(row));
-  if (idx >= 0) {
-    Object.assign(S.outbox[idx], changes);
-  }
+  if (idx >= 0) Object.assign(S.outbox[idx], changes);
   renderOutbox();
-  // Sync silencioso en background (no bloquea UI)
-  API.slackOutboxList()
-    .then((d) => { S.outbox = d || []; S._dirty.add("outbox"); renderOutbox(); })
-    .catch(() => {});
+  // Sin re-fetch — optimistic es suficiente para la UI
+  // El cache de outbox se invalida en GAS; el próximo refresh manual traerá datos frescos
 }
 
 function channelOptionsHtml(selectedId = "") {
@@ -1540,7 +1536,7 @@ const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
     // no refresco todo para no “parpadear”; solo toast
     toast("Mensajes", "✓ Cambios guardados");
   } catch (e) {
-    setErr(`Outbox: ${e.message || e}`);
+    setErr("No se pudo completar la acción. Intentá de nuevo.");
   }
 }, 500);
 
@@ -1717,7 +1713,7 @@ function renderOutbox() {
         renderOutbox();
         toast("Mensajes", "✓ Actualizado");
       } catch (e) {
-        setErr(`Outbox: ${e.message || e}`);
+        setErr("No se pudo completar la acción. Intentá de nuevo.");
       }
     });
   }
@@ -1740,10 +1736,9 @@ function renderOutbox() {
           S.outbox = (S.outbox || []).filter((x) => Number(x.row) !== Number(row));
           renderOutbox();
           toast("Mensajes", "✓ Mensaje eliminado");
-          // Sync background
-          API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
+          // Sin re-fetch — el optimistic ya removió la fila
         } catch (e) {
-          setErr(`Eliminar: ${e.message || e}`);
+          setErr("No se pudo eliminar. Intentá de nuevo.");
         }
       });
 
@@ -1756,39 +1751,56 @@ function renderOutbox() {
 
       tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
         setErr("");
+        const v = (when?.value || "").trim();
+        if (!v) { setErr("Elegí fecha y hora para programar."); return; }
+        const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
+        // Optimistic inmediato
+        patchOutbox_(row, { estado: `PROGRAMADO ${v}`, channel_id: sel.value, canal, mensaje: txt.value });
+        toast("Mensajes", "✓ Mensaje programado");
         try {
-          const v = (when?.value || "").trim();
-          if (!v) throw new Error("Elegí fecha y hora para programar.");
-          // guardo antes de programar
-          const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
-          await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
-          await API.slackOutboxProgramar(row, v);
-          // Patch optimista: marcar como PROGRAMADO localmente
-          patchOutbox_(row, { estado: `PROGRAMADO ${v}`, channel_id: sel.value, canal, mensaje: txt.value });
-          toast("Mensajes", "✓ Mensaje programado");
+          // Guardar canal + programar en paralelo
+          await Promise.all([
+            API.slackOutboxUpdate(row, canal, sel.value, txt.value),
+            API.slackOutboxProgramar(row, v),
+          ]);
         } catch (e) {
-          setErr(`Programar: ${e.message || e}`);
+          // Revertir si falla
+          patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
+          setErr("No se pudo programar el mensaje. Intentá de nuevo.");
         }
       });
 
       // Desprogramar (solo en filas programadas)
       tr.querySelector("[data-desch]")?.addEventListener("click", async () => {
+        // Optimistic inmediato
+        patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
+        toast("Mensajes", "✓ Mensaje desprogramado");
         try {
           await API.slackOutboxDesprogramar(row);
-          patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
-          toast("Mensajes", "✓ Mensaje desprogramado");
-        } catch (e) { setErr(`Outbox: ${e.message || e}`); }
+        } catch (e) {
+          // Revertir
+          const prev = (S.outbox || []).find(x => Number(x.row) === row);
+          if (prev) patchOutbox_(row, { estado: prev.estado, programado_para: prev.programado_para });
+          setErr("No se pudo desprogramar. Intentá de nuevo.");
+        }
       });
 
       tr.querySelector("[data-send]")?.addEventListener("click", async () => {
         setErr("");
+        const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
+        // Optimistic: marcar como enviando
+        const stamp = new Date().toISOString();
+        patchOutbox_(row, { estado: `ENVIADO ✅ ${stamp}`, channel_id: sel.value, canal, mensaje: txt.value });
         try {
-          // guardo antes de enviar
-          const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
-          await API.slackOutboxUpdate(row, canal, sel.value, txt.value);
-          await onOutboxSend(row);
+          // Guardar + enviar en paralelo
+          await Promise.all([
+            API.slackOutboxUpdate(row, canal, sel.value, txt.value),
+            onOutboxSend(row),
+          ]);
+          toast("Mensajes", "✓ Mensaje enviado por Slack");
         } catch (e) {
-          setErr(`Enviar: ${e.message || e}`);
+          patchOutbox_(row, { estado: "BORRADOR" });
+          setErr("No se pudo enviar. Revisá el canal y el mensaje.");
         }
       });
     });
@@ -2156,19 +2168,29 @@ function mountSlackCompose_() {
 
   btnDraft.addEventListener("click", async () => {
     setErr("");
-    try {
-      const channel_id = String(selCh.value || "").trim();
-      const mensaje = buildMessageWithMentions(ta.value);
-      if (!mensaje) throw new Error("Escribí un mensaje.");
+    const channel_id = String(selCh.value || "").trim();
+    const mensaje = buildMessageWithMentions(ta.value);
+    if (!mensaje) { setErr("Escribí un mensaje antes de guardar."); return; }
+    const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
 
-      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
+    // Optimistic: agregar borrador a S.outbox inmediatamente
+    const tempRow = -Date.now();
+    const newRow = { row: tempRow, fecha: todayYMD(), tipo: "COMPOSE", canal, channel_id, mensaje, estado: "BORRADOR", programado_para: "" };
+    S.outbox = [newRow, ...(S.outbox || [])];
+    renderOutbox();
+    clearCompose();
+    toast("Mensajes", "✓ Borrador guardado");
+
+    try {
       await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
-      clearCompose();
-      toast("Mensajes", "✓ Borrador guardado");
-      // Sync en background
-      API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
+      // Reemplazar tempRow con datos reales
+      const fresh = await API.slackOutboxList();
+      if (fresh) { S.outbox = fresh; renderOutbox(); }
     } catch (e) {
-      setErr(`Borrador: ${e.message || e}`);
+      // Revertir si GAS falla
+      S.outbox = (S.outbox || []).filter(x => x.row !== tempRow);
+      renderOutbox();
+      setErr("No se pudo guardar el borrador. Intentá de nuevo.");
     }
   });
 
@@ -2194,7 +2216,7 @@ function mountSlackCompose_() {
       // Sync background
       API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
     } catch (e) {
-      setErr(`Enviar: ${e.message || e}`);
+      setErr("No se pudo enviar. Revisá el canal y el mensaje.");
     }
   });
 
