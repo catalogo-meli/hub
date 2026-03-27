@@ -55,12 +55,11 @@ function assertRow_(row) {
 
 function assertDatetimeLocal_(v) {
   const s = String(v || "").trim();
-  // Normalizar: aceptar YYYY-MM-DDTHH:mm[:ss] y dd/MM/yyyy HH:mm
-  const mISO = s.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
-  if (mISO) return mISO[1]; // recortar segundos si los hay
-  const mDMY = s.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
-  if (mDMY) return mDMY[3] + "-" + mDMY[2] + "-" + mDMY[1] + "T" + mDMY[4] + ":" + mDMY[5];
-  throw new Error("Fecha/hora inválida. Usá el selector de fecha.");
+  // datetime-local suele venir "YYYY-MM-DDTHH:mm"
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) {
+    throw new Error("Fecha/hora inválida. Formato esperado: YYYY-MM-DDTHH:mm");
+  }
+  return s;
 }
 
 export const API = {
@@ -102,10 +101,13 @@ export const API = {
   slackOutboxDelete: (row) => post("slack.outbox.delete", { row: assertRow_(row) }),
 
   // ✅ NUEVO: Programar / Desprogramar (requiere actions en Code.gs)
-  slackOutboxProgramar: (row, programado_para) =>
+  slackOutboxProgramar: (row, programado_para, canal, channel_id, mensaje) =>
     post("slack.outbox.programar", {
       row: assertRow_(row),
       programado_para: assertDatetimeLocal_(programado_para),
+      ...(canal      !== undefined ? { canal }      : {}),
+      ...(channel_id !== undefined ? { channel_id } : {}),
+      ...(mensaje    !== undefined ? { mensaje }    : {}),
     }),
 
   slackOutboxDesprogramar: (row) =>
