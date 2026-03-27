@@ -1532,12 +1532,11 @@ const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
   setErr("");
   try {
     const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
-    // Patch optimista para preservar canal al re-render
-    patchOutbox_(row, { channel_id, canal, mensaje });
     await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
-    toast("Mensajes", "✓ Guardado");
+    // no refresco todo para no “parpadear”; solo toast
+    toast("Mensajes", "✓ Cambios guardados");
   } catch (e) {
-    setErr("No se pudo guardar. Intentá de nuevo.");
+    setErr("No se pudo completar la acción. Intentá de nuevo.");
   }
 }, 1000);
 
@@ -1575,23 +1574,15 @@ function renderOutbox() {
 
   const formatEstado = (estado) => {
     const s = String(estado || "");
-    // Caso: "PROGRAMADO 2026-03-31T09:47" o con segundos/Z
     const mProg = s.match(/^PROGRAMADO\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/i);
     if (mProg) {
-      const [yyyy, mo, dd, HH, MM] = mProg[1].split(/[-T:]/);
-      return `📅 ${dd}/${mo} a las ${HH}:${MM}`;
+      const p = mProg[1].split(/[-T:]/);
+      return "\uD83D\uDCC5 " + p[2] + "/" + p[1] + " a las " + p[3] + ":" + p[4];
     }
-    // Caso: timestamp ISO en cualquier parte del string
-    const mIso = s.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)/);
+    const mIso = s.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
     if (mIso) {
-      const d = new Date(mIso[1]);
-      if (!isNaN(d.getTime())) {
-        const dd = String(d.getDate()).padStart(2, "0");
-        const mm = String(d.getMonth() + 1).padStart(2, "0");
-        const HH = String(d.getHours()).padStart(2, "0");
-        const MM = String(d.getMinutes()).padStart(2, "0");
-        return s.replace(mIso[1], `${dd}/${mm} ${HH}:${MM}`);
-      }
+      const p = mIso[1].split(/[-T:]/);
+      return s.replace(mIso[1], p[2] + "/" + p[1] + "/" + p[0] + " " + p[3] + ":" + p[4]);
     }
     return s;
   };
@@ -1624,60 +1615,53 @@ function renderOutbox() {
         `;
       }
 
-      // Scheduled: vista compacta con lápiz (editar) y X (eliminar)
+      // Scheduled: fecha legible + lápiz editar + X eliminar
       const canalNombre = (S.canales || []).find(c => c.channel_id === chId)?.canal || chId || "—";
-      // Formatear fecha programada de forma legible
-      let fechaLegible = "—";
+      let _fp = "—";
       if (r.programado_para) {
-        const [datePart, timePart] = r.programado_para.split("T");
-        if (datePart && timePart) {
-          const [yyyy, mo, dd] = datePart.split("-");
-          const [HH, MM] = timePart.split(":");
-          fechaLegible = `${dd}/${mo}/${yyyy} ${HH}:${MM}`;
+        const _pp = r.programado_para.split("T");
+        if (_pp[0] && _pp[1]) {
+          const _dd = _pp[0].split("-"); const _tt = _pp[1].split(":");
+          _fp = _dd[2] + "/" + _dd[1] + "/" + _dd[0] + " " + _tt[0] + ":" + _tt[1];
         }
       }
-      return `
-        <div style="display:flex;gap:6px;align-items:center;justify-content:flex-end">
-          <span style="font-size:12px;color:var(--text-2)">📅 ${escapeHtml(fechaLegible)}</span>
-          <button class="btn ghost" data-edit-prog title="Editar fecha/canal"
-            style="font-size:13px;padding:3px 8px;line-height:1">✏️</button>
-          <button class="xbtn" data-del title="Eliminar">×</button>
-        </div>
-        <!-- Panel de edición, oculto por defecto -->
-        <div data-edit-panel style="display:none;margin-top:8px;padding:10px;border:1px solid var(--brd-2);border-radius:8px;background:var(--surface-2)">
-          <div style="display:flex;flex-direction:column;gap:8px">
-            <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Canal</div>
-            <select class="input" data-edit-ch style="font-size:12px">${channelOptionsHtml(chId)}</select>
-            <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Fecha y hora</div>
-            <input class="input" type="datetime-local" data-edit-when value="${escapeAttr(r.programado_para || "")}" style="font-size:12px"/>
-            <div style="display:flex;gap:6px;justify-content:flex-end">
-              <button class="btn ghost" data-edit-cancel style="font-size:12px">Cancelar</button>
-              <button class="btn primary" data-edit-save style="font-size:12px">Guardar cambios</button>
-            </div>
-          </div>
-        </div>
-      `;
+      const _editPanel =
+        '<div data-edit-panel style="display:none;margin-top:8px;padding:10px;' +
+        'border:1px solid var(--brd-2);border-radius:8px;background:var(--surface-2)">' +
+        '<div style="display:flex;flex-direction:column;gap:8px">' +
+        '<div style="font-size:11px;color:var(--text-3);text-transform:uppercase">Canal</div>' +
+        '<select class="input" data-edit-ch style="font-size:12px">' + channelOptionsHtml(chId) + '</select>' +
+        '<div style="font-size:11px;color:var(--text-3);text-transform:uppercase">Fecha y hora</div>' +
+        '<input class="input" type="datetime-local" data-edit-when value="' + escapeAttr(r.programado_para || "") + '" style="font-size:12px"/>' +
+        '<div style="display:flex;gap:6px;justify-content:flex-end">' +
+        '<button class="btn ghost" data-edit-cancel style="font-size:12px">Cancelar</button>' +
+        '<button class="btn primary" data-edit-save style="font-size:12px">Guardar cambios</button>' +
+        '</div></div></div>';
+      return (
+        '<div style="display:flex;gap:6px;align-items:center;justify-content:flex-end">' +
+        '<span style="font-size:12px;color:var(--text-2)">\uD83D\uDCC5 ' + escapeHtml(_fp) + '</span>' +
+        '<button class="btn ghost" data-edit-prog title="Editar" style="font-size:13px;padding:3px 8px">\u270F\uFE0F</button>' +
+        '<button class="xbtn" data-del title="Eliminar">\u00D7</button>' +
+        '</div>' + _editPanel
+      );
     })();
 
     const isDraft = mode === "draft";
-
-    // Variables intermedias — evitar backticks anidados a 3 niveles
-    const canalNombreProg = escapeHtml((S.canales||[]).find(c=>c.channel_id===chId)?.canal || chId || "—");
-    const sinCanalWarn = (!chId && r.canal) ? '<div style="font-size:10px;color:var(--err-txt);margin-top:2px">⚠ Sin canal</div>' : "";
-    const tdCanal = isDraft
-      ? ('<select data-ch>' + channelOptionsHtml(chId) + '</select>' + sinCanalWarn)
-      : ('<span style="font-size:12px;font-weight:500">' + canalNombreProg + '</span>');
-    const tdMensaje = isDraft
+    const _noChW = (!chId && r.canal) ? '<div style="font-size:10px;color:var(--err-txt);margin-top:2px">\u26A0 Sin canal</div>' : "";
+    const _chDisp = isDraft
+      ? ('<select data-ch>' + channelOptionsHtml(chId) + '</select>' + _noChW)
+      : ('<span style="font-size:12px;font-weight:500">' + escapeHtml(canalNombre) + '</span>');
+    const _msgDisp = isDraft
       ? ('<textarea data-msg style="min-height:60px">' + escapeHtml(msg) + '</textarea>')
       : ('<div style="font-size:12px;max-width:520px;white-space:pre-wrap;color:var(--text-2)">' + escapeHtml(msg) + '</div>');
-    const tdEstado = isDraft ? ('<span class="' + badge + '">' + escapeHtml(formatEstado(rawEstado)) + '</span>') : "";
+    const _estDisp = isDraft ? ('<span class="' + badge + '">' + escapeHtml(formatEstado(rawEstado)) + '</span>') : "";
 
     return `
       <tr data-row="${row}" data-mode="${mode}">
         <td class="nowrap" style="font-size:12px;color:var(--text-3)">${escapeHtml(date)}</td>
-        <td>${tdCanal}</td>
-        <td>${tdMensaje}</td>
-        <td class="nowrap">${tdEstado}</td>
+        <td>${_chDisp}</td>
+        <td>${_msgDisp}</td>
+        <td class="nowrap">${_estDisp}</td>
         <td class="right">${actions}</td>
       </tr>
     `;
@@ -1779,53 +1763,45 @@ function renderOutbox() {
         }
       });
 
-      // ── Mensajes programados: lápiz edita, guardar reprograma ──
       if (mode === "scheduled") {
-        const editBtn    = tr.querySelector("[data-edit-prog]");
-        const editPanel  = tr.querySelector("[data-edit-panel]");
-        const editCh     = tr.querySelector("[data-edit-ch]");
-        const editWhen   = tr.querySelector("[data-edit-when]");
-        const editSave   = tr.querySelector("[data-edit-save]");
-        const editCancel = tr.querySelector("[data-edit-cancel]");
-
-        editBtn?.addEventListener("click", () => {
-          editPanel.style.display = editPanel.style.display === "none" ? "block" : "none";
-          editBtn.textContent = editPanel.style.display !== "none" ? "✕" : "✏️";
+        var _eBtn = tr.querySelector("[data-edit-prog]");
+        var _ePan = tr.querySelector("[data-edit-panel]");
+        var _eCh  = tr.querySelector("[data-edit-ch]");
+        var _eWhn = tr.querySelector("[data-edit-when]");
+        var _eSav = tr.querySelector("[data-edit-save]");
+        var _eCnc = tr.querySelector("[data-edit-cancel]");
+        if (_eBtn) _eBtn.addEventListener("click", function() {
+          _ePan.style.display = _ePan.style.display === "none" ? "block" : "none";
+          _eBtn.textContent = _ePan.style.display !== "none" ? "\u2715" : "\u270F\uFE0F";
         });
-        editCancel?.addEventListener("click", () => {
-          editPanel.style.display = "none";
-          editBtn.textContent = "✏️";
+        if (_eCnc) _eCnc.addEventListener("click", function() {
+          _ePan.style.display = "none"; _eBtn.textContent = "\u270F\uFE0F";
         });
-        editSave?.addEventListener("click", async () => {
-          const newChId = editCh?.value || "";
-          const newWhen = (editWhen?.value || "").trim();
-          if (!newWhen) { setErr("Elegí fecha y hora para programar."); return; }
-          const newCanal = (S.canales || []).find(c => c.channel_id === newChId)?.canal || "";
-          // Optimistic
-          patchOutbox_(row, { channel_id: newChId, canal: newCanal, programado_para: newWhen,
-            estado: `PROGRAMADO ${newWhen}` });
-          editPanel.style.display = "none";
-          editBtn.textContent = "✏️";
-          toast("Mensajes", "✓ Mensaje reprogramado");
+        if (_eSav) _eSav.addEventListener("click", async function() {
+          var nChId = _eCh ? _eCh.value : "";
+          var nWhen = _eWhn ? _eWhn.value.trim() : "";
+          if (!nWhen) { setErr("Elegí fecha y hora para programar."); return; }
+          var nCanal = (S.canales || []).find(function(c) { return c.channel_id === nChId; })?.canal || "";
+          var curMsg = (S.outbox || []).find(function(x) { return Number(x.row) === row; })?.mensaje || "";
+          patchOutbox_(row, { channel_id: nChId, canal: nCanal, programado_para: nWhen, estado: "PROGRAMADO " + nWhen });
+          _ePan.style.display = "none"; _eBtn.textContent = "\u270F\uFE0F";
+          toast("Mensajes", "\u2713 Mensaje reprogramado");
           try {
             await Promise.all([
-              API.slackOutboxUpdate(row, newCanal, newChId, (S.outbox||[]).find(x=>Number(x.row)===row)?.mensaje || ""),
-              API.slackOutboxProgramar(row, newWhen),
+              API.slackOutboxUpdate(row, nCanal, nChId, curMsg),
+              API.slackOutboxProgramar(row, nWhen),
             ]);
-          } catch (e) {
-            setErr("No se pudo reprogramar. Intentá de nuevo.");
-          }
+          } catch(e) { setErr("No se pudo reprogramar. Intent\u00E1 de nuevo."); }
         });
         return;
       }
 
-      // ── Borradores: auto-save debounce 1s ──────────────────
-      const sel = tr.querySelector("[data-ch]");
-      const txt = tr.querySelector("[data-msg]");
-      const triggerSave = () => outboxAutosave(row, sel?.value, txt?.value);
-      sel?.addEventListener("change", triggerSave);
-      txt?.addEventListener("input", triggerSave);
-      txt?.addEventListener("blur", triggerSave);
+      if (mode !== "draft") return;
+
+      const triggerSave = () => outboxAutosave(row, sel ? sel.value : "", txt ? txt.value : "");
+      sel && sel.addEventListener("change", triggerSave);
+      txt && txt.addEventListener("input", triggerSave);
+      txt && txt.addEventListener("blur", triggerSave);
 
       tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
         setErr("");
