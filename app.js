@@ -278,10 +278,9 @@ function copyToClipboard(text) {
 
 function debounce(fn, ms = 350) {
   let t;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
-  };
+  const d = (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  d.cancel = () => clearTimeout(t);
+  return d;
 }
 
 function mountTableSort_(tableId, sortState, onChange) {
@@ -1529,15 +1528,13 @@ function channelOptionsHtml(selectedId = "") {
 }
 
 const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
-  setErr("");
-  try {
-    const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
-    await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
-    // no refresco todo para no “parpadear”; solo toast
-    toast("Mensajes", "✓ Cambios guardados");
-  } catch (e) {
-    setErr("No se pudo completar la acción. Intentá de nuevo.");
-  }
+  if (!row || Number(row) < 0) return;
+  const current = (S.outbox || []).find(x => Number(x.row) === Number(row));
+  if (!current) return;
+  const est = String(current.estado || "").toUpperCase();
+  if (est.includes("PROGRAMADO") || est.includes("ENVIADO")) return;
+  const canal = (S.canales || []).find(c => c.channel_id === channel_id)?.canal || "";
+  API.slackOutboxUpdate(row, canal, channel_id, mensaje).catch(() => {});
 }, 1000);
 
 function renderOutbox() {
@@ -1816,56 +1813,54 @@ function renderOutbox() {
 
       tr.querySelector("[data-prog]")?.addEventListener("click", async () => {
         setErr("");
-        // Leer valores del DOM ANTES de cualquier re-render
-        const v       = (when ? when.value : "").trim();
-        const chVal   = sel ? sel.value : "";
-        const txtVal  = txt ? txt.value : "";
-        if (!v) { setErr("Elegí fecha y hora para programar."); return; }
-        const canal = (S.canales || []).find((c) => c.channel_id === chVal)?.canal || "";
-        // Optimistic
-        patchOutbox_(row, { estado: "PROGRAMADO " + v, channel_id: chVal, canal, mensaje: txtVal, programado_para: v });
-        toast("Mensajes", "✓ Mensaje programado");
+        // Leer DOM ANTES de cualquier re-render
+        const v      = (when ? when.value : "").trim();
+        const chVal  = sel ? sel.value : "";
+        const txtVal = txt ? txt.value : "";
+        if (!v)     { setErr("Elegí la fecha y hora antes de programar."); return; }
+        if (!chVal) { setErr("Elegí el canal de Slack antes de programar."); return; }
+        const canal = (S.canales || []).find(c => c.channel_id === chVal)?.canal || "";
+        // Cancelar autosave pendiente para evitar race condition en GAS
+        outboxAutosave.cancel && outboxAutosave.cancel();
         try {
-          await Promise.all([
-            API.slackOutboxUpdate(row, canal, chVal, txtVal),
-            API.slackOutboxProgramar(row, v),
-          ]);
+          // Primero guardar estado actual, luego programar (secuencial para evitar conflictos)
+          await API.slackOutboxUpdate(row, canal, chVal, txtVal);
+          await API.slackOutboxProgramar(row, v);
+          // Optimistic recién cuando GAS confirmó
+          patchOutbox_(row, { estado: "PROGRAMADO " + v, channel_id: chVal, canal, mensaje: txtVal, programado_para: v });
+          toast("Mensajes", "✓ Mensaje programado");
         } catch (e) {
-          patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
           setErr("No se pudo programar. Intentá de nuevo.");
         }
       });
 
       // Desprogramar (solo en filas programadas)
       tr.querySelector("[data-desch]")?.addEventListener("click", async () => {
-        // Optimistic inmediato
+        outboxAutosave.cancel && outboxAutosave.cancel();
+        const prevEstado = (S.outbox || []).find(x => Number(x.row) === row)?.estado || "";
         patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
         toast("Mensajes", "✓ Mensaje desprogramado");
-        try {
-          await API.slackOutboxDesprogramar(row);
-        } catch (e) {
-          // Revertir
-          const prev = (S.outbox || []).find(x => Number(x.row) === row);
-          if (prev) patchOutbox_(row, { estado: prev.estado, programado_para: prev.programado_para });
+        API.slackOutboxDesprogramar(row).catch(() => {
+          patchOutbox_(row, { estado: prevEstado });
           setErr("No se pudo desprogramar. Intentá de nuevo.");
-        }
+        });
       });
 
       tr.querySelector("[data-send]")?.addEventListener("click", async () => {
         setErr("");
-        const canal = (S.canales || []).find((c) => c.channel_id === sel.value)?.canal || "";
-        // Optimistic: marcar como enviando
-        const stamp = new Date().toISOString();
-        patchOutbox_(row, { estado: `ENVIADO ✅ ${stamp}`, channel_id: sel.value, canal, mensaje: txt.value });
+        const chVal  = sel ? sel.value : "";
+        const txtVal = txt ? txt.value : "";
+        if (!chVal)        { setErr("Elegí el canal de Slack antes de enviar."); return; }
+        if (!txtVal.trim()) { setErr("Escribí un mensaje antes de enviar."); return; }
+        const canal = (S.canales || []).find(c => c.channel_id === chVal)?.canal || "";
+        outboxAutosave.cancel && outboxAutosave.cancel();
         try {
-          // Guardar + enviar en paralelo
-          await Promise.all([
-            API.slackOutboxUpdate(row, canal, sel.value, txt.value),
-            onOutboxSend(row),
-          ]);
+          await API.slackOutboxUpdate(row, canal, chVal, txtVal);
+          await onOutboxSend(row);
+          const stamp = new Date().toISOString();
+          patchOutbox_(row, { estado: "ENVIADO ✅ " + stamp, channel_id: chVal, canal, mensaje: txtVal });
           toast("Mensajes", "✓ Mensaje enviado por Slack");
         } catch (e) {
-          patchOutbox_(row, { estado: "BORRADOR" });
           setErr("No se pudo enviar. Revisá el canal y el mensaje.");
         }
       });
@@ -2262,55 +2257,60 @@ function mountSlackCompose_() {
 
   btnSendNow.addEventListener("click", async () => {
     setErr("");
+    const channel_id = String(selCh.value || "").trim();
+    const mensaje = buildMessageWithMentions(ta.value);
+    if (!mensaje)    { setErr("Escribí un mensaje antes de enviar."); return; }
+    if (!channel_id) { setErr("Elegí el canal de Slack."); return; }
+    const canal = (S.canales || []).find(c => c.channel_id === channel_id)?.canal || "";
+    setBusy("Mensajes", "Enviando...");
     try {
-      const channel_id = String(selCh.value || "").trim();
-      const mensaje = buildMessageWithMentions(ta.value);
-      if (!mensaje) throw new Error("Escribí un mensaje.");
-
-      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
-      // 1) append
       await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
-      // fetch una sola vez para obtener la fila creada
-      S.outbox = await API.slackOutboxList();
-      const newest = (S.outbox || []).slice().sort((a, b) => (b.row || 0) - (a.row || 0))[0];
-      if (!newest?.row) throw new Error("No se pudo obtener la fila creada.");
-
-      // 2) send
+      const fresh = await API.slackOutboxList();
+      S.outbox = fresh || [];
+      const newest = (S.outbox).slice().sort((a, b) => (b.row||0) - (a.row||0))[0];
+      if (!newest?.row) throw new Error("No se pudo obtener la fila.");
       await API.slackSendRow(newest.row);
       clearCompose();
-      toast("Slack", "Enviado");
-      // Sync background
-      API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
+      toast("Mensajes", "✓ Mensaje enviado por Slack");
+      API.slackOutboxList().then(d => { if(d) { S.outbox = d; renderOutbox(); } }).catch(()=>{});
     } catch (e) {
       setErr("No se pudo enviar. Revisá el canal y el mensaje.");
+    } finally {
+      clearBusy();
     }
   });
 
   btnSched.addEventListener("click", async () => {
     setErr("");
+    const channel_id = String(selCh.value || "").trim();
+    const mensaje = buildMessageWithMentions(ta.value);
+    const v = String(when.value || "").trim();
+    if (!mensaje)    { setErr("Escribí un mensaje antes de programar."); return; }
+    if (!v)          { setErr("Elegí fecha y hora para programar."); return; }
+    if (!channel_id) { setErr("Elegí el canal de Slack."); return; }
+    const canal = (S.canales || []).find(c => c.channel_id === channel_id)?.canal || "";
+
+    // Optimistic: mostrar como programado inmediatamente
+    const tempRow = -Date.now();
+    S.outbox = [{ row: tempRow, fecha: todayYMD(), tipo: "COMPOSE", canal, channel_id,
+      mensaje, estado: "PROGRAMADO " + v, programado_para: v }, ...(S.outbox || [])];
+    renderOutbox();
+    clearCompose();
+    toast("Mensajes", "✓ Mensaje programado");
+
     try {
-      const channel_id = String(selCh.value || "").trim();
-      const mensaje = buildMessageWithMentions(ta.value);
-      const v = String(when.value || "").trim();
-      if (!mensaje) throw new Error("Escribí un mensaje.");
-      if (!v) throw new Error("Elegí fecha y hora para programar.");
-
-      const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
-      // 1) crear fila como borrador
       await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
-      // fetch una sola vez para obtener la fila creada
-      S.outbox = await API.slackOutboxList();
-      const newest = (S.outbox || []).slice().sort((a,b)=>(b.row||0)-(a.row||0))[0];
-      if (!newest?.row) throw new Error("No se pudo obtener la fila creada.");
-
-      // 2) programar
-      await API.slackOutboxProgramar(newest.row, v);
-      clearCompose();
-      toast("Mensajes", "✓ Mensaje programado");
-      // Sync background
-      API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
+      const fresh = await API.slackOutboxList();
+      if (!fresh) throw new Error("Sin respuesta de GAS.");
+      S.outbox = fresh;
+      const newest = fresh.slice().sort((a,b) => (b.row||0)-(a.row||0))[0];
+      if (newest?.row) await API.slackOutboxProgramar(newest.row, v);
+      S.outbox = await API.slackOutboxList() || fresh;
+      renderOutbox();
     } catch (e) {
-      setErr(`Programar: ${e.message || e}`);
+      S.outbox = (S.outbox || []).filter(x => x.row !== tempRow);
+      renderOutbox();
+      setErr("No se pudo programar. Intentá de nuevo.");
     }
   });
   // Emojis: paleta operativa (vista unificada).
@@ -2417,19 +2417,8 @@ const renderEmojiPanel = () => {
 }
 
 async function onOutboxSend(row) {
-  setErr("");
-  try {
-    setBusy("Slack", "Enviando mensaje...");
-    await API.slackSendRow(row);
-    // Patch optimista: marcar como ENVIADO localmente
-    const stamp = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
-    patchOutbox_(row, { estado: `ENVIADO ✅ ${stamp}` });
-    toast("Slack", "Enviado");
-  } catch (e) {
-    setErr(`Slack: ${e.message || e}`);
-  } finally {
-    clearBusy();
-  }
+  // Solo envía — el caller maneja el toast y el patch
+  await API.slackSendRow(row);
 }
 
 /* ========= Colaboradores ========= */

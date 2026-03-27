@@ -55,11 +55,12 @@ function assertRow_(row) {
 
 function assertDatetimeLocal_(v) {
   const s = String(v || "").trim();
-  // datetime-local suele venir "YYYY-MM-DDTHH:mm"
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) {
-    throw new Error("Fecha/hora inválida. Formato esperado: YYYY-MM-DDTHH:mm");
-  }
-  return s;
+  // Normalizar: aceptar YYYY-MM-DDTHH:mm[:ss] y dd/MM/yyyy HH:mm
+  const mISO = s.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
+  if (mISO) return mISO[1]; // recortar segundos si los hay
+  const mDMY = s.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+  if (mDMY) return mDMY[3] + "-" + mDMY[2] + "-" + mDMY[1] + "T" + mDMY[4] + ":" + mDMY[5];
+  throw new Error("Fecha/hora inválida. Usá el selector de fecha.");
 }
 
 export const API = {
