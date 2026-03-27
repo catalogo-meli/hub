@@ -1655,7 +1655,10 @@ function renderOutbox() {
         '<select class="input" data-edit-ch style="font-size:12px">' + channelOptionsHtml(chId) + '</select>' +
         '<div style="font-size:11px;color:var(--text-3);text-transform:uppercase">Fecha y hora</div>' +
         '<input class="input" type="datetime-local" data-edit-when value="' + escapeAttr(r.programado_para || "") + '" style="font-size:12px"/>' +
-        '<div style="display:flex;gap:6px;justify-content:flex-end">' +
+        '<div style="font-size:11px;color:var(--text-3);text-transform:uppercase">Mensaje</div>' +
+        '<textarea class="input" data-edit-msg style="font-size:12px;min-height:80px">' + escapeHtml(msg) + '</textarea>' +
+        '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">' +
+        '<button class="btn ghost" data-edit-desch style="font-size:12px;color:var(--text-3)">Desprogramar</button>' +
         '<button class="btn ghost" data-edit-cancel style="font-size:12px">Cancelar</button>' +
         '<button class="btn primary" data-edit-save style="font-size:12px">Guardar cambios</button>' +
         '</div></div></div>';
@@ -1776,21 +1779,17 @@ function renderOutbox() {
       tr.querySelector("[data-del]")?.addEventListener("click", async (e) => {
         e.stopPropagation();
         setErr("");
-        // Confirmar antes de cualquier acción
         const confirmed = await hubConfirm_("¿Eliminás este mensaje? No se puede recuperar.", "Sí, eliminar");
         if (!confirmed) return;
-        // Optimistic inmediato — sin esperar GAS
-        const prevOutbox = [...(S.outbox || [])];
-        S.outbox = (S.outbox || []).filter((x) => Number(x.row) !== Number(row));
-        renderOutbox();
-        toast("Mensajes", "✓ Mensaje eliminado");
-        // API en background
-        API.slackOutboxDelete(row).catch((e) => {
-          // Revertir si falla
-          S.outbox = prevOutbox;
+        try {
+          // Esperar confirmación real de GAS antes de actualizar UI
+          await API.slackOutboxDelete(row);
+          S.outbox = (S.outbox || []).filter((x) => Number(x.row) !== Number(row));
           renderOutbox();
+          toast("Mensajes", "✓ Mensaje eliminado");
+        } catch (err) {
           setErr("No se pudo eliminar. Intentá de nuevo.");
-        });
+        }
       });
 
       if (mode === "scheduled") {
@@ -1807,21 +1806,35 @@ function renderOutbox() {
         if (_eCnc) _eCnc.addEventListener("click", function() {
           _ePan.style.display = "none"; _eBtn.textContent = "\u270F\uFE0F";
         });
+        var _eMsg = tr.querySelector("[data-edit-msg]");
         if (_eSav) _eSav.addEventListener("click", async function() {
-          var nChId = _eCh ? _eCh.value : "";
+          var nChId = _eCh  ? _eCh.value        : "";
           var nWhen = _eWhn ? _eWhn.value.trim() : "";
+          var nMsg  = _eMsg ? _eMsg.value.trim() : ((S.outbox||[]).find(function(x){return Number(x.row)===row;})?.mensaje||"");
           if (!nWhen) { setErr("Elegí fecha y hora para programar."); return; }
+          if (!nMsg)  { setErr("El mensaje no puede estar vacío."); return; }
           var nCanal = (S.canales || []).find(function(c) { return c.channel_id === nChId; })?.canal || "";
-          var curMsg = (S.outbox || []).find(function(x) { return Number(x.row) === row; })?.mensaje || "";
-          patchOutbox_(row, { channel_id: nChId, canal: nCanal, programado_para: nWhen, estado: "PROGRAMADO " + nWhen });
           _ePan.style.display = "none"; _eBtn.textContent = "\u270F\uFE0F";
-          toast("Mensajes", "\u2713 Mensaje reprogramado");
           try {
-            await Promise.all([
-              API.slackOutboxUpdate(row, nCanal, nChId, curMsg),
-              API.slackOutboxProgramar(row, nWhen),
-            ]);
-          } catch(e) { setErr("No se pudo reprogramar. Intent\u00E1 de nuevo."); }
+            await API.slackOutboxUpdate(row, nCanal, nChId, nMsg);
+            await API.slackOutboxProgramar(row, nWhen);
+            const fresh = await API.slackOutboxList();
+            if (fresh) { S.outbox = fresh; renderOutbox(); }
+            else { patchOutbox_(row, { channel_id: nChId, canal: nCanal, programado_para: nWhen, mensaje: nMsg, estado: "PROGRAMADO " + nWhen }); }
+            toast("Mensajes", "\u2713 Cambios guardados");
+          } catch(e) { setErr("No se pudo guardar. Intent\u00E1 de nuevo."); }
+        });
+        // Desprogramar desde panel de edición
+        var _eDesch = tr.querySelector("[data-edit-desch]");
+        if (_eDesch) _eDesch.addEventListener("click", async function() {
+          _ePan.style.display = "none"; _eBtn.textContent = "\u270F\uFE0F";
+          try {
+            await API.slackOutboxDesprogramar(row);
+            const fresh = await API.slackOutboxList();
+            if (fresh) { S.outbox = fresh; renderOutbox(); }
+            else { patchOutbox_(row, { estado: "BORRADOR", programado_para: "" }); }
+            toast("Mensajes", "\u2713 Mensaje movido a Borradores");
+          } catch(e) { setErr("No se pudo desprogramar. Intent\u00E1 de nuevo."); }
         });
         return;
       }
@@ -1844,18 +1857,23 @@ function renderOutbox() {
         const canal = (S.canales || []).find(c => c.channel_id === chVal)?.canal || "";
         // Cancelar autosave pendiente para evitar race condition en GAS
         outboxAutosave.cancel && outboxAutosave.cancel();
-        try {
-          await API.slackOutboxUpdate(row, canal, chVal, txtVal);
-          await API.slackOutboxProgramar(row, v);
-          // Fetch final — cache invalidado por slackOutboxProgramar_ en GAS
-          const fresh = await API.slackOutboxList();
-          if (fresh) { S.outbox = fresh; }
-          else { patchOutbox_(row, { estado: "PROGRAMADO " + v, channel_id: chVal, canal, mensaje: txtVal, programado_para: v }); }
-          renderOutbox();
-          toast("Mensajes", "✓ Mensaje programado");
-        } catch (e) {
-          setErr("No se pudo programar. Intentá de nuevo.");
-        }
+        // Optimistic inmediato — el usuario ve el resultado al instante
+        patchOutbox_(row, { estado: "PROGRAMADO " + v, channel_id: chVal, canal, mensaje: txtVal, programado_para: v });
+        toast("Mensajes", "✓ Mensaje programado");
+        // GAS en background — secuencial para evitar conflictos entre update y programar
+        (async () => {
+          try {
+            await API.slackOutboxUpdate(row, canal, chVal, txtVal);
+            await API.slackOutboxProgramar(row, v);
+            // Fetch final para sincronizar el estado real de Sheets (⏰ y formato dd/MM/yyyy)
+            const fresh = await API.slackOutboxList();
+            if (fresh) { S.outbox = fresh; renderOutbox(); }
+          } catch (e) {
+            // Revertir si falla
+            patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
+            setErr("No se pudo programar. Intentá de nuevo.");
+          }
+        })();
       });
 
       // Desprogramar (solo en filas programadas)
