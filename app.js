@@ -2573,7 +2573,7 @@ function renderHabil() {
   const chipsWrap = $("habilResumenChips");
   if (chipsWrap) {
     const activeFlujoFilter = S.fHabil?.flujos?.size > 0 ? [...S.fHabil.flujos][0] : null;
-    chipsWrap.innerHTML = flujos.map(f => {
+    const chipsHtml = flujos.map(f => {
       const total = (S.habil.rows || []).filter(r => r[`H_${f}`]).length;
       const isActive = activeFlujoFilter === f;
       return `<button type="button" data-chip-flujo="${escapeAttr(f)}"
@@ -2587,6 +2587,23 @@ function renderHabil() {
           padding:1px 6px;border-radius:99px;font-size:10px">${total}</span>
       </button>`;
     }).join("");
+
+    // Input inline para nuevo flujo — mismo estilo que los chips
+    const inputChip = `
+      <span style="display:inline-flex;align-items:center;gap:0;border-radius:var(--r-full);
+        border:1px dashed var(--brd-2);overflow:hidden;">
+        <input id="habilNuevoFlujoInput" type="text" placeholder="+ Nuevo flujo..."
+          style="background:transparent;border:none;outline:none;padding:3px 10px;
+            font-size:11px;color:var(--text-2);width:130px;font-family:inherit"
+          maxlength="40"/>
+        <button id="habilNuevoFlujoBtn" type="button"
+          style="background:transparent;border:none;border-left:1px dashed var(--brd-2);
+            padding:3px 10px;cursor:pointer;font-size:13px;color:var(--text-3);
+            transition:var(--t);line-height:1"
+          title="Crear flujo">+</button>
+      </span>`;
+
+    chipsWrap.innerHTML = chipsHtml + inputChip;
 
     // Click en chip → filtrar por ese flujo (toggle)
     chipsWrap.querySelectorAll("[data-chip-flujo]").forEach(btn => {
@@ -2604,6 +2621,52 @@ function renderHabil() {
         renderHabil();
       });
     });
+
+    // Input inline para agregar nuevo flujo
+    const inputNuevo = chipsWrap.querySelector("#habilNuevoFlujoInput");
+    const btnNuevo   = chipsWrap.querySelector("#habilNuevoFlujoBtn");
+
+    if (inputNuevo && btnNuevo) {
+      const doAdd = async () => {
+        const nombre = inputNuevo.value.trim();
+        if (!nombre) { inputNuevo.focus(); return; }
+        if ((S.flujos || []).some(f => String(f.flujo || f).trim().toLowerCase() === nombre.toLowerCase())) {
+          setErr(`Ya existe un flujo llamado "${nombre}".`);
+          return;
+        }
+        btnNuevo.disabled = true;
+        btnNuevo.textContent = "...";
+        try {
+          await API.flujosUpsert(nombre, 0, "");
+          // Refrescar flujos y habilitaciones en paralelo
+          const [fl] = await Promise.all([
+            API.flujosList(),
+            refreshHabil(),
+          ]);
+          if (fl) { S.flujos = fl; }
+          CACHE.invalidate("habil");
+          S.habil = await API.habilitacionesList();
+          inputNuevo.value = "";
+          renderHabil();
+          // Hacer foco en el chip del nuevo flujo
+          const newChip = chipsWrap.querySelector(`[data-chip-flujo="${CSS.escape(nombre)}"]`);
+          if (newChip) newChip.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          toast("Asignaciones", `✓ Flujo "${nombre}" creado. Ya podés asignar colaboradores.`);
+          setErr("");
+        } catch (e) {
+          setErr(`No se pudo crear el flujo. Intentá de nuevo.`);
+        } finally {
+          btnNuevo.disabled = false;
+          btnNuevo.textContent = "+";
+        }
+      };
+
+      btnNuevo.addEventListener("click", doAdd);
+      inputNuevo.addEventListener("keydown", e => {
+        if (e.key === "Enter") { e.preventDefault(); doAdd(); }
+        if (e.key === "Escape") { inputNuevo.value = ""; inputNuevo.blur(); }
+      });
+    }
   }
 
   // Header: select-all + colaborador + columnas de flujos con tooltip
@@ -2638,9 +2701,6 @@ function renderHabil() {
     return { ...r, _meta: meta };
   });
 
-  // Toggle "Solo habilitados"
-  const soloHabilitados = $("toggleSoloHabilitados")?.checked || false;
-
   const filtered = rows.filter((r) => {
     const rolRaw = String(r._meta.rol || "").trim();
     if (S.fHabil.roles.size > 0 && !S.fHabil.roles.has(rolRaw)) return false;
@@ -2650,8 +2710,6 @@ function renderHabil() {
       const tieneAlguno = [...S.fHabil.flujos].some(f => r[`H_${f}`]);
       if (!tieneAlguno) return false;
     }
-    // Toggle solo habilitados: oculta a quien no tiene ningún flujo habilitado
-    if (soloHabilitados && !flujos.some(f => r[`H_${f}`])) return false;
     const q = norm(S.fHabil.q);
     if (q) {
       const hay =
@@ -4959,16 +5017,11 @@ async function main() {
     copyToClipboard(rows.join("\n"));
   });
 
-  // Toggle "Solo habilitados"
-  $("toggleSoloHabilitados")?.addEventListener("change", () => renderHabil());
-
   $("btnClearHabil")?.addEventListener("click", () => {
     S.fHabil = { roles: new Set(), equipos: new Set(), q: "", flujos: new Set() };
     S._habilSel.clear();
     msRolesHab?.clear(); msEquipHab?.clear();
     _habilFlujoMs?.clear();
-    const togSH = $("toggleSoloHabilitados");
-    if (togSH) togSH.checked = false;
     $("searchHabil").value = ""; $("searchHabilWrap").classList.remove("has");
     renderHabil();
   });
