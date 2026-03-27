@@ -1028,11 +1028,29 @@ function validateFlujosSlackConfig_(rows) {
 
 async function onFlujoDelete(flujo) {
   setErr("");
+
+  // ── Optimistic: quitar flujo de S.flujos y S.habil inmediatamente ──
+  const prevFlujos = S.flujos ? [...S.flujos] : [];
+  const prevHabil  = S.habil  ? { ...S.habil, flujos: [...(S.habil.flujos||[])], rows: S.habil.rows } : null;
+
+  S.flujos = (S.flujos || []).filter(f => String(f.flujo || f).trim() !== flujo);
+  if (S.habil?.flujos) S.habil = { ...S.habil, flujos: S.habil.flujos.filter(f => f !== flujo) };
+  // Limpiar filtro activo si era ese flujo
+  if (S.fHabil?.flujos?.has(flujo)) S.fHabil.flujos.delete(flujo);
+
+  // Invalidar caches del frontend para forzar fetch fresco
+  CACHE.invalidate("flujos");
+  CACHE.invalidate("habil");
+
+  // Re-render inmediato con los datos optimistas
+  renderFlujos();
+  renderHabil();
+
   try {
     $("dailyStatus") && ($("dailyStatus").textContent = "Eliminando...");
     await API.flujosDelete(flujo);
 
-    // Refrescar flujos y habilitaciones en paralelo
+    // Confirmar con datos reales de GAS (ya sin cache por la invalidación)
     const [fl, hab] = await Promise.all([
       API.flujosList(),
       API.habilitacionesList(),
@@ -1041,9 +1059,14 @@ async function onFlujoDelete(flujo) {
     if (hab) { S.habil  = hab; CACHE.set("habil",  hab, 10 * 60_000); }
 
     renderFlujos();
-    renderHabil();   // actualizar Asignaciones también
-    toast("Asignaciones", `✓ Flujo "${flujo}" eliminado.`);
+    renderHabil();
+    toast("Operativa diaria", `✓ Flujo "${flujo}" eliminado.`);
   } catch (e) {
+    // Revertir si falló
+    S.flujos = prevFlujos;
+    S.habil  = prevHabil;
+    renderFlujos();
+    renderHabil();
     setErr("No se pudo eliminar el flujo. Intentá de nuevo.");
   } finally {
     $("dailyStatus") && ($("dailyStatus").textContent = "Listo");
@@ -2735,45 +2758,80 @@ Se quitará de Operativa diaria y de Asignaciones. Esta acción no se puede desh
           setErr(`Ya existe un flujo con ese nombre. Elegí otro.`);
           return;
         }
+        setErr("");
 
-        // Feedback inmediato en el botón
+        // ── Optimistic: agregar a S.flujos y S.habil inmediatamente ──
+        const nuevoFlujoObj = { flujo: nombre, perfiles_requeridos: 0, channel_id: "" };
+        S.flujos = [...(S.flujos || []), nuevoFlujoObj];
+        if (S.habil) {
+          S.habil = {
+            ...S.habil,
+            flujos: [...(S.habil.flujos || []), nombre],
+            rows: (S.habil.rows || []).map(r => ({
+              ...r,
+              [`H_${nombre}`]: false,
+              [`F_${nombre}`]: false,
+            })),
+          };
+        }
+        CACHE.invalidate("flujos");
+        CACHE.invalidate("habil");
+
+        // Limpiar input y re-render inmediato
+        inputNuevo.value = "";
+        renderFlujos();
+        renderHabil();
+
+        // Scroll al chip nuevo
+        requestAnimationFrame(() => {
+          const newChip = chipsWrap.querySelector(`[data-chip-flujo="${CSS.escape(nombre)}"]`);
+          if (newChip) newChip.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        });
+
+        // Feedback en botón — indica que está guardando en GAS
         btnNuevo.disabled = true;
         btnNuevo.textContent = "✓";
         btnNuevo.style.color = "var(--ok-txt)";
         inputNuevo.disabled = true;
-        inputNuevo.style.opacity = "0.5";
-        setErr("");
 
         try {
-          // Crear flujo
+          // Guardar en GAS
           await API.flujosUpsert(nombre, 0, "");
 
-          // Refrescar flujos y habilitaciones en paralelo — un solo par de requests
+          // Confirmar con datos reales — GAS ya tiene cache invalidado
           const [fl, hab] = await Promise.all([
             API.flujosList(),
             API.habilitacionesList(),
           ]);
-          if (fl)  { S.flujos = fl;  CACHE.set("flujos", fl, 2 * 60_000); }
+          if (fl)  { S.flujos = fl;  CACHE.set("flujos", fl,  2  * 60_000); }
           if (hab) { S.habil  = hab; CACHE.set("habil",  hab, 10 * 60_000); }
 
-          inputNuevo.value = "";
-          renderFlujos();   // actualizar Operativa diaria también
+          renderFlujos();
           renderHabil();
-
-          // Scroll al chip del nuevo flujo
-          requestAnimationFrame(() => {
-            const newChip = chipsWrap.querySelector(`[data-chip-flujo="${CSS.escape(nombre)}"]`);
-            if (newChip) newChip.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          });
           toast("Asignaciones", `✓ Flujo "${nombre}" creado. Habilitá colaboradores desde la tabla.`);
         } catch (e) {
+          // Revertir optimistic si GAS falla
+          S.flujos = (S.flujos || []).filter(f => String(f.flujo || f).trim() !== nombre);
+          if (S.habil?.flujos) {
+            S.habil = {
+              ...S.habil,
+              flujos: S.habil.flujos.filter(f => f !== nombre),
+              rows: (S.habil.rows || []).map(r => {
+                const clean = { ...r };
+                delete clean[`H_${nombre}`];
+                delete clean[`F_${nombre}`];
+                return clean;
+              }),
+            };
+          }
+          renderFlujos();
+          renderHabil();
           setErr("No se pudo crear el flujo. Intentá de nuevo.");
         } finally {
           btnNuevo.disabled = false;
           btnNuevo.textContent = "+";
           btnNuevo.style.color = "";
           inputNuevo.disabled = false;
-          inputNuevo.style.opacity = "";
         }
       };
 
@@ -4779,35 +4837,67 @@ async function main() {
 
   $("btnAddFlujo")?.addEventListener("click", async () => {
     const name = $("newFlujoName")?.value?.trim() || "";
-    if (!name) return setErr("Flujos: escribí el nombre del flujo.");
-
-    if ((S.flujos || []).some(f => String(f.flujo).trim().toLowerCase() === name.toLowerCase())) {
-      return setErr(`Flujos: ya existe un flujo con el nombre "${name}".`);
+    if (!name) return setErr("Escribí un nombre para el nuevo flujo.");
+    if ((S.flujos || []).some(f => String(f.flujo || f).trim().toLowerCase() === name.toLowerCase())) {
+      return setErr("Ya existe un flujo con ese nombre. Elegí otro.");
     }
+    setErr("");
+
+    // ── Optimistic: agregar inmediatamente ──
+    const nuevoObj = { flujo: name, perfiles_requeridos: 0, channel_id: "" };
+    S.flujos = [...(S.flujos || []), nuevoObj];
+    if (S.habil) {
+      S.habil = {
+        ...S.habil,
+        flujos: [...(S.habil.flujos || []), name],
+        rows: (S.habil.rows || []).map(r => ({ ...r, [`H_${name}`]: false, [`F_${name}`]: false })),
+      };
+    }
+    CACHE.invalidate("flujos");
+    CACHE.invalidate("habil");
+    $("newFlujoName").value = "";
+    renderFlujos();
+
+    // Scroll + foco en nueva fila
+    requestAnimationFrame(() => {
+      const tb = $("tblFlujos")?.querySelector("tbody");
+      if (!tb) return;
+      const newRow = Array.from(tb.querySelectorAll("tr")).find(tr => {
+        const b = tr.querySelector("td b");
+        return b && b.textContent.trim() === name;
+      });
+      if (newRow) {
+        newRow.scrollIntoView({ behavior: "smooth", block: "center" });
+        const inp = newRow.querySelector("[data-req]");
+        if (inp) { inp.focus(); inp.select(); }
+      }
+    });
 
     try {
       ($("dailyStatus") && ($("dailyStatus").textContent = "Guardando..."));
       await API.flujosUpsert(name, 0, "");
-      S.flujos = await API.flujosList();
+
+      // Confirmar con datos reales
+      const [fl, hab] = await Promise.all([API.flujosList(), API.habilitacionesList()]);
+      if (fl)  { S.flujos = fl;  CACHE.set("flujos", fl,  2  * 60_000); }
+      if (hab) { S.habil  = hab; CACHE.set("habil",  hab, 10 * 60_000); }
       renderFlujos();
+      renderHabil();
       toast("Operativa diaria", `✓ Flujo "${name}" creado.`);
-      $("newFlujoName").value = "";
-      // Scroll al nuevo flujo y foco en input de perfiles
-      requestAnimationFrame(() => {
-        const tb = $("tblFlujos")?.querySelector("tbody");
-        if (!tb) return;
-        const newRow = Array.from(tb.querySelectorAll("tr")).find(tr => {
-          const b = tr.querySelector("td b");
-          return b && b.textContent.trim() === name;
-        });
-        if (newRow) {
-          newRow.scrollIntoView({ behavior: "smooth", block: "center" });
-          const inp = newRow.querySelector("[data-req]");
-          if (inp) { inp.focus(); inp.select(); }
-        }
-      });
     } catch (e) {
-      setErr(`Flujos: ${e.message || e}`);
+      // Revertir si GAS falla
+      S.flujos = (S.flujos || []).filter(f => String(f.flujo || f).trim() !== name);
+      if (S.habil?.flujos) {
+        S.habil = {
+          ...S.habil,
+          flujos: S.habil.flujos.filter(f => f !== name),
+          rows: (S.habil.rows || []).map(r => {
+            const c = { ...r }; delete c[`H_${name}`]; delete c[`F_${name}`]; return c;
+          }),
+        };
+      }
+      renderFlujos();
+      setErr("No se pudo crear el flujo. Intentá de nuevo.");
     } finally {
       ($("dailyStatus") && ($("dailyStatus").textContent = "Listo"));
     }
