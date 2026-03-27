@@ -1482,13 +1482,20 @@ async function generarMensajePorFlujo_(flujo, btn = null) {
     const msg = `*${flujo}*\n${mentions}`;
 
     const fechaISO = todayYMD();
-    await API.slackOutboxAppend(fechaISO, "POR_FLUJO", flujo, "", msg, "PENDIENTE - SIN CANAL");
+    // Resolver canal del flujo desde S.flujos
+    const flujoConfig = (S.flujos || []).find(f => String(f.flujo || f).trim() === flujo);
+    const chId   = String(flujoConfig?.channel_id || "").trim();
+    const chName = chId
+      ? (S.canales || []).find(c => c.channel_id === chId)?.canal || ""
+      : "";
+    const estado = chId ? "BORRADOR" : "SIN CANAL CONFIGURADO";
+    await API.slackOutboxAppend(fechaISO, "POR_FLUJO", chName || flujo, chId, msg, estado);
     S.outbox = await API.slackOutboxList();
     renderOutbox();
     renderPlan();
-    toast("Outbox", `Mensaje generado: ${flujo} · ${items.length} perfiles`);
+    toast("Mensajes", `✓ Borrador generado para ${flujo} — ${items.length} perfil${items.length !== 1 ? "es" : ""}`);
   } catch (e) {
-    setErr(`Mensaje por flujo: ${e.message || e}`);
+    setErr("No se pudo generar el mensaje. Intentá de nuevo.");
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -1531,7 +1538,7 @@ const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
     const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
     await API.slackOutboxUpdate(row, canal, channel_id, mensaje);
     // no refresco todo para no “parpadear”; solo toast
-    toast("Outbox", "Guardado");
+    toast("Mensajes", "✓ Cambios guardados");
   } catch (e) {
     setErr(`Outbox: ${e.message || e}`);
   }
@@ -1632,6 +1639,7 @@ function renderOutbox() {
         <td class="nowrap">${escapeHtml(date)}</td>
         <td>
           <select data-ch ${disableEdits ? "disabled" : ""}>${channelOptionsHtml(chId)}</select>
+          ${!chId && r.canal ? `<div style="font-size:10px;color:var(--err-txt);margin-top:2px">⚠ Canal no configurado</div>` : ""}
         </td>
         <td>
           <textarea data-msg ${disableEdits ? "disabled" : ""}>${escapeHtml(msg)}</textarea>
@@ -1707,7 +1715,7 @@ function renderOutbox() {
         setErr("");
         S.outbox = await API.slackOutboxList();
         renderOutbox();
-        toast("Outbox", "Actualizado");
+        toast("Mensajes", "✓ Actualizado");
       } catch (e) {
         setErr(`Outbox: ${e.message || e}`);
       }
@@ -1731,7 +1739,7 @@ function renderOutbox() {
           // Patch optimista: eliminar localmente sin esperar re-fetch
           S.outbox = (S.outbox || []).filter((x) => Number(x.row) !== Number(row));
           renderOutbox();
-          toast("Outbox", "Eliminado");
+          toast("Mensajes", "✓ Mensaje eliminado");
           // Sync background
           API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
         } catch (e) {
@@ -1757,7 +1765,7 @@ function renderOutbox() {
           await API.slackOutboxProgramar(row, v);
           // Patch optimista: marcar como PROGRAMADO localmente
           patchOutbox_(row, { estado: `PROGRAMADO ${v}`, channel_id: sel.value, canal, mensaje: txt.value });
-          toast("Outbox", "Programado");
+          toast("Mensajes", "✓ Mensaje programado");
         } catch (e) {
           setErr(`Programar: ${e.message || e}`);
         }
@@ -1768,7 +1776,7 @@ function renderOutbox() {
         try {
           await API.slackOutboxDesprogramar(row);
           patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
-          toast("Outbox", "Mensaje desprogramado");
+          toast("Mensajes", "✓ Mensaje desprogramado");
         } catch (e) { setErr(`Outbox: ${e.message || e}`); }
       });
 
@@ -1874,7 +1882,7 @@ function renderDailyDrafts_() {
         await API.slackOutboxDelete(row);
         S.outbox = await API.slackOutboxList();
         renderOutbox();
-        toast("Outbox", "Eliminado");
+        toast("Mensajes", "✓ Mensaje eliminado");
       } catch (e) {
         setErr(`Eliminar borrador: ${e.message || e}`);
       }
@@ -2156,7 +2164,7 @@ function mountSlackCompose_() {
       const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
       await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
       clearCompose();
-      toast("Outbox", "Borrador guardado");
+      toast("Mensajes", "✓ Borrador guardado");
       // Sync en background
       API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
     } catch (e) {
@@ -2210,7 +2218,7 @@ function mountSlackCompose_() {
       // 2) programar
       await API.slackOutboxProgramar(newest.row, v);
       clearCompose();
-      toast("Outbox", "Mensaje programado");
+      toast("Mensajes", "✓ Mensaje programado");
       // Sync background
       API.slackOutboxList().then((d) => { S.outbox = d || []; renderOutbox(); }).catch(() => {});
     } catch (e) {
@@ -4780,9 +4788,9 @@ async function onGenerarPlanificacionYOutbox_() {
     renderPlan();
     renderOutbox();
     renderDashboard();
-    toast("OK", "Planificación + Outbox generados");
+    toast("Planificación del día", "✓ Planificación y mensajes generados");
   } catch (e) {
-    setErr(`Planificación/Outbox: ${e.message || e}`);
+    setErr("No se pudo generar la planificación. Intentá de nuevo.");
   } finally {
     ($("dailyStatus") && ($("dailyStatus").textContent = "Listo"));
     clearBusy();
