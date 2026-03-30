@@ -2784,6 +2784,8 @@ async function deleteColabsExecute_() {
 
 // Instancia del mountMultiSelect del filtro de flujo en Habilitaciones
 let _habilFlujoMs = null;
+let _syncBulkFlujoItems_ = null; // asignada en mountHabilFilters_
+let _habilBulkFlujoMs = null;
 
 /* ========= Habilitaciones ========= */
 function renderHabil() {
@@ -2808,6 +2810,18 @@ function renderHabil() {
   if (_habilFlujoMs && typeof _habilFlujoMs.updateItems === "function") {
     _habilFlujoMs.updateItems(flujos);
   }
+
+  // Sincronizar multiselect de roles (excluye roles sin flujos)
+  const ROLES_SIN_FLUJO_ = new Set(["Coordinadora Pedagógica", "Project Manager", "Team Leader"]);
+  const rolesHab = [...new Set((S.colabs || []).map(c => colabRowView(c).rol).filter(Boolean))]
+    .sort()
+    .filter(r => !ROLES_SIN_FLUJO_.has(r));
+  if (_msRolesHab_ && typeof _msRolesHab_.updateItems === "function") {
+    _msRolesHab_.updateItems(rolesHab);
+  }
+
+  // Sincronizar bulk flujo ms
+  if (typeof _syncBulkFlujoItems_ === "function") _syncBulkFlujoItems_();
 
   // ── Chips de resumen: count de habilitados por flujo ──────
   const chipsWrap = $("habilResumenChips");
@@ -3206,6 +3220,8 @@ function _syncHabilBulkBar_() {
   const n = (S._habilSel || new Set()).size;
   if (bar) bar.style.display = n > 0 ? "" : "none";
   if (countEl) countEl.innerHTML = `<b>${n} seleccionado${n !== 1 ? "s" : ""}</b>`;
+  // Sincronizar flujos disponibles en el bulk ms cada vez que la barra se muestra
+  if (n > 0 && typeof _syncBulkFlujoItems_ === "function") _syncBulkFlujoItems_();
 }
 
 async function setHabilitacion(idMeli, flujo, habilitado, fijo) {
@@ -5410,7 +5426,7 @@ async function main() {
   });
 
   // Select de flujo en la barra masiva — se puebla con S.flujos (Operativa)
-  let _habilBulkFlujoMs = mountMultiSelect("msHabilBulkFlujo", {
+  _habilBulkFlujoMs = mountMultiSelect("msHabilBulkFlujo", {
     title: "Flujos a aplicar",
     items: (S.flujos || []).map(f => String(f.flujo || f)).filter(Boolean).sort(),
     onChange: () => {},  // no filtra — acumula selección para la acción bulk
@@ -5418,7 +5434,8 @@ async function main() {
   });
 
   // Poblar ms de barra masiva — fuente única: S.flujos (Operativa) con fallback a habil.flujos
-  const _syncBulkFlujoItems_ = () => {
+  // (expuesta globalmente vía _syncBulkFlujoItems_ definida abajo)
+  _syncBulkFlujoItems_ = () => {
     const fromOperativa = (S.flujos || []).map(f => String(f.flujo || f)).filter(Boolean);
     const flujos = fromOperativa.length
       ? fromOperativa.slice().sort((a, b) => a.localeCompare(b))
@@ -5426,7 +5443,6 @@ async function main() {
     if (_habilBulkFlujoMs && typeof _habilBulkFlujoMs.updateItems === "function") {
       _habilBulkFlujoMs.updateItems(flujos);
     }
-    // También actualizar el filtro superior
     if (_habilFlujoMs && typeof _habilFlujoMs.updateItems === "function") {
       _habilFlujoMs.updateItems(flujos);
     }
