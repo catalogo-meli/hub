@@ -267,11 +267,12 @@ function roleBucket(raw) {
   return "Analista PM";
 }
 
-function copyToClipboard(text) {
 
-// Construye mapa slackId → "@Nombre" desde S.colabs (lazy, se recalcula si cambia)
+// ─── Slack token humanization ───────────────────────────────
+// Construye mapa slackId → nombre desde S.colabs (lazy cache)
 let _slackIdMapCache = null;
 let _slackIdMapColabsLen = -1;
+
 function _getSlackIdMap_() {
   const colabs = S.colabs || [];
   if (_slackIdMapCache && _slackIdMapColabsLen === colabs.length) return _slackIdMapCache;
@@ -284,7 +285,7 @@ function _getSlackIdMap_() {
   return _slackIdMapCache;
 }
 
-// <@UXXX> → @Nombre (para mostrar en UI)
+// <@UXXX> → @Nombre  (para mostrar en UI)
 function humanizeSlackTokens_(text) {
   if (!text) return text;
   const map = _getSlackIdMap_();
@@ -294,19 +295,15 @@ function humanizeSlackTokens_(text) {
   });
 }
 
-// @Nombre → <@UXXX> (al guardar desde editor que humanizó)
+// @Nombre → <@UXXX>  (al guardar desde editor que humanizó)
 function dehumanizeSlackTokens_(text) {
   if (!text) return text;
   const map = _getSlackIdMap_();
-  // Construir mapa inverso nombre → id
   const inv = new Map();
   map.forEach((nombre, id) => inv.set(`@${nombre}`, `<@${id}>`));
-  // Reemplazar @Nombre por token (orden: más largo primero para evitar conflictos)
   const keys = [...inv.keys()].sort((a, b) => b.length - a.length);
   let result = text;
-  for (const key of keys) {
-    result = result.split(key).join(inv.get(key));
-  }
+  for (const key of keys) result = result.split(key).join(inv.get(key));
   return result;
 }
 
@@ -5051,7 +5048,7 @@ async function onAgendaAgregar_(ownerParam) {
     const agFormBody = $("agFormBody");
     const agFormBtn  = $("btnAgFormToggle");
     if (agFormBody) agFormBody.style.display = "none";
-    if (agFormBtn)  agFormBtn.textContent = "✚ Agregar tema";
+    if (agFormBtn)  agFormBtn.textContent = "+ Agregar tema";
     if (btnAgregar) { btnAgregar.disabled = false; btnAgregar.textContent = "Agregar"; }
     toast("Agenda", "✓ Tema agregado");
     _agendaAddInProgress_ = false;
@@ -5073,7 +5070,7 @@ async function onAgendaAgregar_(ownerParam) {
       const agFormBody = $("agFormBody");
       const agFormBtn  = $("btnAgFormToggle");
       if (agFormBody) agFormBody.style.display = "none";
-      if (agFormBtn)  agFormBtn.textContent = "✚ Agregar tema";
+      if (agFormBtn)  agFormBtn.textContent = "+ Agregar tema";
       toast("Agenda", "✓ Guardado");
       _agendaAddInProgress_ = false;
       // Re-fetch demorado para no competir con el lock
@@ -5407,7 +5404,7 @@ async function main() {
       if (!body) return;
       const isOpen = body.style.display !== "none";
       body.style.display = isOpen ? "none" : "block";
-      if (btn) btn.textContent = isOpen ? "✚ Agregar tema" : "✕ Cancelar";
+      if (btn) btn.textContent = isOpen ? "+ Agregar tema" : "✕ Cancelar";
       if (!isOpen) setTimeout(() => $("agTema")?.focus(), 50);
     });
 
@@ -5947,7 +5944,7 @@ function wireLinksDrawer_() {
     if (!form) return;
     const open = form.style.display !== "none";
     form.style.display = open ? "none" : "flex";
-    if (toggle) toggle.textContent = open ? "+ Agregar link" : "▲ Cancelar";
+    if (toggle) toggle.textContent = open ? "+ Agregar link" : "✕ Cancelar";
     if (!open) setTimeout(() => $("linksAddTitulo")?.focus(), 50);
   });
 
