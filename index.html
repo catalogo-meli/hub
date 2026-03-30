@@ -1116,6 +1116,135 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
   .brand h1{ font-size: 14px; }
 }
 
+
+/* ═══════════════════════════════════════════════
+   SISTEMA DE DISEÑO UNIFICADO — HUB v3
+   ═══════════════════════════════════════════════ */
+
+/* Form labels consistentes */
+.form-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-bottom: 5px;
+  display: block;
+}
+
+/* Empty states */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Sub-tabs (Equipo / Organización) */
+.equipo-main-stab,
+.org-stab,
+.equipo-stab {
+  font-family: var(--font);
+  transition: color .12s, border-color .12s;
+}
+.equipo-main-stab:focus-visible,
+.org-stab:focus-visible {
+  outline: 2px solid var(--pri);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Tablas — fila hover consistente */
+.table tbody tr:hover { background: var(--pri-dim); }
+[data-theme="light"] .table tbody tr:hover { background: var(--pri-dim); }
+
+/* Editable cells en Organización */
+.editable-cell:focus {
+  background: var(--surface-2);
+  box-shadow: 0 0 0 2px var(--pri-dim);
+  border-radius: 4px;
+}
+
+/* ag-ctrl (selects/inputs dentro de agenda) */
+.ag-ctrl {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--brd-2);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-family: var(--font);
+}
+.ag-ctrl:focus {
+  border-color: var(--pri);
+  box-shadow: 0 0 0 2px var(--pri-dim);
+  outline: none;
+}
+
+/* Agenda card */
+.ag-card {
+  transition: border-color .12s, box-shadow .12s;
+}
+.ag-card:hover { border-color: var(--brd-2) !important; }
+.ag-card:has(.ag-row-detail[style*="display: block"]),
+.ag-card:has(.ag-row-detail:not([style*="display: none"])) {
+  border-color: var(--pri-brd) !important;
+}
+
+/* Botón flotante Links hover */
+#btnLinksUtiles:hover { transform: scale(1.08); }
+#btnLinksUtiles:active { transform: scale(.96); }
+
+/* Links drawer pills hover */
+.link-pill:hover { border-color: var(--brd-2) !important; }
+
+/* Modal overlay click target full */
+#colabModal, #flujoConfigModal, #asignacionModal, #canalesModal,
+#colabDeleteModal {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+#colabModal > div, #flujoConfigModal > div, #asignacionModal > div,
+#canalesModal > div, #colabDeleteModal > div {
+  margin: 60px 16px;
+  width: 100%;
+}
+
+/* xbtn (botón ×) consistente */
+.xbtn {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  transition: color .1s, background .1s;
+}
+.xbtn:hover { color: var(--err-txt); background: var(--err-dim); }
+
+/* selbar (barra de acciones sobre tablas) */
+.selbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Busy z-index fix */
+.busy { z-index: 890; }
+
+/* Responsive: ocultar columnas menos importantes en pantallas chicas */
+@media (max-width: 900px) {
+  #tblColabs td:nth-child(4),  /* Slack ID */
+  #tblColabs th:nth-child(4) { display: none; }
+  #tblColabs td:nth-child(9),  /* CUIL */
+  #tblColabs th:nth-child(9) { display: none; }
+}
+
 /* ── Tabla Colaboradores compacta ── */
 #tblColabs th,
 #tblColabs td {
@@ -1605,7 +1734,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="row">
 <div>
 <h2>Presentismo</h2>
-<div class="muted">Semana (Lun–Vie). Feriados destacados. Licencias con rango.</div>
+<div class="muted">Disponibilidad semanal del equipo.</div>
 </div>
 <div class="spacer"></div>
 <button class="btn" id="btnReloadPres">Actualizar</button>
@@ -1777,6 +1906,65 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 
 <script src="/api.js" type="module"></script>
 <script src="/app.js" type="module"></script>
+
+<!-- Modal Configuración de Flujo -->
+<div id="flujoConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;overflow:auto">
+  <div style="background:var(--surface);border-radius:var(--r-lg);max-width:560px;width:calc(100% - 32px);margin:60px auto;padding:28px;box-shadow:var(--shd-lg)">
+    <div class="row" style="margin-bottom:4px">
+      <h2 id="flujoConfigModalTitle" style="margin:0;font-size:15px">⚙️ Configuración del flujo</h2>
+      <div class="spacer"></div>
+      <button class="xbtn" id="flujoConfigModalClose" style="font-size:20px">×</button>
+    </div>
+    <p class="muted" style="margin:0 0 20px;font-size:12px">Los cambios se guardan en la hoja <b>Config_Flujos</b> del Sheets.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="grid-column:1/-1">
+        <div class="form-label">Flujo</div>
+        <input class="input" id="fcFlujo" disabled style="background:var(--surface-2);color:var(--text-2)"/>
+      </div>
+      <div>
+        <div class="form-label">Canal Slack <span class="muted">(nombre o ID)</span></div>
+        <input class="input" id="fcSlackChannel" placeholder="tareas-soporte-netkel"/>
+      </div>
+      <div>
+        <div class="form-label">Channel ID <span class="muted">(técnico)</span></div>
+        <input class="input" id="fcChannelId" placeholder="C0XXXXXXXXX"/>
+      </div>
+      <div>
+        <div class="form-label">Perfiles requeridos</div>
+        <input class="input" id="fcPerfiles" type="number" min="0" placeholder="0"/>
+      </div>
+      <div>
+        <div class="form-label">Rotación</div>
+        <select class="input" id="fcRotMode">
+          <option value="Off">Sin rotación</option>
+          <option value="diaria">Diaria</option>
+          <option value="semanal">Semanal</option>
+        </select>
+      </div>
+      <div>
+        <div class="form-label">Ventana de rotación <span class="muted">(días)</span></div>
+        <input class="input" id="fcRotWindow" type="number" min="0" placeholder="0 = auto"/>
+      </div>
+      <div style="grid-column:1/-1">
+        <div class="form-label">Notas default <span class="muted">(texto predeterminado en mensajes Slack)</span></div>
+        <textarea class="input" id="fcNotas" rows="2" placeholder="Ej: Recordá actualizar el canal antes de las 9am" style="resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <input type="checkbox" id="fcIncluirMensaje" style="width:16px;height:16px;accent-color:var(--pri);flex-shrink:0"/>
+        <label for="fcIncluirMensaje" class="form-label" style="margin:0;cursor:pointer">Incluir en mensaje general</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <input type="checkbox" id="fcPermiteFijos" style="width:16px;height:16px;accent-color:var(--pri);flex-shrink:0"/>
+        <label for="fcPermiteFijos" class="form-label" style="margin:0;cursor:pointer">Permite perfiles fijos</label>
+      </div>
+    </div>
+    <div class="hr" style="margin:20px 0"></div>
+    <div class="row" style="justify-content:flex-end;gap:8px">
+      <button class="btn ghost" id="flujoConfigModalCancel">Cancelar</button>
+      <button class="btn primary" id="flujoConfigModalSave">Guardar configuración</button>
+    </div>
+  </div>
+</div>
 
 <!-- Modal Asignación Semanal -->
 <div id="asignacionModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;overflow:auto">

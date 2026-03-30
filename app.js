@@ -1126,6 +1126,7 @@ function renderFlujos() {
             <input class="input smallnum" type="number" min="0" step="1" value="${req}" data-req />
           </td>
           <td class="right nowrap">
+            <button class="btn ghost" title="Configurar flujo" data-cfg style="font-size:13px;padding:3px 7px;margin-right:4px">⚙️</button>
             <button class="xbtn" title="Eliminar flujo" data-del>×</button>
           </td>
         </tr>
@@ -1249,6 +1250,10 @@ function renderFlujos() {
         if (!chWrap.contains(ev.target)) close();
       });
     }
+
+    tr.querySelector("[data-cfg]")?.addEventListener("click", () => {
+      openFlujoConfigModal_(unescapeAttr(flujo));
+    });
 
     tr.querySelector("[data-del]")?.addEventListener("click", async () => {
       if (!await hubConfirm_(`¿Eliminás el flujo "${unescapeAttr(flujo)}"? Se quitará de Operativa y de Asignaciones. No se puede deshacer.`, "Sí, eliminar")) return;
@@ -3051,10 +3056,18 @@ Se quitará de Operativa diaria y de Asignaciones. Esta acción no se puede desh
     return;
   }
 
+  // Ordenar por columna Colaborador si aplica
+  const habilSort = S.sort.habil || { key: "nombre", dir: 1 };
+  const sorted = filtered.slice().sort((a, b) => {
+    const na = String(a._meta.nombre || a._meta.id || "").toLowerCase();
+    const nb = String(b._meta.nombre || b._meta.id || "").toLowerCase();
+    return na.localeCompare(nb) * (habilSort.dir || 1);
+  });
+
   // Conservar selección entre re-renders
   const prevSel = S._habilSel || new Set();
 
-  body.innerHTML = filtered
+  body.innerHTML = sorted
     .map((r) => {
       const id = r.id_meli;
       const label = `${r._meta.nombre || id} (${id})`;
@@ -3181,6 +3194,9 @@ Se quitará de Operativa diaria y de Asignaciones. Esta acción no se puede desh
   });
 
   _syncHabilBulkBar_();
+
+  // Columna Colaborador ordenable
+  mountTableSort_("tblHabil", S.sort.habil, (next) => { S.sort.habil = next; renderHabil(); });
 }
 
 // Actualiza la barra de acciones masivas según S._habilSel
@@ -3829,44 +3845,74 @@ function linkify_(text) {
 // Markdown → HTML (para mostrar en el editor contenteditable)
 function mdToHtml_(md) {
   if (!md) return "";
-  let h = md
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  h = h.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  h = h.replace(/\*(.+?)\*/g, "<em>$1</em>");
-  h = h.replace(/__(.+?)__/g, "<u>$1</u>");
-  // Listas al final para no interferir con otros patrones
-  h = h.replace(/^- (.+)$/gm, "<li>$1</li>");
-  h = h.replace(/^\d+\. (.+)$/gm, "<li data-ol>$1</li>");
-  h = h.replace(/(<li[^>]*>.*<\/li>\n?)+/gs, m => {
-    const isOl = m.includes("data-ol");
-    const tag = isOl ? "ol" : "ul";
-    return `<${tag} style="margin:2px 0 2px 16px;padding:0">${m.replace(/ data-ol/g, "")}</${tag}>`;
-  });
-  h = h.replace(/\n/g, "<br>");
-  return h;
+  // Procesar línea por línea para manejar listas correctamente
+  const lines = md.split("\n");
+  const out = [];
+  let inUl = false, inOl = false;
+
+  const closeList = () => {
+    if (inUl) { out.push("</ul>"); inUl = false; }
+    if (inOl) { out.push("</ol>"); inOl = false; }
+  };
+
+  const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const fmt = s => s
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/__(.+?)__/g, "<u>$1</u>");
+
+  for (const line of lines) {
+    const ulM = line.match(/^- (.+)$/);
+    const olM = line.match(/^\d+\. (.+)$/);
+    if (ulM) {
+      if (inOl) { out.push("</ol>"); inOl = false; }
+      if (!inUl) { out.push('<ul style="margin:4px 0 4px 16px;padding:0">'); inUl = true; }
+      out.push(`<li>${fmt(esc(ulM[1]))}</li>`);
+    } else if (olM) {
+      if (inUl) { out.push("</ul>"); inUl = false; }
+      if (!inOl) { out.push('<ol style="margin:4px 0 4px 16px;padding:0">'); inOl = true; }
+      out.push(`<li>${fmt(esc(olM[1]))}</li>`);
+    } else {
+      closeList();
+      if (line.trim() === "") {
+        out.push("<br>");
+      } else {
+        out.push(`<div>${fmt(esc(line))}</div>`);
+      }
+    }
+  }
+  closeList();
+  return out.join("");
 }
 
 // HTML (contenteditable) → Markdown (para guardar en Sheets)
 function htmlToMd_(html) {
   if (!html) return "";
   let md = html;
-  // Listas
-  md = md.replace(/<li>(.*?)<\/li>/gi, (_, c) => "- " + c + "\n");
-  md = md.replace(/<\/?[uo]l[^>]*>/gi, "");
-  // Formato
+  // Listas — convertir ANTES de procesar otros tags
+  // li dentro de ul/ol
+  md = md.replace(/<ul[^>]*>(.*?)<\/ul>/gis, (_, inner) =>
+    inner.replace(/<li[^>]*>(.*?)<\/li>/gi, (__, c) => "- " + c.replace(/<[^>]+>/g,"").trim() + "\n")
+  );
+  md = md.replace(/<ol[^>]*>(.*?)<\/ol>/gis, (_, inner) => {
+    let i = 1;
+    return inner.replace(/<li[^>]*>(.*?)<\/li>/gi, (__, c) => `${i++}. ` + c.replace(/<[^>]+>/g,"").trim() + "\n");
+  });
+  // Formato inline
   md = md.replace(/<strong>(.*?)<\/strong>/gi, "**$1**");
   md = md.replace(/<b>(.*?)<\/b>/gi, "**$1**");
   md = md.replace(/<em>(.*?)<\/em>/gi, "*$1*");
   md = md.replace(/<i>(.*?)<\/i>/gi, "*$1*");
   md = md.replace(/<u>(.*?)<\/u>/gi, "__$1__");
-  // Saltos de línea
+  // Saltos de línea y divs
   md = md.replace(/<br\s*\/?>/gi, "\n");
+  md = md.replace(/<\/div><div>/gi, "\n");
   md = md.replace(/<div>/gi, "\n").replace(/<\/div>/gi, "");
-  md = md.replace(/<p>/gi, "\n").replace(/<\/p>/gi, "\n");
-  // Limpiar tags restantes y entidades HTML
+  md = md.replace(/<p>/gi, "").replace(/<\/p>/gi, "\n");
+  // Limpiar tags restantes y entidades
   md = md.replace(/<[^>]+>/g, "");
   md = md.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ");
-  // Limpiar líneas vacías múltiples
+  // Limpiar líneas vacías múltiples (máx 1 línea vacía entre párrafos)
   md = md.replace(/\n{3,}/g, "\n\n").trim();
   return md;
 }
@@ -4470,36 +4516,61 @@ function renderAgenda() {
           </div>
         </div>
 
-        <!-- MODO EDICIÓN: se muestra al expandir -->
-        <div class="ag-row-detail" data-ag-detail="${r.row}" style="display:none;padding:0 14px 14px;border-top:1px solid var(--brd)">
+        <!-- PANEL EXPANDIDO: modo lectura por defecto -->
+        <div class="ag-row-detail" data-ag-detail="${r.row}" style="display:none;border-top:1px solid var(--brd)">
 
-          <!-- Controles uniformes -->
-          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 0 10px">
-            <select class="ag-ctrl" data-ag-prio title="Prioridad" style="width:auto">
-              ${prioOpts}
-            </select>
-            <input class="ag-ctrl" data-ag-fecha type="date" value="${escapeAttr(_fechaToISO_(r.fecha))}" style="width:140px"/>
-            <div style="min-width:150px;max-width:200px">${ownerSelectHtml(r.owner, "ag_owner_" + r.row)}</div>
-            <select class="ag-ctrl" data-ag-tiempo style="width:auto">${tiempoOpts}</select>
-            <div style="flex:1"></div>
-            <span class="ag-save-status" data-save-status="${r.row}" style="font-size:10px;color:var(--text-3)"></span>
-            <button class="xbtn" data-ag-del="${r.row}" title="Eliminar">×</button>
+          <!-- Vista de lectura -->
+          <div class="ag-read-view" data-ag-read="${r.row}" style="padding:10px 14px 12px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <span style="font-size:12px;color:var(--text-3)">${escapeHtml(r.fecha || "—")}</span>
+              <span style="font-size:12px;color:var(--text-3)">·</span>
+              <span style="font-size:12px;color:var(--text-3)">${escapeHtml(r.owner || "—")}</span>
+              <span style="font-size:12px;color:var(--text-3)">·</span>
+              <span style="font-size:12px;color:var(--text-3)">${escapeHtml(r.tiempo ? (r.tiempo === "Si sobra tiempo" ? "Si sobra" : r.tiempo + " min") : "—")}</span>
+              <div style="flex:1"></div>
+              <button class="btn ghost" data-ag-edit-mode="${r.row}" style="font-size:11px;padding:3px 8px;gap:4px">✏️ Editar</button>
+              <button class="xbtn" data-ag-del="${r.row}" title="Eliminar" style="font-size:14px">×</button>
+            </div>
+            ${parseDescLinks_(r.descripcion).text
+              ? `<div style="font-size:12px;line-height:1.7;color:var(--text-1)">${renderMarkdown_(parseDescLinks_(r.descripcion).text)}</div>`
+              : `<div style="font-size:12px;color:var(--text-3);font-style:italic">Sin descripción.</div>`}
+            ${parseDescLinks_(r.descripcion).urls.length
+              ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">${parseDescLinks_(r.descripcion).urls.map(u =>
+                  `<a href="${escapeAttr(u)}" target="_blank" rel="noopener" class="pill" style="font-size:11px;color:var(--pri);text-decoration:none">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,45))}${u.length > 48 ? "…" : ""}</a>`
+                ).join("")}</div>`
+              : ""}
           </div>
 
-          <!-- Tema -->
-          <input class="input" data-ag-tema value="${escapeAttr(r.tema)}"
-            style="font-size:13px;font-weight:500;width:100%;margin-bottom:8px;box-sizing:border-box"/>
+          <!-- Vista de edición (oculta por defecto) -->
+          <div class="ag-edit-view" data-ag-edit="${r.row}" style="display:none;padding:0 14px 14px">
 
-          <!-- Descripción WYSIWYG -->
-          <div class="input wysiwyg-editor" data-ag-desc contenteditable="true"
-            style="font-size:12px;width:100%;min-height:36px;font-family:inherit;line-height:1.6;padding:8px;box-sizing:border-box;cursor:text"
-            data-placeholder="Descripción...">${mdToHtml_(parseDescLinks_(r.descripcion).text)}</div>
+            <!-- Controles uniformes -->
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 0 10px">
+              <select class="ag-ctrl" data-ag-prio title="Prioridad" style="width:auto">
+                ${prioOpts}
+              </select>
+              <input class="ag-ctrl" data-ag-fecha type="date" value="${escapeAttr(_fechaToISO_(r.fecha))}" style="width:140px"/>
+              <div style="min-width:150px;max-width:200px">${ownerSelectHtml(r.owner, "ag_owner_" + r.row)}</div>
+              <select class="ag-ctrl" data-ag-tiempo style="width:auto">${tiempoOpts}</select>
+              <div style="flex:1"></div>
+              <span class="ag-save-status" data-save-status="${r.row}" style="font-size:10px;color:var(--text-3)"></span>
+            </div>
 
-          <!-- Links -->
-          <div data-ag-links-wrap
-            style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--card2));margin-top:6px">
-            ${parseDescLinks_(r.descripcion).urls.map(u => `<span class="pill" style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px" data-link-pill="${escapeAttr(u)}"><a href="${escapeAttr(u)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(u)}">×</span></span>`).join("")}
-            <input class="input" data-ag-link-input placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:120px;padding:0;font-size:11px"/>
+            <!-- Tema -->
+            <input class="input" data-ag-tema value="${escapeAttr(r.tema)}"
+              style="font-size:13px;font-weight:500;width:100%;margin-bottom:8px;box-sizing:border-box"/>
+
+            <!-- Descripción WYSIWYG -->
+            <div class="input wysiwyg-editor" data-ag-desc contenteditable="true"
+              style="font-size:12px;width:100%;min-height:36px;font-family:inherit;line-height:1.6;padding:8px;box-sizing:border-box;cursor:text"
+              data-placeholder="Descripción...">${mdToHtml_(parseDescLinks_(r.descripcion).text)}</div>
+
+            <!-- Links -->
+            <div data-ag-links-wrap
+              style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 8px;border:1px solid var(--brd-2);border-radius:6px;background:var(--surface-2);margin-top:6px">
+              ${parseDescLinks_(r.descripcion).urls.map(u => `<span class="pill" style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px" data-link-pill="${escapeAttr(u)}"><a href="${escapeAttr(u)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(u)}">×</span></span>`).join("")}
+              <input class="input" data-ag-link-input placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:120px;padding:0;font-size:11px"/>
+            </div>
           </div>
         </div>
 
@@ -4559,8 +4630,13 @@ function renderAgenda() {
     </div>
     ${pendientesHtml}
     <div class="hr" style="margin-top:16px"></div>
-    <div class="row" style="align-items:center;justify-content:space-between;margin:8px 0">
+    <div class="row" style="align-items:center;justify-content:space-between;margin:8px 0;flex-wrap:wrap;gap:8px">
       <button class="btn ghost" id="btnAgendaHistToggle" type="button" style="font-size:12px">${histBtnLabel}</button>
+      ${!S.agendaHistCollapsed && historial.length > 4 ? `
+        <div class="search" style="position:relative;flex:1;min-width:160px;max-width:260px">
+          <input class="input" id="agHistSearch" placeholder="Buscar en historial..." style="font-size:12px;padding:5px 10px 5px 28px"/>
+          <span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--text-3);pointer-events:none">🔍</span>
+        </div>` : ""}
     </div>
     <div id="agendaHistSection">${histContent}</div>
   `;
@@ -4583,8 +4659,21 @@ function renderAgenda() {
     const descEl = host.querySelector('[data-agenda-row="' + r.row + '"] [data-ag-desc]');
     if (descEl) mountWysiwygInline_(descEl);
 
+    // Botón ✏️ Editar — alterna entre modo lectura y edición
+    const card = host.querySelector(`[data-agenda-row="${r.row}"]`);
+    const editBtn = card?.querySelector(`[data-ag-edit-mode="${r.row}"]`);
+    const readView = card?.querySelector(`[data-ag-read="${r.row}"]`);
+    const editView = card?.querySelector(`[data-ag-edit="${r.row}"]`);
+    if (editBtn && readView && editView) {
+      editBtn.addEventListener("click", () => {
+        readView.style.display = "none";
+        editView.style.display = "";
+        editView.querySelector("[data-ag-tema]")?.focus();
+      });
+    }
+
     // Links píldoras en fila editable
-    const wrap = host.querySelector(`tr[data-agenda-row="${r.row}"] [data-ag-links-wrap]`);
+    const wrap = host.querySelector(`[data-agenda-row="${r.row}"] [data-ag-links-wrap]`);
     const linkInp = wrap?.querySelector("[data-ag-link-input]");
     if (wrap && linkInp) {
       // Remover links existentes (× en cada píldora)
@@ -4795,6 +4884,18 @@ function renderAgenda() {
         return;
       }
       // btnAgFormToggle y btnAgendaAgregar manejados en wireUI (fuera del host)
+    });
+
+    // Búsqueda en historial (filtrado local)
+    host.addEventListener("input", (e) => {
+      if (e.target.id !== "agHistSearch") return;
+      const q = e.target.value.trim().toLowerCase();
+      const histSection = $("agendaHistSection");
+      if (!histSection) return;
+      histSection.querySelectorAll("tr[data-agenda-row]").forEach(tr => {
+        const text = tr.textContent.toLowerCase();
+        tr.style.display = q && !text.includes(q) ? "none" : "";
+      });
     });
   }
 
@@ -5287,9 +5388,10 @@ async function main() {
   // Filters
   // Roles dinámicos: extraídos de S.colabs, ordenados, únicos
   // Roles dinámicos desde S.colabs — se actualizan al cambiar colabs
+  const ROLES_SIN_FLUJO = new Set(["Coordinadora Pedagógica", "Project Manager", "Team Leader"]);
   const getRolesDynamic_ = () => [...new Set((S.colabs || []).map(c => colabRowView(c).rol).filter(Boolean))].sort();
-  // Habilitaciones: todos los roles (dinámico igual que Colaboradores)
-  const getRolesHab_ = () => getRolesDynamic_();
+  // Asignaciones: excluir roles que no operan flujos
+  const getRolesHab_ = () => getRolesDynamic_().filter(r => !ROLES_SIN_FLUJO.has(r));
 
   _msRolesCol_ = mountMultiSelect("msRolesColabs", { title: "Roles", items: getRolesDynamic_(), onChange: (set) => { S.fColabs.roles = set; renderColabs(); }});
   const msRolesCol = _msRolesCol_;
@@ -5312,6 +5414,7 @@ async function main() {
     title: "Flujos a aplicar",
     items: (S.flujos || []).map(f => String(f.flujo || f)).filter(Boolean).sort(),
     onChange: () => {},  // no filtra — acumula selección para la acción bulk
+    placeholder: "Seleccioná uno o más flujos",
   });
 
   // Poblar ms de barra masiva — fuente única: S.flujos (Operativa) con fallback a habil.flujos
@@ -5332,13 +5435,13 @@ async function main() {
   // ── Barra de acciones masivas: botones ──────────────────────────────────
   async function _applyBulkHabil_(habilitado, fijo, soloFijo) {
     const sel = Array.from(S._habilSel || []);
-    if (!sel.length) { setErr("Seleccioná al menos un colaborador."); return; }
+    if (!sel.length) { toast("Asignaciones", "Seleccioná al menos un colaborador antes de aplicar."); return; }
 
     // Flujos seleccionados en el ms de la barra
     const flujosSel = _habilBulkFlujoMs
       ? Array.from(_habilBulkFlujoMs._state?.selected || [])
       : [];
-    if (!flujosSel.length) { setErr("Elegí al menos un flujo en la barra."); return; }
+    if (!flujosSel.length) { toast("Asignaciones", "Elegí uno o más flujos en el desplegable 'Flujos a aplicar'."); return; }
 
     setBusy("Habilitaciones", `Aplicando a ${sel.length} colaboradores...`);
     setErr("");
@@ -5490,6 +5593,12 @@ async function main() {
   wireOrganizacionSubTabs_();
   wireAsignacion_();
   wireCanales_();
+
+  // Modal configuración de flujo
+  $("flujoConfigModalClose")?.addEventListener("click", closeFlujoConfigModal_);
+  $("flujoConfigModalCancel")?.addEventListener("click", closeFlujoConfigModal_);
+  $("flujoConfigModalSave")?.addEventListener("click", saveFlujoConfigModal_);
+  $("flujoConfigModal")?.addEventListener("click", e => { if (e.target === $("flujoConfigModal")) closeFlujoConfigModal_(); });
 }
 
 
@@ -6195,4 +6304,67 @@ function wireCanales_() {
   $("canalesModalCancel")?.addEventListener("click", closeCanalesModal_);
   $("canalesModalSave")?.addEventListener("click", saveCanalesModal_);
   $("canalesModal")?.addEventListener("click", e => { if (e.target === $("canalesModal")) closeCanalesModal_(); });
+}
+
+/* =========================================================
+   MODAL CONFIGURACIÓN DE FLUJO
+   ========================================================= */
+
+function openFlujoConfigModal_(flujoName) {
+  const f = (S.flujos || []).find(x => String(x.flujo || "").trim() === flujoName);
+  if (!f) return;
+
+  $("flujoConfigModalTitle").textContent = `⚙️ ${flujoName}`;
+  $("fcFlujo").value         = flujoName;
+  $("fcSlackChannel").value  = f.channel_id || "";
+  $("fcChannelId").value     = f.channel_id || "";
+  $("fcPerfiles").value      = f.perfiles_requeridos || 0;
+  $("fcRotMode").value       = f.rotacion_modo || "Off";
+  $("fcRotWindow").value     = f.ventana_rotacion_dias || "";
+  $("fcNotas").value         = f.notas_default || "";
+  $("fcIncluirMensaje").checked = f.incluir_en_mensaje !== false;
+  $("fcPermiteFijos").checked   = f.permite_fijos !== false;
+  $("flujoConfigModal").style.display = "block";
+  setTimeout(() => $("fcSlackChannel")?.focus(), 50);
+}
+
+function closeFlujoConfigModal_() {
+  $("flujoConfigModal").style.display = "none";
+}
+
+async function saveFlujoConfigModal_() {
+  const flujo = $("fcFlujo")?.value?.trim();
+  if (!flujo) return;
+
+  const payload = {
+    flowName:          flujo,
+    slackChannel:      $("fcSlackChannel")?.value?.trim() || "",
+    channel_id:        $("fcChannelId")?.value?.trim()    || "",
+    profilesRequired:  Number($("fcPerfiles")?.value  || 0),
+    rotationMode:      $("fcRotMode")?.value           || "Off",
+    rotationWindowDays:Number($("fcRotWindow")?.value  || 0),
+    notesDefault:      $("fcNotas")?.value?.trim()     || "",
+    includeSlack:      !!$("fcIncluirMensaje")?.checked,
+    allowFixed:        !!$("fcPermiteFijos")?.checked,
+  };
+
+  const btn = $("flujoConfigModalSave");
+  if (btn) { btn.disabled = true; btn.textContent = "Guardando..."; }
+
+  try {
+    await API.flujosUpdate(payload);
+    // Refrescar S.flujos con los nuevos datos
+    const updated = await API.flujosList().catch(() => null);
+    if (updated) {
+      S.flujos = updated;
+      CACHE.set("flujos", updated, 2 * 60_000);
+      renderFlujos();
+    }
+    closeFlujoConfigModal_();
+    toast("Operativa diaria", `✓ Configuración de "${flujo}" guardada`);
+  } catch (e) {
+    setErr(`No se pudo guardar: ${e.message || e}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Guardar configuración"; }
+  }
 }

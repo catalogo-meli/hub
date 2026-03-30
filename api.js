@@ -74,6 +74,7 @@ export const API = {
   canalesList: () => get("canales.list"),
 
   flujosList: () => get("flujos.list"),
+  flujosUpdate: (data) => post("flujos.update", data),
   flujosUpsert: (flujo, perfiles_requeridos, channel_id = "") =>
     post("flujos.upsert", { flujo, perfiles_requeridos, channel_id }),
   flujosDelete: (flujo) => post("flujos.delete", { flujo }),
