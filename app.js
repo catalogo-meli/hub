@@ -268,6 +268,49 @@ function roleBucket(raw) {
 }
 
 function copyToClipboard(text) {
+
+// Construye mapa slackId → "@Nombre" desde S.colabs (lazy, se recalcula si cambia)
+let _slackIdMapCache = null;
+let _slackIdMapColabsLen = -1;
+function _getSlackIdMap_() {
+  const colabs = S.colabs || [];
+  if (_slackIdMapCache && _slackIdMapColabsLen === colabs.length) return _slackIdMapCache;
+  _slackIdMapCache = new Map();
+  _slackIdMapColabsLen = colabs.length;
+  colabs.forEach(c => {
+    const v = colabRowView(c);
+    if (v.slackId) _slackIdMapCache.set(v.slackId, v.nombre || v.id);
+  });
+  return _slackIdMapCache;
+}
+
+// <@UXXX> → @Nombre (para mostrar en UI)
+function humanizeSlackTokens_(text) {
+  if (!text) return text;
+  const map = _getSlackIdMap_();
+  return text.replace(/<@([A-Z0-9]+)>/g, (match, id) => {
+    const nombre = map.get(id);
+    return nombre ? `@${nombre}` : match;
+  });
+}
+
+// @Nombre → <@UXXX> (al guardar desde editor que humanizó)
+function dehumanizeSlackTokens_(text) {
+  if (!text) return text;
+  const map = _getSlackIdMap_();
+  // Construir mapa inverso nombre → id
+  const inv = new Map();
+  map.forEach((nombre, id) => inv.set(`@${nombre}`, `<@${id}>`));
+  // Reemplazar @Nombre por token (orden: más largo primero para evitar conflictos)
+  const keys = [...inv.keys()].sort((a, b) => b.length - a.length);
+  let result = text;
+  for (const key of keys) {
+    result = result.split(key).join(inv.get(key));
+  }
+  return result;
+}
+
+function copyToClipboard(text) {
   const t = String(text ?? "");
   if (!t) return;
   const label = t.length > 40 ? t.slice(0, 38) + "…" : t;
@@ -1672,7 +1715,7 @@ function renderOutbox() {
         '<div style="font-size:11px;color:var(--text-3);text-transform:uppercase">Fecha y hora</div>' +
         '<input class="input" type="datetime-local" data-edit-when value="' + escapeAttr(r.programado_para || "") + '" style="font-size:12px"/>' +
         '<div style="font-size:11px;color:var(--text-3);text-transform:uppercase">Mensaje</div>' +
-        '<textarea class="input" data-edit-msg style="font-size:12px;min-height:80px">' + escapeHtml(msg) + '</textarea>' +
+        '<textarea class="input" data-edit-msg style="font-size:12px;min-height:80px">' + escapeHtml(humanizeSlackTokens_(msg)) + '</textarea>' +
         '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">' +
         '<button class="btn ghost" data-edit-desch style="font-size:12px;color:var(--text-3)">Desprogramar</button>' +
         '<button class="btn ghost" data-edit-cancel style="font-size:12px">Cancelar</button>' +
@@ -1693,8 +1736,8 @@ function renderOutbox() {
       ? ('<select data-ch>' + channelOptionsHtml(chId) + '</select>' + _noChW)
       : ('<span style="font-size:12px;font-weight:500">' + escapeHtml(canalNombre) + '</span>');
     const _msgDisp = isDraft
-      ? ('<textarea data-msg style="min-height:60px">' + escapeHtml(msg) + '</textarea>')
-      : ('<div style="font-size:12px;max-width:520px;white-space:pre-wrap;color:var(--text-2)">' + escapeHtml(msg) + '</div>');
+      ? ('<textarea data-msg style="min-height:60px">' + escapeHtml(humanizeSlackTokens_(msg)) + '</textarea>')
+      : ('<div style="font-size:12px;max-width:520px;white-space:pre-wrap;color:var(--text-2)">' + escapeHtml(humanizeSlackTokens_(msg)) + '</div>');
     // Draft: badge de estado. Scheduled: fecha programada legible en la columna estado
     const _estDisp = isDraft
       ? ('<span class="' + badge + '">' + escapeHtml(formatEstado(rawEstado)) + '</span>')
@@ -1734,7 +1777,7 @@ function renderOutbox() {
       <tr>
         <td class="nowrap">${escapeHtml(date)}</td>
         <td>${escapeHtml(chLabel)}</td>
-        <td><div style="max-width:720px;white-space:pre-wrap">${escapeHtml(msg)}</div></td>
+        <td><div style="max-width:720px;white-space:pre-wrap">${escapeHtml(humanizeSlackTokens_(msg))}</div></td>
         <td class="nowrap"><span class="${badge}">${escapeHtml(formatEstado(rawEstado))}</span></td>
       </tr>
     `;
@@ -1828,7 +1871,7 @@ function renderOutbox() {
         if (_eSav) _eSav.addEventListener("click", async function() {
           var nChId = _eCh  ? _eCh.value        : "";
           var nWhen = _eWhn ? _eWhn.value.trim() : "";
-          var nMsg  = _eMsg ? _eMsg.value.trim() : ((S.outbox||[]).find(function(x){return Number(x.row)===row;})?.mensaje||"");
+          var nMsg  = _eMsg ? dehumanizeSlackTokens_(_eMsg.value.trim()) : ((S.outbox||[]).find(function(x){return Number(x.row)===row;})?.mensaje||"");
           if (!nWhen) { setErr("Elegí fecha y hora para programar."); return; }
           if (!nMsg)  { setErr("El mensaje no puede estar vacío."); return; }
           var nCanal = (S.canales || []).find(function(c) { return c.channel_id === nChId; })?.canal || "";
@@ -1979,7 +2022,7 @@ function renderDailyDrafts_() {
             <button class="btn ghost" data-copy="${g.row}">Copiar</button>
             <button class="btn ghost" data-del="${g.row}">Eliminar borrador</button>
           </div>
-          <div style="white-space:pre-wrap">${escapeHtml(g.msg)}</div>
+          <div style="white-space:pre-wrap">${escapeHtml(humanizeSlackTokens_(g.msg))}</div>
         </div>
       `;
     })
