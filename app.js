@@ -564,7 +564,7 @@ function mountTabs() {
     const activeTab = tabs.querySelector(`[data-tab="${key}"]`);
     if (activeTab) activeTab.classList.add("active");
 
-    ["dashboard", "daily", "agenda", "colabs", "habil", "pres"].forEach((k) => {
+    ["dashboard", "daily", "agenda", "colabs", "habil", "pres", "equipo"].forEach((k) => {
       const sec = $(`tab_${k}`);
       if (sec) sec.style.display = k === key ? "" : "none";
     });
@@ -577,6 +577,7 @@ function mountTabs() {
     if (key === "colabs") renderColabs();
     if (key === "habil") renderHabil();
     if (key === "pres") renderPresentismo();
+    if (key === "equipo") renderEquipo();
 
     // Lazy load: carga datos del backend solo la primera vez que se visita el tab
     if (!loaded.has(key)) {
@@ -630,6 +631,9 @@ async function lazyLoadTab_(name) {
       renderPresentismo();
       renderDashboard();
     }
+    if (name === "equipo") {
+      await refreshEquipo_();
+    }
   } catch (e) {
     setErr(`Error cargando ${name}: ${e.message || e}`);
   } finally {
@@ -665,7 +669,8 @@ function colabRowView(c) {
   const mailProd = getField(c, ["Mail Productora", "Mail_Productora", "Mail productora", "mail_productora"]);
   const mailExt = getField(c, ["Mail Externo", "Mail_Externo", "Mail externo", "mail_externo"]);
   const ingreso = getField(c, ["Fecha Ingreso", "Fecha_Ingreso", "Fecha ingreso", "fecha_ingreso", "Ingreso"]);
-  return { id, nombre, rol, equipo, ubic, slackId, mailProd, mailExt, ingreso };
+  const cuil = getField(c, ["CUIL", "cuil"]);
+  return { id, nombre, rol, equipo, ubic, slackId, mailProd, mailExt, ingreso, cuil };
 }
 
 function applySectionFilter(list, f) {
@@ -2513,7 +2518,7 @@ function renderColabs() {
   }
 
   if (!sorted.length) {
-    tb.innerHTML = `<tr><td colspan="9" class="muted">Sin resultados.</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="12" class="muted">Sin resultados.</td></tr>`;
     return;
   }
 
@@ -2529,12 +2534,14 @@ function renderColabs() {
           <td class="nowrap"><input type="checkbox" data-sel ${checked} /></td>
           <td class="copyable" data-copy="${escapeAttr(v.id)}">${escapeHtml(v.id)}</td>
           <td>${escapeHtml(v.nombre)}</td>
+          <td class="copyable" data-copy="${escapeAttr(v.slackId)}">${escapeHtml(v.slackId)}</td>
           <td>${escapeHtml(v.rol)}</td>
           <td>${escapeHtml(v.equipo)}</td>
           <td>${escapeHtml(v.ubic)}</td>
+          <td class="nowrap">${escapeHtml(fmtDateAny(v.ingreso))}</td>
+          <td class="copyable" data-copy="${escapeAttr(v.cuil)}">${escapeHtml(v.cuil)}</td>
           <td class="copyable" data-copy="${escapeAttr(v.mailProd)}">${escapeHtml(v.mailProd)}</td>
           <td class="copyable" data-copy="${escapeAttr(v.mailExt)}">${escapeHtml(v.mailExt)}</td>
-          <td class="nowrap">${escapeHtml(fmtDateAny(v.ingreso))}</td>
           <td class="nowrap">
             <button class="btn ghost" data-colab-edit="${escapeAttr(v.id)}" style="font-size:11px;padding:3px 8px" title="Editar">✏️</button>
           </td>
@@ -2611,7 +2618,7 @@ async function openColabModal_(editId = null) {
   }
 
   // Limpiar / poblar campos
-  const campos = ["cmIdMeli","cmNombre","cmRol","cmEquipo","cmFechaIngreso","cmMailProd","cmMailExt","cmTag"];
+  const campos = ["cmIdMeli","cmNombre","cmSlackId","cmRol","cmEquipo","cmFechaIngreso","cmMailProd","cmMailExt","cmCuil"];
   campos.forEach(id => { const el = $(id); if (el) el.value = ""; });
   if ($("cmUbic")) $("cmUbic").value = "";
   if ($("cmUbicOtra")) { $("cmUbicOtra").value = ""; $("cmUbicOtra").style.display = "none"; }
@@ -2639,17 +2646,15 @@ async function openColabModal_(editId = null) {
           if ($("cmUbicOtra")) { $("cmUbicOtra").style.display = ""; $("cmUbicOtra").value = v.ubic; }
         }
       }
+      set_("cmSlackId",      v.slackId);
       set_("cmMailProd",     v.mailProd);
       set_("cmMailExt",      v.mailExt);
+      set_("cmCuil",         v.cuil);
       // Fecha ingreso: convertir a yyyy-MM-dd para input type=date
       if (v.ingreso) {
         const iso = _fechaToISO_(v.ingreso) || (v.ingreso instanceof Date ? v.ingreso.toISOString().slice(0,10) : "");
         if (iso && $("cmFechaIngreso")) $("cmFechaIngreso").value = iso;
       }
-      // TAG desde el objeto raw
-      const raw = (S.colabs || []).find(c => colabRowView(c).id === editId);
-      const tag = raw?.TAG || raw?.tag || "";
-      if (tag && $("cmTag")) $("cmTag").value = tag;
       // ID no editable en modo edit
       if ($("cmIdMeli")) $("cmIdMeli").disabled = true;
     }
@@ -2681,7 +2686,8 @@ async function saveColabModal_() {
   const fecha_ingreso = $("cmFechaIngreso")?.value || "";
   const mail_prod     = $("cmMailProd")?.value?.trim() || "";
   const mail_ext      = $("cmMailExt")?.value?.trim() || "";
-  const tag           = $("cmTag")?.value?.trim() || "";
+  const slack_id      = $("cmSlackId")?.value?.trim() || "";
+  const cuil          = $("cmCuil")?.value?.trim() || "";
 
   // Validar obligatorios
   const faltantes = [];
@@ -2703,7 +2709,7 @@ async function saveColabModal_() {
   try {
     setBusy("Colaboradores", _colabModalMode_ === "add" ? "Agregando..." : "Guardando...");
 
-    const payload = { id_meli, nombre, rol, equipo, ubicacion, mail_prod, mail_ext, fecha_ingreso, tag };
+    const payload = { id_meli, nombre, rol, equipo, ubicacion, mail_prod, mail_ext, fecha_ingreso, slack_id, cuil };
 
     if (_colabModalMode_ === "add") {
       await API.colaboradoresAdd(payload);
@@ -3549,7 +3555,7 @@ function renderDashboard() {
   kpi.innerHTML = `
     <div class="dash-status pill ${statusCls}" style="width:100%;margin-bottom:14px;padding:12px 16px;font-size:14px;border-radius:12px;display:flex;align-items:center;gap:10px">
       <span style="font-size:18px">${statusEmoji}</span>
-      <span><b>${statusLabel}</b> — ${pres} de ${total} presentes hoy · ${flujosActivos} flujo${flujosActivos !== 1 ? "s" : ""} activo${flujosActivos !== 1 ? "s" : ""}${slackPendientes > 0 ? ` · <span style="color:var(--warn)">${slackPendientes} mensaje${slackPendientes !== 1 ? "s" : ""} pendiente${slackPendientes !== 1 ? "s" : ""} Slack</span>` : ""}</span>
+      <span><b>${statusLabel}</b> — ${pres} de ${total} presentes hoy · ${flujosActivos} flujo${flujosActivos !== 1 ? "s" : ""} activo${flujosActivos !== 1 ? "s" : ""}${slackPendientes > 0 ? ` · <span id="dashSlackPendientes" style="color:var(--warn);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px" title="Ir a Mensajes Slack">${slackPendientes} mensaje${slackPendientes !== 1 ? "s" : ""} pendiente${slackPendientes !== 1 ? "s" : ""} Slack</span>` : ""}</span>
     </div>
     <div class="kpi kpi-agenda" id="kpiAgenda" title="Ir a Agenda">
       <div class="v" style="font-size:22px" id="kpiAgendaNum">—</div>
@@ -3566,6 +3572,18 @@ function renderDashboard() {
 
   // Actualizar card de Agenda
   _updateKpiAgenda_();
+
+  // Slack pendientes → click navega a Operativa diaria y scrollea a mensajes
+  const dashSlackEl = document.getElementById("dashSlackPendientes");
+  if (dashSlackEl) {
+    dashSlackEl.onclick = () => {
+      document.querySelector('[data-tab="daily"]')?.click();
+      setTimeout(() => {
+        const target = document.getElementById("tblDrafts") || document.getElementById("slackOutboxSection");
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 150);
+    };
+  }
 }
 
 
@@ -4047,6 +4065,115 @@ function mountWysiwyg_(editorId, toolbarId, emojiId) {
 let _agDescEditor_ = null;
 let _agendaAddInProgress_ = false; // previene doble-add por doble click
 
+// Monta un editor WYSIWYG completo (toolbar + emoji) directamente sobre un elemento DOM,
+// insertando la toolbar inmediatamente antes del editor. Usado en cards de edición inline.
+function mountWysiwygInline_(editorEl) {
+  if (!editorEl || editorEl._wysiwygMounted) return;
+  editorEl._wysiwygMounted = true;
+
+  // Crear toolbar
+  const toolbar = document.createElement("div");
+  toolbar.className = "wysiwyg-toolbar";
+  toolbar.style.cssText = "display:flex;gap:3px;align-items:center;flex-wrap:wrap;padding:3px 0 5px";
+  toolbar.innerHTML = `
+    <button type="button" data-cmd="bold"                title="Negrita"   style="font-weight:700">B</button>
+    <button type="button" data-cmd="italic"              title="Cursiva"   style="font-style:italic">I</button>
+    <button type="button" data-cmd="underline"           title="Subrayado" style="text-decoration:underline">U</button>
+    <button type="button" data-cmd="insertUnorderedList" title="Lista"     >☰</button>
+    <button type="button" data-cmd="insertOrderedList"   title="Numerada"  >1.</button>
+    <button type="button" data-emoji title="Emoji">😊</button>
+  `.trim();
+  toolbar.querySelectorAll("button[data-cmd]").forEach(btn => {
+    btn.style.cssText = "border:1px solid var(--brd-2);background:var(--surface-2);color:var(--text-1);border-radius:4px;padding:2px 7px;cursor:pointer;font-size:12px;line-height:1.4";
+  });
+  toolbar.querySelector("button[data-emoji]").style.cssText =
+    "border:1px solid var(--brd-2);background:var(--surface-2);color:var(--text-1);border-radius:4px;padding:2px 7px;cursor:pointer;font-size:13px;line-height:1.4";
+
+  editorEl.parentNode.insertBefore(toolbar, editorEl);
+
+  // Resize
+  const resize = () => { editorEl.style.minHeight = "48px"; };
+  editorEl.addEventListener("input", resize);
+  resize();
+
+  // Formato
+  const fmt = (cmd) => { editorEl.focus(); document.execCommand(cmd, false, null); };
+  toolbar.querySelectorAll("[data-cmd]").forEach(btn => {
+    btn.addEventListener("mousedown", e => {
+      e.preventDefault();
+      fmt(btn.getAttribute("data-cmd"));
+    });
+  });
+
+  // Auto-markdown mientras escribe
+  editorEl.addEventListener("keyup", (e) => {
+    if (![" ", "*", "_", "Enter"].includes(e.key)) return;
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return;
+    const text = node.textContent;
+    const offset = range.startOffset;
+    const lineText = text.slice(0, offset);
+    const boldM = lineText.match(/\*\*(.+?)\*\*$/);
+    if (boldM) {
+      const r2 = range.cloneRange(); r2.setStart(node, offset - boldM[0].length); r2.setEnd(node, offset); r2.deleteContents();
+      document.execCommand("bold", false, null); document.execCommand("insertText", false, boldM[1]); document.execCommand("bold", false, null); return;
+    }
+    const italicM = lineText.match(/(?<!\*)\*([^*]+?)\*$/);
+    if (italicM) {
+      const r2 = range.cloneRange(); r2.setStart(node, offset - italicM[0].length); r2.setEnd(node, offset); r2.deleteContents();
+      document.execCommand("italic", false, null); document.execCommand("insertText", false, italicM[1]); document.execCommand("italic", false, null); return;
+    }
+    const ulM = lineText.match(/__(.+?)__$/);
+    if (ulM) {
+      const r2 = range.cloneRange(); r2.setStart(node, offset - ulM[0].length); r2.setEnd(node, offset); r2.deleteContents();
+      document.execCommand("underline", false, null); document.execCommand("insertText", false, ulM[1]); document.execCommand("underline", false, null);
+    }
+  });
+  editorEl.addEventListener("keydown", (e) => {
+    if (e.key !== " " && e.key !== "Enter") return;
+    const sel = window.getSelection(); if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0); const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return;
+    const lineText = node.textContent.slice(0, range.startOffset);
+    if (e.key === " " && lineText === "-") { e.preventDefault(); document.execCommand("insertUnorderedList", false, null); return; }
+    if (e.key === " " && /^\d+\.$/.test(lineText)) { e.preventDefault(); document.execCommand("insertOrderedList", false, null); }
+  });
+
+  // Emoji picker
+  const emojiBtn = toolbar.querySelector("[data-emoji]");
+  const EMOJI_ITEMS = ["👍","👎","✅","❌","⚠️","🔴","🟡","🟢","🔵","⭐","🎯","🚀","💡","📌","🔔","⏰","📝","💬","👀","❓","❗","🚨","‼️","🔥","🚩","📢","📊","📈","⚙️","🛠️","🔧","📦","🏷️","🔗","🔍","👤","👥","🤝","👋","🙌","🙏","🤔","💪","🎉","📅","🗓️"];
+  const picker = document.createElement("div");
+  picker.style.cssText = "position:fixed;background:var(--surface);border:1px solid var(--brd-2);border-radius:8px;padding:10px;display:none;z-index:9999;box-shadow:var(--shd-lg);width:260px;max-height:260px;overflow-y:auto";
+  picker.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:3px">${EMOJI_ITEMS.map(e => `<button type="button" data-emo="${e}" style="font-size:18px;padding:3px;border:none;background:none;cursor:pointer;border-radius:4px;line-height:1">${e}</button>`).join("")}</div>`;
+  picker.querySelectorAll("[data-emo]").forEach(b => {
+    b.addEventListener("mousedown", e => e.preventDefault());
+    b.addEventListener("click", () => {
+      if (editorEl._savedRange) {
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(editorEl._savedRange); editorEl._savedRange = null;
+      } else { editorEl.focus(); }
+      document.execCommand("insertText", false, b.getAttribute("data-emo"));
+      picker.style.display = "none";
+    });
+  });
+  document.body.appendChild(picker);
+  emojiBtn.addEventListener("click", e => {
+    e.stopPropagation();
+    if (picker.style.display !== "none") { picker.style.display = "none"; return; }
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) editorEl._savedRange = sel.getRangeAt(0).cloneRange();
+    const rect = emojiBtn.getBoundingClientRect();
+    picker.style.top  = (rect.bottom + 4) + "px";
+    picker.style.left = Math.min(rect.left, window.innerWidth - 270) + "px";
+    picker.style.display = "block";
+  });
+  document.addEventListener("click", (e) => {
+    if (!picker.contains(e.target) && e.target !== emojiBtn) picker.style.display = "none";
+  });
+}
+
 // ── Editor Markdown toolbar ──────────────────────────────────
 function applyMdFormat_(ta, cmd) {
   if (!ta) return;
@@ -4453,44 +4580,9 @@ function renderAgenda() {
   pendientes.forEach(r => {
     mountAgendaOwnerMs_("ag_owner_" + r.row + "_wrap");
 
-    // Montar WYSIWYG en el div contenteditable de descripción de la card
+    // Montar WYSIWYG completo (toolbar + emoji) en el editor de descripción de la card
     const descEl = host.querySelector('[data-agenda-row="' + r.row + '"] [data-ag-desc]');
-    if (descEl) {
-      // Conectar botones de toolbar inline a este editor
-      const toolbarBtns = host.querySelectorAll(`[data-tb-row="${r.row}"]`);
-      toolbarBtns.forEach(btn => {
-        btn.addEventListener("mousedown", e => {
-          e.preventDefault();
-          const cmd = btn.getAttribute("data-md");
-          descEl.focus();
-          if (cmd === "bold")      document.execCommand("bold", false, null);
-          if (cmd === "italic")    document.execCommand("italic", false, null);
-          if (cmd === "underline") document.execCommand("underline", false, null);
-          if (cmd === "ul")        document.execCommand("insertUnorderedList", false, null);
-          if (cmd === "ol")        document.execCommand("insertOrderedList", false, null);
-        });
-      });
-      // Auto-conversión de markdown al escribir
-      descEl.addEventListener("keydown", e => {
-        if (e.key === " " || e.key === "Enter") {
-          const sel = window.getSelection();
-          if (!sel.rangeCount) return;
-          const range = sel.getRangeAt(0);
-          const node = range.startContainer;
-          if (node.nodeType !== Node.TEXT_NODE) return;
-          const lineText = node.textContent.slice(0, range.startOffset);
-          if (e.key === " " && lineText === "-") {
-            e.preventDefault();
-            document.execCommand("insertUnorderedList", false, null);
-            return;
-          }
-          if (e.key === " " && /^\d+\.$/.test(lineText)) {
-            e.preventDefault();
-            document.execCommand("insertOrderedList", false, null);
-          }
-        }
-      });
-    }
+    if (descEl) mountWysiwygInline_(descEl);
 
     // Links píldoras en fila editable
     const wrap = host.querySelector(`tr[data-agenda-row="${r.row}"] [data-ag-links-wrap]`);
@@ -5391,6 +5483,14 @@ async function main() {
 
   await loadCore();
   mountSlackCompose_();
+
+  // Links útiles drawer
+  wireLinksDrawer_();
+
+  // Tab Equipo: sub-tabs + botones
+  wireEquipoSubTabs_();
+  wireAsignacion_();
+  wireCanales_();
 }
 
 
@@ -5429,3 +5529,416 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
 
+
+/* =========================================================
+   LINKS ÚTILES — drawer
+   ========================================================= */
+
+let S_links = [];        // cache local
+let _linksDragSrc = null; // drag & drop state
+
+async function refreshLinks_() {
+  try {
+    S_links = await API.linksList() || [];
+  } catch (e) {
+    S_links = [];
+  }
+  renderLinksDrawer_();
+}
+
+function renderLinksDrawer_() {
+  const body = $("linksDrawerBody");
+  if (!body) return;
+
+  // Actualizar datalist categorías
+  const cats = [...new Set(S_links.map(l => l.categoria).filter(Boolean))];
+  const dl = document.getElementById("linksCatList");
+  if (dl) dl.innerHTML = cats.map(c => `<option value="${escapeAttr(c)}">`).join("");
+
+  if (!S_links.length) {
+    body.innerHTML = `<div class="empty-state muted" style="text-align:center;padding:32px 0">Todavía no hay links. ¡Agregá el primero!</div>`;
+    return;
+  }
+
+  // Agrupar por categoría (sin categoría → grupo vacío al final)
+  const grupos = {};
+  S_links.forEach(l => {
+    const cat = l.categoria || "__sin_cat__";
+    if (!grupos[cat]) grupos[cat] = [];
+    grupos[cat].push(l);
+  });
+
+  const catOrder = [...cats, "__sin_cat__"].filter(c => grupos[c]);
+
+  body.innerHTML = catOrder.map(cat => {
+    const items = grupos[cat];
+    const label = cat === "__sin_cat__" ? "" : cat;
+    return `
+      <div class="links-group" data-cat="${escapeAttr(cat)}" style="margin-bottom:16px">
+        ${label ? `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:6px;padding:0 2px">${escapeHtml(label)}</div>` : ""}
+        <div class="links-pills-wrap" data-cat="${escapeAttr(cat)}" style="display:flex;flex-direction:column;gap:6px">
+          ${items.map(l => linkPillHtml_(l)).join("")}
+        </div>
+      </div>`;
+  }).join("");
+
+  // Drag & drop dentro de cada categoría
+  body.querySelectorAll(".link-pill[draggable]").forEach(pill => {
+    pill.addEventListener("dragstart", e => {
+      _linksDragSrc = pill;
+      pill.style.opacity = "0.5";
+      e.dataTransfer.effectAllowed = "move";
+    });
+    pill.addEventListener("dragend", () => { pill.style.opacity = ""; _linksDragSrc = null; });
+    pill.addEventListener("dragover", e => {
+      e.preventDefault();
+      if (_linksDragSrc && _linksDragSrc !== pill) {
+        const wrap = pill.closest(".links-pills-wrap");
+        const srcWrap = _linksDragSrc.closest(".links-pills-wrap");
+        if (wrap === srcWrap) {
+          const rect = pill.getBoundingClientRect();
+          const after = e.clientY > rect.top + rect.height / 2;
+          wrap.insertBefore(_linksDragSrc, after ? pill.nextSibling : pill);
+        }
+      }
+    });
+    pill.addEventListener("drop", async e => {
+      e.preventDefault();
+      if (!_linksDragSrc || _linksDragSrc === pill) return;
+      // Guardar nuevo orden
+      const wrap = pill.closest(".links-pills-wrap");
+      if (!wrap) return;
+      const pills = [...wrap.querySelectorAll(".link-pill")];
+      const items = pills.map((p, i) => ({ row: Number(p.dataset.row), orden: i }));
+      // Actualizar local
+      items.forEach(({ row, orden }) => {
+        const link = S_links.find(l => l._row === row);
+        if (link) link.orden = orden;
+      });
+      try { await API.linksReorder(items); } catch (e) { /* silent */ }
+    });
+  });
+
+  // Botón eliminar
+  body.querySelectorAll("[data-link-del]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const row = Number(btn.dataset.linkDel);
+      const link = S_links.find(l => l._row === row);
+      if (!link) return;
+      const ok = await hubConfirm_(`¿Eliminar link? Se eliminará "${link.titulo}". Esta acción no se puede deshacer.`, "Eliminar", "Cancelar");
+      if (!ok) return;
+      // Optimistic
+      const prev = [...S_links];
+      S_links = S_links.filter(l => l._row !== row);
+      renderLinksDrawer_();
+      try { await API.linksDelete(row); }
+      catch (e) { S_links = prev; renderLinksDrawer_(); toast("Links útiles", "No se pudo eliminar."); }
+    });
+  });
+
+  // Botón editar categoría
+  body.querySelectorAll("[data-link-edit]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const row = Number(btn.dataset.linkEdit);
+      const link = S_links.find(l => l._row === row);
+      if (!link) return;
+      linkOpenEdit_(link);
+    });
+  });
+}
+
+function linkPillHtml_(l) {
+  return `
+    <div class="link-pill" draggable="true" data-row="${l._row}"
+      style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;border:1px solid var(--brd);background:var(--surface-2);cursor:grab;transition:box-shadow .12s"
+      onmouseenter="this.style.boxShadow='var(--shd-sm)'" onmouseleave="this.style.boxShadow=''">
+      <span style="font-size:16px;flex-shrink:0">🔗</span>
+      <a href="${escapeAttr(l.url)}" target="_blank" rel="noopener"
+        style="flex:1;font-size:13px;font-weight:600;color:var(--text-1);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+        title="${escapeAttr(l.url)}">${escapeHtml(l.titulo)}</a>
+      <button data-link-edit="${l._row}" title="Editar" style="border:none;background:none;cursor:pointer;font-size:14px;color:var(--text-3);padding:2px 4px;flex-shrink:0">✏️</button>
+      <button data-link-del="${l._row}" title="Eliminar" style="border:none;background:none;cursor:pointer;font-size:14px;color:var(--text-3);padding:2px 4px;flex-shrink:0">×</button>
+    </div>`;
+}
+
+function linkOpenEdit_(link) {
+  // Reusar el formulario de agregar como edición inline
+  const titulo = prompt("Título:", link.titulo);
+  if (titulo === null) return;
+  const url = prompt("URL:", link.url);
+  if (url === null) return;
+  const cat = prompt("Categoría (opcional):", link.categoria || "");
+  if (cat === null) return;
+
+  const prev = { ...link };
+  const updated = { ...link, titulo: titulo.trim() || link.titulo, url: url.trim() || link.url, categoria: cat.trim() };
+  S_links = S_links.map(l => l._row === link._row ? updated : l);
+  renderLinksDrawer_();
+  API.linksUpdate({ row: link._row, titulo: updated.titulo, url: updated.url, categoria: updated.categoria })
+    .catch(() => { S_links = S_links.map(l => l._row === link._row ? prev : l); renderLinksDrawer_(); toast("Links útiles", "No se pudo guardar."); });
+}
+
+function openLinksDrawer_() {
+  const drawer = $("linksDrawer");
+  const overlay = $("linksDrawerOverlay");
+  if (!drawer || !overlay) return;
+  drawer.style.display = "flex";
+  overlay.style.display = "block";
+  // Animación entrada
+  requestAnimationFrame(() => { drawer.style.transform = "translateX(0)"; });
+  if (!S_links.length) refreshLinks_();
+  else renderLinksDrawer_();
+}
+
+function closeLinksDrawer_() {
+  const drawer = $("linksDrawer");
+  const overlay = $("linksDrawerOverlay");
+  if (drawer) drawer.style.display = "none";
+  if (overlay) overlay.style.display = "none";
+}
+
+function wireLinksDrawer_() {
+  $("btnLinksUtiles")?.addEventListener("click", openLinksDrawer_);
+  $("linksDrawerClose")?.addEventListener("click", closeLinksDrawer_);
+  $("linksDrawerOverlay")?.addEventListener("click", closeLinksDrawer_);
+
+  $("linksAddBtn")?.addEventListener("click", async () => {
+    const titulo = $("linksAddTitulo")?.value?.trim();
+    const url    = $("linksAddUrl")?.value?.trim();
+    const cat    = $("linksAddCat")?.value?.trim();
+    if (!titulo) { $("linksAddTitulo")?.focus(); return; }
+    if (!url)    { $("linksAddUrl")?.focus(); return; }
+    const tempRow = -Date.now();
+    const newLink = { titulo, url, categoria: cat, orden: S_links.length, _row: tempRow };
+    S_links = [...S_links, newLink];
+    renderLinksDrawer_();
+    if ($("linksAddTitulo")) $("linksAddTitulo").value = "";
+    if ($("linksAddUrl"))    $("linksAddUrl").value    = "";
+    if ($("linksAddCat"))    $("linksAddCat").value    = "";
+    try {
+      await API.linksAdd({ titulo, url, categoria: cat });
+      await refreshLinks_();
+    } catch (e) {
+      S_links = S_links.filter(l => l._row !== tempRow);
+      renderLinksDrawer_();
+      toast("Links útiles", "No se pudo agregar.");
+    }
+  });
+
+  // Enter en los inputs del form
+  ["linksAddTitulo","linksAddUrl","linksAddCat"].forEach(id => {
+    $(id)?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("linksAddBtn")?.click(); } });
+  });
+}
+
+
+/* =========================================================
+   EQUIPO — Asignación semanal + Gestión de Canales
+   ========================================================= */
+
+let S_asignacion = [];
+let S_canales    = [];
+let _equipoStab  = "asignacion";
+
+async function refreshEquipo_() {
+  try {
+    [S_asignacion, S_canales] = await Promise.all([
+      API.asignacionList(),
+      API.gestionCanalesList(),
+    ]);
+  } catch (e) {
+    setErr("Error cargando datos del equipo: " + (e.message || e));
+  }
+  renderEquipo();
+}
+
+function renderEquipo() {
+  renderAsignacion_();
+  renderCanales_();
+}
+
+// ── Sub-tabs ─────────────────────────────────────────────
+function wireEquipoSubTabs_() {
+  document.querySelectorAll(".equipo-stab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      _equipoStab = btn.dataset.stab;
+      document.querySelectorAll(".equipo-stab").forEach(b => {
+        const active = b.dataset.stab === _equipoStab;
+        b.style.color = active ? "var(--pri)" : "var(--text-3)";
+        b.style.borderBottomColor = active ? "var(--pri)" : "transparent";
+        b.classList.toggle("active", active);
+      });
+      $("equipoPanel_asignacion").style.display = _equipoStab === "asignacion" ? "" : "none";
+      $("equipoPanel_canales").style.display    = _equipoStab === "canales"    ? "" : "none";
+    });
+  });
+}
+
+// ── Asignación semanal ───────────────────────────────────
+function renderAsignacion_() {
+  const tbody = $("tblAsignacionBody");
+  if (!tbody) return;
+
+  if (!S_asignacion.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="muted" style="text-align:center;padding:20px">Sin tareas. Agregá la primera con el botón +.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = S_asignacion.map(r => `
+    <tr data-asig-row="${r._row}">
+      <td><span class="editable-cell" data-asig-field="tarea" data-asig-row="${r._row}" contenteditable="true" style="display:block;min-width:100px;outline:none;padding:2px 4px;border-radius:4px" spellcheck="false">${escapeHtml(r.tarea)}</span></td>
+      <td><span class="editable-cell" data-asig-field="descripcion" data-asig-row="${r._row}" contenteditable="true" style="display:block;min-width:160px;outline:none;padding:2px 4px;border-radius:4px;font-size:12px;color:var(--text-2)" spellcheck="false">${escapeHtml(r.descripcion)}</span></td>
+      <td><span class="editable-cell" data-asig-field="owner_s1" data-asig-row="${r._row}" contenteditable="true" style="display:block;outline:none;padding:2px 4px;border-radius:4px" spellcheck="false">${escapeHtml(r.owner_s1)}</span></td>
+      <td><span class="editable-cell" data-asig-field="owner_s2" data-asig-row="${r._row}" contenteditable="true" style="display:block;outline:none;padding:2px 4px;border-radius:4px" spellcheck="false">${escapeHtml(r.owner_s2)}</span></td>
+      <td><span class="editable-cell" data-asig-field="owner_s3" data-asig-row="${r._row}" contenteditable="true" style="display:block;outline:none;padding:2px 4px;border-radius:4px" spellcheck="false">${escapeHtml(r.owner_s3)}</span></td>
+      <td><span class="editable-cell" data-asig-field="backup" data-asig-row="${r._row}" contenteditable="true" style="display:block;outline:none;padding:2px 4px;border-radius:4px;font-size:12px;color:var(--text-2)" spellcheck="false">${escapeHtml(r.backup)}</span></td>
+      <td><button class="xbtn" data-asig-del="${r._row}" title="Eliminar tarea" style="font-size:14px">×</button></td>
+    </tr>`).join("");
+
+  // Edición inline con debounce
+  tbody.querySelectorAll(".editable-cell").forEach(cell => {
+    cell.addEventListener("focus", () => { cell.style.background = "var(--surface-2)"; cell.style.boxShadow = "0 0 0 2px var(--pri-dim)"; });
+    cell.addEventListener("blur",  () => { cell.style.background = ""; cell.style.boxShadow = ""; _saveAsignacionCell_(cell); });
+    cell.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); cell.blur(); } });
+  });
+
+  // Eliminar fila
+  tbody.querySelectorAll("[data-asig-del]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const row = Number(btn.dataset.asigDel);
+      const item = S_asignacion.find(r => r._row === row);
+      if (!item) return;
+      const ok = await hubConfirm_(`¿Eliminar la tarea "${item.tarea}"? Esta acción no se puede deshacer.`, "Eliminar", "Cancelar");
+      if (!ok) return;
+      const prev = [...S_asignacion];
+      S_asignacion = S_asignacion.filter(r => r._row !== row);
+      renderAsignacion_();
+      try { await API.asignacionDelete(row); }
+      catch (e) { S_asignacion = prev; renderAsignacion_(); toast("Asignación", "No se pudo eliminar."); }
+    });
+  });
+}
+
+async function _saveAsignacionCell_(cell) {
+  const row   = Number(cell.dataset.asigRow);
+  const field = cell.dataset.asigField;
+  const val   = cell.innerText.trim();
+  const item  = S_asignacion.find(r => r._row === row);
+  if (!item || item[field] === val) return;
+  item[field] = val;
+  try { await API.asignacionUpsert({ ...item, row }); }
+  catch (e) { toast("Asignación", "No se pudo guardar."); }
+}
+
+function wireAsignacion_() {
+  $("btnAsignacionAdd")?.addEventListener("click", async () => {
+    const tarea = prompt("Nombre de la tarea:");
+    if (!tarea?.trim()) return;
+    const tempRow = -Date.now();
+    const newItem = { tarea: tarea.trim(), descripcion: "", owner_s1: "", owner_s2: "", owner_s3: "", backup: "", _row: tempRow };
+    S_asignacion = [...S_asignacion, newItem];
+    renderAsignacion_();
+    try {
+      await API.asignacionUpsert(newItem);
+      await refreshEquipo_();
+    } catch (e) {
+      S_asignacion = S_asignacion.filter(r => r._row !== tempRow);
+      renderAsignacion_();
+      toast("Asignación", "No se pudo agregar.");
+    }
+  });
+}
+
+// ── Gestión de canales ───────────────────────────────────
+function renderCanales_() {
+  const tbody = $("tblCanalesBody");
+  if (!tbody) return;
+
+  if (!S_canales.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="muted" style="text-align:center;padding:20px">Sin canales. Agregá el primero con el botón +.</td></tr>`;
+    return;
+  }
+
+  // Agrupar por "grupo"
+  const grupos = {};
+  S_canales.forEach(c => {
+    const g = c.grupo || "Sin grupo";
+    if (!grupos[g]) grupos[g] = [];
+    grupos[g].push(c);
+  });
+
+  let html = "";
+  Object.entries(grupos).forEach(([grupo, items]) => {
+    html += `<tr><td colspan="7" style="background:var(--surface-2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);padding:6px 12px">${escapeHtml(grupo)}</td></tr>`;
+    html += items.map(c => {
+      const slackUrl = `https://slack.com/app_redirect?channel=${encodeURIComponent(c.canal.replace(/^#/, ""))}`;
+      return `
+        <tr data-canal-row="${c._row}">
+          <td><a href="${slackUrl}" target="_blank" rel="noopener" style="font-weight:600;color:var(--pri);text-decoration:none" title="Abrir en Slack">#${escapeHtml(c.canal)}</a></td>
+          <td style="font-size:12px;color:var(--text-2)">${escapeHtml(c.foco)}</td>
+          <td><span class="editable-cell" data-canal-field="owner_s1" data-canal-row="${c._row}" contenteditable="true" style="display:block;outline:none;padding:2px 4px;border-radius:4px" spellcheck="false">${escapeHtml(c.owner_s1)}</span></td>
+          <td><span class="editable-cell" data-canal-field="owner_s2" data-canal-row="${c._row}" contenteditable="true" style="display:block;outline:none;padding:2px 4px;border-radius:4px" spellcheck="false">${escapeHtml(c.owner_s2)}</span></td>
+          <td><span class="editable-cell" data-canal-field="owner_s3" data-canal-row="${c._row}" contenteditable="true" style="display:block;outline:none;padding:2px 4px;border-radius:4px" spellcheck="false">${escapeHtml(c.owner_s3)}</span></td>
+          <td style="font-size:12px;color:var(--text-2)">${escapeHtml(c.grupo)}</td>
+          <td><button class="xbtn" data-canal-del="${c._row}" title="Eliminar canal" style="font-size:14px">×</button></td>
+        </tr>`;
+    }).join("");
+  });
+
+  tbody.innerHTML = html;
+
+  // Edición inline owners
+  tbody.querySelectorAll(".editable-cell").forEach(cell => {
+    cell.addEventListener("focus", () => { cell.style.background = "var(--surface-2)"; cell.style.boxShadow = "0 0 0 2px var(--pri-dim)"; });
+    cell.addEventListener("blur",  () => { cell.style.background = ""; cell.style.boxShadow = ""; _saveCanalCell_(cell); });
+    cell.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); cell.blur(); } });
+  });
+
+  // Eliminar canal
+  tbody.querySelectorAll("[data-canal-del]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const row = Number(btn.dataset.canalDel);
+      const item = S_canales.find(c => c._row === row);
+      if (!item) return;
+      const ok = await hubConfirm_(`¿Eliminar el canal "#${item.canal}"? Esta acción no se puede deshacer.`, "Eliminar", "Cancelar");
+      if (!ok) return;
+      const prev = [...S_canales];
+      S_canales = S_canales.filter(c => c._row !== row);
+      renderCanales_();
+      try { await API.gestionCanalesDelete(row); }
+      catch (e) { S_canales = prev; renderCanales_(); toast("Canales", "No se pudo eliminar."); }
+    });
+  });
+}
+
+async function _saveCanalCell_(cell) {
+  const row   = Number(cell.dataset.canalRow);
+  const field = cell.dataset.canalField;
+  const val   = cell.innerText.trim();
+  const item  = S_canales.find(c => c._row === row);
+  if (!item || item[field] === val) return;
+  item[field] = val;
+  try { await API.gestionCanalesUpsert({ ...item, row }); }
+  catch (e) { toast("Canales", "No se pudo guardar."); }
+}
+
+function wireCanales_() {
+  $("btnCanalesAdd")?.addEventListener("click", async () => {
+    const canal = prompt("Nombre del canal (sin #):");
+    if (!canal?.trim()) return;
+    const foco  = prompt("Foco del canal:") || "";
+    const grupo = prompt("Grupo (ej: Internos · Operativo, Con MELI · Estratégico):") || "";
+    const tempRow = -Date.now();
+    const newItem = { canal: canal.trim(), foco: foco.trim(), owner_s1: "", owner_s2: "", owner_s3: "", grupo: grupo.trim(), _row: tempRow };
+    S_canales = [...S_canales, newItem];
+    renderCanales_();
+    try {
+      await API.gestionCanalesUpsert(newItem);
+      await refreshEquipo_();
+    } catch (e) {
+      S_canales = S_canales.filter(c => c._row !== tempRow);
+      renderCanales_();
+      toast("Canales", "No se pudo agregar.");
+    }
+  });
+}

@@ -124,6 +124,23 @@ export const API = {
   configFlujosSetIncluirMensaje: (flujo, value) =>
     post("config.flujos.setIncluirMensaje", { flujo, value: !!value }),
 
+  // Links útiles
+  linksList:   () => get("links.list"),
+  linksAdd:    (data) => post("links.add", data),
+  linksUpdate: (data) => post("links.update", data),
+  linksDelete: (row)  => post("links.delete", { row: assertRow_(row) }),
+  linksReorder:(items) => post("links.reorder", { items }),
+
+  // Asignación semanal
+  asignacionList:   () => get("asignacion.list"),
+  asignacionUpsert: (data) => post("asignacion.upsert", data),
+  asignacionDelete: (row)  => post("asignacion.delete", { row: assertRow_(row) }),
+
+  // Gestión de canales
+  gestionCanalesList:   () => get("canales.gestion.list"),
+  gestionCanalesUpsert: (data) => post("canales.upsert", data),
+  gestionCanalesDelete: (row)  => post("canales.delete", { row: assertRow_(row) }),
+
   presentismoSemanas: () => get("presentismo.semanas"),
   presentismoWeek: (dateYMD) => get("presentismo.week", { date: dateYMD }),
   presentismoStats: (dateYMD) => get("presentismo.stats", { date: dateYMD }),
