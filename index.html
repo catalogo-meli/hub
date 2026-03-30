@@ -1161,10 +1161,9 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div class="tab active" data-tab="dashboard">Dashboard</div>
 <div class="tab" data-tab="agenda">Agenda</div>
 <div class="tab" data-tab="daily">Operativa diaria</div>
-<div class="tab" data-tab="colabs">Colaboradores</div>
-<div class="tab" data-tab="habil">Asignaciones</div>
-<div class="tab" data-tab="pres">Presentismo</div>
 <div class="tab" data-tab="equipo">Equipo</div>
+<div class="tab" data-tab="pres">Presentismo</div>
+<div class="tab" data-tab="organizacion">Organización</div>
 </nav>
 <main class="grid" style="margin-top:16px">
 <!-- Dashboard -->
@@ -1483,7 +1482,13 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div id="agendaContent"></div>
 </section>
 <!-- Colaboradores -->
-<section class="card" id="tab_colabs" style="display:none">
+<section class="card" id="tab_equipo" style="display:none">
+  <!-- Sub-tabs Equipo -->
+  <div id="equipoSubTabsMain" style="display:flex;gap:0;border-bottom:2px solid var(--brd);margin-bottom:20px">
+    <button class="equipo-main-stab active" data-stab="colabs" style="padding:8px 18px;border:none;background:none;font-size:13px;font-weight:600;cursor:pointer;color:var(--pri);border-bottom:2px solid var(--pri);margin-bottom:-2px">Colaboradores</button>
+    <button class="equipo-main-stab" data-stab="habil" style="padding:8px 18px;border:none;background:none;font-size:13px;font-weight:600;cursor:pointer;color:var(--text-3);border-bottom:2px solid transparent;margin-bottom:-2px">Asignaciones</button>
+  </div>
+<div id="equipoPanel_colabs">
 <div class="row">
 <div>
 <h2>Colaboradores</h2>
@@ -1535,9 +1540,9 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 </table>
 </div>
 <div class="muted" style="margin-top:10px">Tip: podés seleccionar varias filas y copiar IDs o mails en bloque. También podés clickear un ID/mail para copiarlo individualmente.</div>
-</section>
-<!-- Habilitaciones -->
-<section class="card" id="tab_habil" style="display:none">
+</div>
+
+<div id="equipoPanel_habil" style="display:none">
 <div class="row">
 <div>
 <h2>Asignaciones</h2>
@@ -1592,6 +1597,8 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
     <tbody id="tblHabilBody"></tbody>
   </table>
 </div>
+</section>
+
 </section>
 <!-- Presentismo -->
 <section class="card" id="tab_pres" style="display:none">
@@ -1669,18 +1676,18 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 </section>
 
 <!-- Tab Equipo -->
-<section class="card" id="tab_equipo" style="display:none">
-  <h2 style="margin-bottom:4px">Equipo</h2>
+<section class="card" id="tab_organizacion" style="display:none">
+  <h2 style="margin-bottom:4px">Organización</h2>
   <div class="muted" style="margin-bottom:16px">Asignaciones semanales y gestión de canales Slack.</div>
 
   <!-- Sub-tabs -->
-  <div id="equipoSubTabs" style="display:flex;gap:0;border-bottom:2px solid var(--brd);margin-bottom:20px">
-    <button class="equipo-stab active" data-stab="asignacion" style="padding:8px 18px;border:none;background:none;font-size:13px;font-weight:600;cursor:pointer;color:var(--pri);border-bottom:2px solid var(--pri);margin-bottom:-2px">Asignación semanal</button>
-    <button class="equipo-stab" data-stab="canales" style="padding:8px 18px;border:none;background:none;font-size:13px;font-weight:600;cursor:pointer;color:var(--text-3);border-bottom:2px solid transparent;margin-bottom:-2px">Gestión de canales</button>
+  <div id="organizacionSubTabs" style="display:flex;gap:0;border-bottom:2px solid var(--brd);margin-bottom:20px">
+    <button class="org-stab active" data-stab="asignacion" style="padding:8px 18px;border:none;background:none;font-size:13px;font-weight:600;cursor:pointer;color:var(--pri);border-bottom:2px solid var(--pri);margin-bottom:-2px">Asignación semanal</button>
+    <button class="org-stab" data-stab="canales" style="padding:8px 18px;border:none;background:none;font-size:13px;font-weight:600;cursor:pointer;color:var(--text-3);border-bottom:2px solid transparent;margin-bottom:-2px">Gestión de canales</button>
   </div>
 
   <!-- Asignación semanal -->
-  <div id="equipoPanel_asignacion">
+  <div id="organizacionPanel_asignacion">
     <div class="row" style="margin-bottom:12px">
       <div class="muted" style="font-size:12px">Quién hace qué esta semana. Editá inline o agregá nuevas tareas.</div>
       <div class="spacer"></div>
@@ -1703,7 +1710,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
   </div>
 
   <!-- Gestión de canales -->
-  <div id="equipoPanel_canales" style="display:none">
+  <div id="organizacionPanel_canales" style="display:none">
     <div class="row" style="margin-bottom:12px">
       <div class="muted" style="font-size:12px">Canales Slack y sus owners por semana. Hacé click en el nombre del canal para abrirlo.</div>
       <div class="spacer"></div>
@@ -1756,13 +1763,14 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
     <button id="linksDrawerClose" class="xbtn" style="font-size:20px" title="Cerrar">×</button>
   </div>
   <div id="linksDrawerBody" style="flex:1;overflow-y:auto;padding:16px 20px"></div>
-  <div style="border-top:1px solid var(--brd);padding:14px 20px">
-    <div id="linksAddForm" style="display:flex;flex-direction:column;gap:8px">
+  <div style="border-top:1px solid var(--brd);padding:12px 20px" id="linksAddFormWrap">
+    <button id="linksAddToggle" style="width:100%;padding:8px;border:1px dashed var(--brd-2);border-radius:8px;background:none;color:var(--text-3);font-size:13px;cursor:pointer;text-align:center;margin-bottom:0">+ Agregar link</button>
+    <div id="linksAddFormInner" style="display:none;flex-direction:column;gap:8px;margin-top:10px">
       <input class="input" id="linksAddTitulo" placeholder="Título del link *" style="font-size:13px"/>
       <input class="input" id="linksAddUrl" placeholder="https://..." type="url" style="font-size:13px"/>
       <input class="input" id="linksAddCat" placeholder="Categoría (opcional)" style="font-size:13px" list="linksCatList"/>
       <datalist id="linksCatList"></datalist>
-      <button class="btn primary" id="linksAddBtn" style="align-self:flex-end;font-size:13px">+ Agregar link</button>
+      <button class="btn primary" id="linksAddBtn" style="align-self:flex-end;font-size:13px">+ Agregar</button>
     </div>
   </div>
 </aside>

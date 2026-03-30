@@ -565,7 +565,7 @@ function mountTabs() {
     const activeTab = tabs.querySelector(`[data-tab="${key}"]`);
     if (activeTab) activeTab.classList.add("active");
 
-    ["dashboard", "daily", "agenda", "colabs", "habil", "pres", "equipo"].forEach((k) => {
+    ["dashboard", "daily", "agenda", "equipo", "pres", "organizacion"].forEach((k) => {
       const sec = $(`tab_${k}`);
       if (sec) sec.style.display = k === key ? "" : "none";
     });
@@ -575,10 +575,9 @@ function mountTabs() {
     // Render inmediato con datos ya cargados
     if (key === "dashboard") renderDashboard();
     if (key === "daily") { renderFlujos(); renderPlan(); renderOutbox(); }
-    if (key === "colabs") renderColabs();
-    if (key === "habil") renderHabil();
+    if (key === "equipo") { renderColabs(); renderHabil(); }
     if (key === "pres") renderPresentismo();
-    if (key === "equipo") renderEquipo();
+    if (key === "organizacion") renderEquipo();
 
     // Lazy load: carga datos del backend solo la primera vez que se visita el tab
     if (!loaded.has(key)) {
@@ -595,17 +594,16 @@ function mountTabs() {
 async function lazyLoadTab_(name) {
   setBusy("Cargando", name + "...");
   try {
-    if (name === "colabs") {
+    if (name === "equipo") {
       if (!CACHE.get("colabs")) {
         S.colabs = await API.colaboradoresList();
         CACHE.set("colabs", S.colabs, 5 * 60_000);
       }
       renderColabs();
-      renderDashboard();
-    }
-    if (name === "habil") {
       if (!S.habil) await refreshHabil();
       renderHabil();
+      renderDashboard();
+      wireEquipoMainSubTabs_();
     }
     if (name === "agenda") {
       if (!S.agenda || !S.agenda.length) {
@@ -632,7 +630,7 @@ async function lazyLoadTab_(name) {
       renderPresentismo();
       renderDashboard();
     }
-    if (name === "equipo") {
+    if (name === "organizacion") {
       await refreshEquipo_();
     }
   } catch (e) {
@@ -5489,7 +5487,7 @@ async function main() {
   wireLinksDrawer_();
 
   // Tab Equipo: sub-tabs + botones
-  wireEquipoSubTabs_();
+  wireOrganizacionSubTabs_();
   wireAsignacion_();
   wireCanales_();
 }
@@ -5538,9 +5536,30 @@ document.addEventListener("DOMContentLoaded", () => {
 let S_links = [];        // cache local
 let _linksDragSrc = null; // drag & drop state
 
+let S_linksLoaded = false;
+let S_linksCats = {}; // { categoria: color }
+
+// Paleta automática de colores para categorías
+const LINKS_PALETTE = ["#6366f1","#0ea5e9","#10b981","#f59e0b","#ef4444","#8b5cf6","#ec4899","#14b8a6"];
+
+function linksCatColor_(cat) {
+  if (!cat) return "var(--brd-2)";
+  if (S_linksCats[cat]) return S_linksCats[cat];
+  // Asignar automáticamente basado en hash del nombre
+  const idx = Array.from(cat).reduce((a, c) => a + c.charCodeAt(0), 0) % LINKS_PALETTE.length;
+  return LINKS_PALETTE[idx];
+}
+
 async function refreshLinks_() {
   try {
-    S_links = await API.linksList() || [];
+    const [links, cats] = await Promise.all([
+      API.linksList(),
+      API.linksCategoriasList().catch(() => [])
+    ]);
+    S_links = links || [];
+    S_linksLoaded = true;
+    // Merge categorias guardadas
+    (cats || []).forEach(c => { if (c.categoria && c.color) S_linksCats[c.categoria] = c.color; });
   } catch (e) {
     S_links = [];
   }
@@ -5557,31 +5576,62 @@ function renderLinksDrawer_() {
   if (dl) dl.innerHTML = cats.map(c => `<option value="${escapeAttr(c)}">`).join("");
 
   if (!S_links.length) {
-    body.innerHTML = `<div class="empty-state muted" style="text-align:center;padding:32px 0">Todavía no hay links. ¡Agregá el primero!</div>`;
+    body.innerHTML = `<div class="muted" style="text-align:center;padding:40px 0;font-size:13px">Todavía no hay links.<br>¡Agregá el primero!</div>`;
     return;
   }
 
-  // Agrupar por categoría (sin categoría → grupo vacío al final)
+  // Agrupar por categoría (sin categoría → al final sin header)
   const grupos = {};
   S_links.forEach(l => {
     const cat = l.categoria || "__sin_cat__";
     if (!grupos[cat]) grupos[cat] = [];
     grupos[cat].push(l);
   });
-
   const catOrder = [...cats, "__sin_cat__"].filter(c => grupos[c]);
 
   body.innerHTML = catOrder.map(cat => {
     const items = grupos[cat];
     const label = cat === "__sin_cat__" ? "" : cat;
+    const color = linksCatColor_(cat === "__sin_cat__" ? "" : cat);
     return `
-      <div class="links-group" data-cat="${escapeAttr(cat)}" style="margin-bottom:16px">
-        ${label ? `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:6px;padding:0 2px">${escapeHtml(label)}</div>` : ""}
-        <div class="links-pills-wrap" data-cat="${escapeAttr(cat)}" style="display:flex;flex-direction:column;gap:6px">
-          ${items.map(l => linkPillHtml_(l)).join("")}
+      <div class="links-group" data-cat="${escapeAttr(cat)}" style="margin-bottom:20px">
+        ${label ? `
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+            <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:${color}">${escapeHtml(label)}</span>
+            <button data-cat-color="${escapeAttr(cat)}" title="Cambiar color" style="border:none;background:none;cursor:pointer;padding:0;margin-left:2px;flex-shrink:0">
+              <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${color};border:1px solid rgba(0,0,0,.15)"></span>
+            </button>
+          </div>` : ""}
+        <div class="links-pills-wrap" data-cat="${escapeAttr(cat)}" style="display:flex;flex-direction:column;gap:5px">
+          ${items.map(l => linkPillHtml_(l, color)).join("")}
         </div>
       </div>`;
   }).join("");
+
+  // Color picker por categoría
+  body.querySelectorAll("[data-cat-color]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const cat = btn.dataset.catColor;
+      const currentColor = linksCatColor_(cat);
+      // Crear input color temporal
+      const inp = document.createElement("input");
+      inp.type = "color";
+      inp.value = currentColor.startsWith("#") ? currentColor : "#6366f1";
+      inp.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+      document.body.appendChild(inp);
+      inp.addEventListener("change", async () => {
+        const newColor = inp.value;
+        S_linksCats[cat] = newColor;
+        renderLinksDrawer_();
+        try { await API.linksCategoriasUpsert({ categoria: cat, color: newColor }); }
+        catch (e) { /* silent */ }
+        inp.remove();
+      });
+      inp.addEventListener("blur", () => setTimeout(() => inp.remove(), 300));
+      inp.click();
+    });
+  });
 
   // Drag & drop dentro de cada categoría
   body.querySelectorAll(".link-pill[draggable]").forEach(pill => {
@@ -5606,17 +5656,15 @@ function renderLinksDrawer_() {
     pill.addEventListener("drop", async e => {
       e.preventDefault();
       if (!_linksDragSrc || _linksDragSrc === pill) return;
-      // Guardar nuevo orden
       const wrap = pill.closest(".links-pills-wrap");
       if (!wrap) return;
       const pills = [...wrap.querySelectorAll(".link-pill")];
       const items = pills.map((p, i) => ({ row: Number(p.dataset.row), orden: i }));
-      // Actualizar local
       items.forEach(({ row, orden }) => {
         const link = S_links.find(l => l._row === row);
         if (link) link.orden = orden;
       });
-      try { await API.linksReorder(items); } catch (e) { /* silent */ }
+      try { await API.linksReorder(items); } catch (_) { /* silent */ }
     });
   });
 
@@ -5626,69 +5674,75 @@ function renderLinksDrawer_() {
       const row = Number(btn.dataset.linkDel);
       const link = S_links.find(l => l._row === row);
       if (!link) return;
-      const ok = await hubConfirm_(`¿Eliminar link? Se eliminará "${link.titulo}". Esta acción no se puede deshacer.`, "Eliminar", "Cancelar");
+      const ok = await hubConfirm_(`¿Eliminar "${link.titulo}"? No se puede deshacer.`, "Eliminar", "Cancelar");
       if (!ok) return;
-      // Optimistic
       const prev = [...S_links];
       S_links = S_links.filter(l => l._row !== row);
       renderLinksDrawer_();
       try { await API.linksDelete(row); }
-      catch (e) { S_links = prev; renderLinksDrawer_(); toast("Links útiles", "No se pudo eliminar."); }
+      catch (_) { S_links = prev; renderLinksDrawer_(); toast("Links útiles", "No se pudo eliminar."); }
     });
   });
 
-  // Botón editar categoría
+  // Botón editar
   body.querySelectorAll("[data-link-edit]").forEach(btn => {
     btn.addEventListener("click", () => {
       const row = Number(btn.dataset.linkEdit);
       const link = S_links.find(l => l._row === row);
-      if (!link) return;
-      linkOpenEdit_(link);
+      if (link) linkOpenEdit_(link);
     });
   });
 }
 
-function linkPillHtml_(l) {
+function linkPillHtml_(l, catColor) {
+  const color = catColor || linksCatColor_(l.categoria);
   return `
     <div class="link-pill" draggable="true" data-row="${l._row}"
-      style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;border:1px solid var(--brd);background:var(--surface-2);cursor:grab;transition:box-shadow .12s"
+      style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--brd);background:var(--surface-2);cursor:grab;transition:box-shadow .12s;border-left:3px solid ${color}"
       onmouseenter="this.style.boxShadow='var(--shd-sm)'" onmouseleave="this.style.boxShadow=''">
-      <span style="font-size:16px;flex-shrink:0">🔗</span>
       <a href="${escapeAttr(l.url)}" target="_blank" rel="noopener"
-        style="flex:1;font-size:13px;font-weight:600;color:var(--text-1);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-        title="${escapeAttr(l.url)}">${escapeHtml(l.titulo)}</a>
-      <button data-link-edit="${l._row}" title="Editar" style="border:none;background:none;cursor:pointer;font-size:14px;color:var(--text-3);padding:2px 4px;flex-shrink:0">✏️</button>
-      <button data-link-del="${l._row}" title="Eliminar" style="border:none;background:none;cursor:pointer;font-size:14px;color:var(--text-3);padding:2px 4px;flex-shrink:0">×</button>
+        style="flex:1;font-size:13px;font-weight:600;color:var(--text-1);text-decoration:none;word-break:break-word;line-height:1.4">${escapeHtml(l.titulo)}</a>
+      <button data-link-edit="${l._row}" title="Editar" style="border:none;background:none;cursor:pointer;font-size:13px;color:var(--text-3);padding:2px 4px;flex-shrink:0;opacity:.6">✏️</button>
+      <button data-link-del="${l._row}" title="Eliminar" style="border:none;background:none;cursor:pointer;font-size:16px;color:var(--text-3);padding:2px 4px;flex-shrink:0;opacity:.6;line-height:1">×</button>
     </div>`;
 }
 
 function linkOpenEdit_(link) {
-  // Reusar el formulario de agregar como edición inline
-  const titulo = prompt("Título:", link.titulo);
-  if (titulo === null) return;
-  const url = prompt("URL:", link.url);
-  if (url === null) return;
-  const cat = prompt("Categoría (opcional):", link.categoria || "");
-  if (cat === null) return;
+  // Modal de edición reutilizando el form del drawer
+  const drawer = $("linksDrawer");
+  if (!drawer) return;
 
-  const prev = { ...link };
-  const updated = { ...link, titulo: titulo.trim() || link.titulo, url: url.trim() || link.url, categoria: cat.trim() };
-  S_links = S_links.map(l => l._row === link._row ? updated : l);
-  renderLinksDrawer_();
-  API.linksUpdate({ row: link._row, titulo: updated.titulo, url: updated.url, categoria: updated.categoria })
-    .catch(() => { S_links = S_links.map(l => l._row === link._row ? prev : l); renderLinksDrawer_(); toast("Links útiles", "No se pudo guardar."); });
+  // Expand form si estaba colapsado
+  const form = $("linksAddFormInner");
+  if (form) form.style.display = "flex";
+
+  // Precargar valores
+  if ($("linksAddTitulo")) $("linksAddTitulo").value = link.titulo;
+  if ($("linksAddUrl"))    $("linksAddUrl").value    = link.url;
+  if ($("linksAddCat"))    $("linksAddCat").value    = link.categoria || "";
+
+  // Cambiar botón a modo editar
+  const btn = $("linksAddBtn");
+  if (btn) {
+    btn.textContent = "Guardar cambios";
+    btn._editRow = link._row;
+  }
+  // Scroll al form
+  $("linksAddFormWrap")?.scrollIntoView({ behavior: "smooth", block: "end" });
+  $("linksAddTitulo")?.focus();
 }
 
-function openLinksDrawer_() {
+async function openLinksDrawer_() {
   const drawer = $("linksDrawer");
   const overlay = $("linksDrawerOverlay");
   if (!drawer || !overlay) return;
   drawer.style.display = "flex";
   overlay.style.display = "block";
-  // Animación entrada
-  requestAnimationFrame(() => { drawer.style.transform = "translateX(0)"; });
-  if (!S_links.length) refreshLinks_();
-  else renderLinksDrawer_();
+  const body = $("linksDrawerBody");
+  if (body && !S_linksLoaded) {
+    body.innerHTML = `<div class="muted" style="text-align:center;padding:40px 0;font-size:13px">Cargando...</div>`;
+  }
+  await refreshLinks_();
 }
 
 function closeLinksDrawer_() {
@@ -5696,6 +5750,21 @@ function closeLinksDrawer_() {
   const overlay = $("linksDrawerOverlay");
   if (drawer) drawer.style.display = "none";
   if (overlay) overlay.style.display = "none";
+  // Reset form
+  _linksResetForm_();
+}
+
+function _linksResetForm_() {
+  if ($("linksAddTitulo")) $("linksAddTitulo").value = "";
+  if ($("linksAddUrl"))    $("linksAddUrl").value    = "";
+  if ($("linksAddCat"))    $("linksAddCat").value    = "";
+  const btn = $("linksAddBtn");
+  if (btn) { btn.textContent = "+ Agregar"; delete btn._editRow; }
+  // Colapsar form
+  const form = $("linksAddFormInner");
+  if (form) form.style.display = "none";
+  const toggle = $("linksAddToggle");
+  if (toggle) toggle.textContent = "+ Agregar link";
 }
 
 function wireLinksDrawer_() {
@@ -5703,30 +5772,56 @@ function wireLinksDrawer_() {
   $("linksDrawerClose")?.addEventListener("click", closeLinksDrawer_);
   $("linksDrawerOverlay")?.addEventListener("click", closeLinksDrawer_);
 
+  // Toggle del formulario
+  $("linksAddToggle")?.addEventListener("click", () => {
+    const form = $("linksAddFormInner");
+    const toggle = $("linksAddToggle");
+    if (!form) return;
+    const open = form.style.display !== "none";
+    form.style.display = open ? "none" : "flex";
+    if (toggle) toggle.textContent = open ? "+ Agregar link" : "▲ Cancelar";
+    if (!open) setTimeout(() => $("linksAddTitulo")?.focus(), 50);
+  });
+
+  // Guardar (agregar o editar)
   $("linksAddBtn")?.addEventListener("click", async () => {
     const titulo = $("linksAddTitulo")?.value?.trim();
     const url    = $("linksAddUrl")?.value?.trim();
     const cat    = $("linksAddCat")?.value?.trim();
     if (!titulo) { $("linksAddTitulo")?.focus(); return; }
     if (!url)    { $("linksAddUrl")?.focus(); return; }
-    const tempRow = -Date.now();
-    const newLink = { titulo, url, categoria: cat, orden: S_links.length, _row: tempRow };
-    S_links = [...S_links, newLink];
-    renderLinksDrawer_();
-    if ($("linksAddTitulo")) $("linksAddTitulo").value = "";
-    if ($("linksAddUrl"))    $("linksAddUrl").value    = "";
-    if ($("linksAddCat"))    $("linksAddCat").value    = "";
-    try {
-      await API.linksAdd({ titulo, url, categoria: cat });
-      await refreshLinks_();
-    } catch (e) {
-      S_links = S_links.filter(l => l._row !== tempRow);
+
+    const btn = $("linksAddBtn");
+    const editRow = btn?._editRow;
+
+    if (editRow) {
+      // Modo editar
+      const prev = S_links.map(l => ({...l}));
+      const link = S_links.find(l => l._row === editRow);
+      if (link) { link.titulo = titulo; link.url = url; link.categoria = cat; }
       renderLinksDrawer_();
-      toast("Links útiles", "No se pudo agregar.");
+      _linksResetForm_();
+      try { await API.linksUpdate({ row: editRow, titulo, url, categoria: cat }); }
+      catch (_) { S_links = prev; renderLinksDrawer_(); toast("Links útiles", "No se pudo guardar."); }
+    } else {
+      // Modo agregar
+      const tempRow = -Date.now();
+      S_links = [...S_links, { titulo, url, categoria: cat, orden: S_links.length, _row: tempRow }];
+      renderLinksDrawer_();
+      _linksResetForm_();
+      try {
+        await API.linksAdd({ titulo, url, categoria: cat });
+        await refreshLinks_();
+        toast("Links útiles", "✓ Link agregado");
+      } catch (_) {
+        S_links = S_links.filter(l => l._row !== tempRow);
+        renderLinksDrawer_();
+        toast("Links útiles", "No se pudo agregar.");
+      }
     }
   });
 
-  // Enter en los inputs del form
+  // Enter en inputs
   ["linksAddTitulo","linksAddUrl","linksAddCat"].forEach(id => {
     $(id)?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("linksAddBtn")?.click(); } });
   });
@@ -5759,18 +5854,39 @@ function renderEquipo() {
 }
 
 // ── Sub-tabs ─────────────────────────────────────────────
-function wireEquipoSubTabs_() {
-  document.querySelectorAll(".equipo-stab").forEach(btn => {
+function wireOrganizacionSubTabs_() {
+  document.querySelectorAll(".org-stab").forEach(btn => {
     btn.addEventListener("click", () => {
       _equipoStab = btn.dataset.stab;
-      document.querySelectorAll(".equipo-stab").forEach(b => {
+      document.querySelectorAll(".org-stab").forEach(b => {
         const active = b.dataset.stab === _equipoStab;
         b.style.color = active ? "var(--pri)" : "var(--text-3)";
         b.style.borderBottomColor = active ? "var(--pri)" : "transparent";
         b.classList.toggle("active", active);
       });
-      $("equipoPanel_asignacion").style.display = _equipoStab === "asignacion" ? "" : "none";
-      $("equipoPanel_canales").style.display    = _equipoStab === "canales"    ? "" : "none";
+      $("organizacionPanel_asignacion").style.display = _equipoStab === "asignacion" ? "" : "none";
+      $("organizacionPanel_canales").style.display    = _equipoStab === "canales"    ? "" : "none";
+    });
+  });
+}
+
+// Sub-tabs del tab Equipo (Colaboradores / Asignaciones)
+let _equipoMainStab = "colabs";
+function wireEquipoMainSubTabs_() {
+  // Evitar doble binding
+  if ($("equipoSubTabsMain")?._wired) return;
+  if ($("equipoSubTabsMain")) $("equipoSubTabsMain")._wired = true;
+  document.querySelectorAll(".equipo-main-stab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      _equipoMainStab = btn.dataset.stab;
+      document.querySelectorAll(".equipo-main-stab").forEach(b => {
+        const active = b.dataset.stab === _equipoMainStab;
+        b.style.color = active ? "var(--pri)" : "var(--text-3)";
+        b.style.borderBottomColor = active ? "var(--pri)" : "transparent";
+        b.classList.toggle("active", active);
+      });
+      $("equipoPanel_colabs").style.display = _equipoMainStab === "colabs" ? "" : "none";
+      $("equipoPanel_habil").style.display  = _equipoMainStab === "habil"  ? "" : "none";
     });
   });
 }

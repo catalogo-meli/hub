@@ -126,6 +126,8 @@ export const API = {
 
   // Links útiles
   linksList:   () => get("links.list"),
+  linksCategoriasList: () => get("links.categorias.list"),
+  linksCategoriasUpsert: (data) => post("links.categorias.upsert", data),
   linksAdd:    (data) => post("links.add", data),
   linksUpdate: (data) => post("links.update", data),
   linksDelete: (row)  => post("links.delete", { row: assertRow_(row) }),
