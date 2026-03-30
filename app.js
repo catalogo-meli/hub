@@ -5793,7 +5793,10 @@ function renderAsignacion_() {
       <td><span class="editable-cell" data-asig-field="owner_s2" data-asig-row="${r._row}" contenteditable="true" style="display:block;outline:none;padding:2px 4px;border-radius:4px" spellcheck="false">${escapeHtml(r.owner_s2)}</span></td>
       <td><span class="editable-cell" data-asig-field="owner_s3" data-asig-row="${r._row}" contenteditable="true" style="display:block;outline:none;padding:2px 4px;border-radius:4px" spellcheck="false">${escapeHtml(r.owner_s3)}</span></td>
       <td><span class="editable-cell" data-asig-field="backup" data-asig-row="${r._row}" contenteditable="true" style="display:block;outline:none;padding:2px 4px;border-radius:4px;font-size:12px;color:var(--text-2)" spellcheck="false">${escapeHtml(r.backup)}</span></td>
-      <td><button class="xbtn" data-asig-del="${r._row}" title="Eliminar tarea" style="font-size:14px">×</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn ghost" data-asig-edit="${r._row}" title="Editar" style="font-size:11px;padding:2px 6px;margin-right:4px">✏️</button>
+        <button class="xbtn" data-asig-del="${r._row}" title="Eliminar tarea" style="font-size:14px">×</button>
+      </td>
     </tr>`).join("");
 
   // Edición inline con debounce
@@ -5801,6 +5804,15 @@ function renderAsignacion_() {
     cell.addEventListener("focus", () => { cell.style.background = "var(--surface-2)"; cell.style.boxShadow = "0 0 0 2px var(--pri-dim)"; });
     cell.addEventListener("blur",  () => { cell.style.background = ""; cell.style.boxShadow = ""; _saveAsignacionCell_(cell); });
     cell.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); cell.blur(); } });
+  });
+
+  // Editar fila
+  tbody.querySelectorAll("[data-asig-edit]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const row = Number(btn.dataset.asigEdit);
+      const item = S_asignacion.find(r => r._row === row);
+      if (item) openAsignacionModal_(item);
+    });
   });
 
   // Eliminar fila
@@ -5831,23 +5843,78 @@ async function _saveAsignacionCell_(cell) {
   catch (e) { toast("Asignación", "No se pudo guardar."); }
 }
 
-function wireAsignacion_() {
-  $("btnAsignacionAdd")?.addEventListener("click", async () => {
-    const tarea = prompt("Nombre de la tarea:");
-    if (!tarea?.trim()) return;
-    const tempRow = -Date.now();
-    const newItem = { tarea: tarea.trim(), descripcion: "", owner_s1: "", owner_s2: "", owner_s3: "", backup: "", _row: tempRow };
-    S_asignacion = [...S_asignacion, newItem];
+let _asigModalRow_ = null; // null = agregar, number = editar
+
+function openAsignacionModal_(item = null) {
+  _asigModalRow_ = item ? item._row : null;
+  $("asignacionModalTitle").textContent = item ? "Editar tarea" : "Nueva tarea";
+  $("amTarea").value   = item?.tarea       || "";
+  $("amDesc").value    = item?.descripcion  || "";
+  $("amS1").value      = item?.owner_s1    || "";
+  $("amS2").value      = item?.owner_s2    || "";
+  $("amS3").value      = item?.owner_s3    || "";
+  $("amBackup").value  = item?.backup      || "";
+  $("asignacionModal").style.display = "block";
+  setTimeout(() => $("amTarea")?.focus(), 50);
+}
+
+function closeAsignacionModal_() {
+  $("asignacionModal").style.display = "none";
+  _asigModalRow_ = null;
+}
+
+async function saveAsignacionModal_() {
+  const tarea = $("amTarea")?.value?.trim();
+  if (!tarea) { $("amTarea")?.focus(); setErr("El campo Tarea es obligatorio."); return; }
+  setErr("");
+
+  const payload = {
+    tarea,
+    descripcion: $("amDesc")?.value?.trim()   || "",
+    owner_s1:   $("amS1")?.value?.trim()      || "",
+    owner_s2:   $("amS2")?.value?.trim()      || "",
+    owner_s3:   $("amS3")?.value?.trim()      || "",
+    backup:     $("amBackup")?.value?.trim()  || "",
+  };
+
+  if (_asigModalRow_) {
+    // Editar
+    const prev = [...S_asignacion];
+    const idx = S_asignacion.findIndex(r => r._row === _asigModalRow_);
+    if (idx >= 0) S_asignacion[idx] = { ...S_asignacion[idx], ...payload };
     renderAsignacion_();
+    closeAsignacionModal_();
     try {
-      await API.asignacionUpsert(newItem);
+      await API.asignacionUpsert({ ...payload, row: _asigModalRow_ });
+      toast("Asignación", "✓ Tarea actualizada");
+    } catch (e) {
+      S_asignacion = prev; renderAsignacion_();
+      toast("Asignación", "No se pudo guardar.");
+    }
+  } else {
+    // Agregar
+    const tempRow = -Date.now();
+    S_asignacion = [...S_asignacion, { ...payload, _row: tempRow }];
+    renderAsignacion_();
+    closeAsignacionModal_();
+    try {
+      await API.asignacionUpsert(payload);
       await refreshEquipo_();
+      toast("Asignación", "✓ Tarea agregada");
     } catch (e) {
       S_asignacion = S_asignacion.filter(r => r._row !== tempRow);
       renderAsignacion_();
       toast("Asignación", "No se pudo agregar.");
     }
-  });
+  }
+}
+
+function wireAsignacion_() {
+  $("btnAsignacionAdd")?.addEventListener("click", () => openAsignacionModal_());
+  $("asignacionModalClose")?.addEventListener("click", closeAsignacionModal_);
+  $("asignacionModalCancel")?.addEventListener("click", closeAsignacionModal_);
+  $("asignacionModalSave")?.addEventListener("click", saveAsignacionModal_);
+  $("asignacionModal")?.addEventListener("click", e => { if (e.target === $("asignacionModal")) closeAsignacionModal_(); });
 }
 
 // ── Gestión de canales ───────────────────────────────────
@@ -5881,7 +5948,10 @@ function renderCanales_() {
           <td><span class="editable-cell" data-canal-field="owner_s2" data-canal-row="${c._row}" contenteditable="true" style="display:block;outline:none;padding:2px 4px;border-radius:4px" spellcheck="false">${escapeHtml(c.owner_s2)}</span></td>
           <td><span class="editable-cell" data-canal-field="owner_s3" data-canal-row="${c._row}" contenteditable="true" style="display:block;outline:none;padding:2px 4px;border-radius:4px" spellcheck="false">${escapeHtml(c.owner_s3)}</span></td>
           <td style="font-size:12px;color:var(--text-2)">${escapeHtml(c.grupo)}</td>
-          <td><button class="xbtn" data-canal-del="${c._row}" title="Eliminar canal" style="font-size:14px">×</button></td>
+          <td style="white-space:nowrap">
+            <button class="btn ghost" data-canal-edit="${c._row}" title="Editar" style="font-size:11px;padding:2px 6px;margin-right:4px">✏️</button>
+            <button class="xbtn" data-canal-del="${c._row}" title="Eliminar canal" style="font-size:14px">×</button>
+          </td>
         </tr>`;
     }).join("");
   });
@@ -5893,6 +5963,15 @@ function renderCanales_() {
     cell.addEventListener("focus", () => { cell.style.background = "var(--surface-2)"; cell.style.boxShadow = "0 0 0 2px var(--pri-dim)"; });
     cell.addEventListener("blur",  () => { cell.style.background = ""; cell.style.boxShadow = ""; _saveCanalCell_(cell); });
     cell.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); cell.blur(); } });
+  });
+
+  // Editar canal
+  tbody.querySelectorAll("[data-canal-edit]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const row = Number(btn.dataset.canalEdit);
+      const item = S_canales.find(c => c._row === row);
+      if (item) openCanalesModal_(item);
+    });
   });
 
   // Eliminar canal
@@ -5923,23 +6002,81 @@ async function _saveCanalCell_(cell) {
   catch (e) { toast("Canales", "No se pudo guardar."); }
 }
 
-function wireCanales_() {
-  $("btnCanalesAdd")?.addEventListener("click", async () => {
-    const canal = prompt("Nombre del canal (sin #):");
-    if (!canal?.trim()) return;
-    const foco  = prompt("Foco del canal:") || "";
-    const grupo = prompt("Grupo (ej: Internos · Operativo, Con MELI · Estratégico):") || "";
-    const tempRow = -Date.now();
-    const newItem = { canal: canal.trim(), foco: foco.trim(), owner_s1: "", owner_s2: "", owner_s3: "", grupo: grupo.trim(), _row: tempRow };
-    S_canales = [...S_canales, newItem];
+let _canalModalRow_ = null;
+
+function openCanalesModal_(item = null) {
+  _canalModalRow_ = item ? item._row : null;
+  $("canalesModalTitle").textContent = item ? "Editar canal" : "Nuevo canal";
+  $("cmCanal").value    = item?.canal    || "";
+  $("cmFoco").value     = item?.foco     || "";
+  $("cmOwnerS1").value  = item?.owner_s1 || "";
+  $("cmOwnerS2").value  = item?.owner_s2 || "";
+  $("cmOwnerS3").value  = item?.owner_s3 || "";
+  $("cmGrupo").value    = item?.grupo    || "";
+  // Poblar datalist de grupos existentes
+  const grupos = [...new Set(S_canales.map(c => c.grupo).filter(Boolean))];
+  const dl = document.getElementById("canalesGrupoList");
+  if (dl) dl.innerHTML = grupos.map(g => `<option value="${escapeAttr(g)}">`).join("");
+  // Canal no editable en modo edición
+  if ($("cmCanal")) $("cmCanal").disabled = !!item;
+  $("canalesModal").style.display = "block";
+  setTimeout(() => (item ? $("cmFoco") : $("cmCanal"))?.focus(), 50);
+}
+
+function closeCanalesModal_() {
+  $("canalesModal").style.display = "none";
+  if ($("cmCanal")) $("cmCanal").disabled = false;
+  _canalModalRow_ = null;
+}
+
+async function saveCanalesModal_() {
+  const canal = $("cmCanal")?.value?.trim();
+  if (!canal) { $("cmCanal")?.focus(); setErr("El campo Canal es obligatorio."); return; }
+  setErr("");
+
+  const payload = {
+    canal,
+    foco:     $("cmFoco")?.value?.trim()    || "",
+    owner_s1: $("cmOwnerS1")?.value?.trim() || "",
+    owner_s2: $("cmOwnerS2")?.value?.trim() || "",
+    owner_s3: $("cmOwnerS3")?.value?.trim() || "",
+    grupo:    $("cmGrupo")?.value?.trim()   || "",
+  };
+
+  if (_canalModalRow_) {
+    const prev = [...S_canales];
+    const idx = S_canales.findIndex(c => c._row === _canalModalRow_);
+    if (idx >= 0) S_canales[idx] = { ...S_canales[idx], ...payload };
     renderCanales_();
+    closeCanalesModal_();
     try {
-      await API.gestionCanalesUpsert(newItem);
+      await API.gestionCanalesUpsert({ ...payload, row: _canalModalRow_ });
+      toast("Canales", "✓ Canal actualizado");
+    } catch (e) {
+      S_canales = prev; renderCanales_();
+      toast("Canales", "No se pudo guardar.");
+    }
+  } else {
+    const tempRow = -Date.now();
+    S_canales = [...S_canales, { ...payload, _row: tempRow }];
+    renderCanales_();
+    closeCanalesModal_();
+    try {
+      await API.gestionCanalesUpsert(payload);
       await refreshEquipo_();
+      toast("Canales", "✓ Canal agregado");
     } catch (e) {
       S_canales = S_canales.filter(c => c._row !== tempRow);
       renderCanales_();
       toast("Canales", "No se pudo agregar.");
     }
-  });
+  }
+}
+
+function wireCanales_() {
+  $("btnCanalesAdd")?.addEventListener("click", () => openCanalesModal_());
+  $("canalesModalClose")?.addEventListener("click", closeCanalesModal_);
+  $("canalesModalCancel")?.addEventListener("click", closeCanalesModal_);
+  $("canalesModalSave")?.addEventListener("click", saveCanalesModal_);
+  $("canalesModal")?.addEventListener("click", e => { if (e.target === $("canalesModal")) closeCanalesModal_(); });
 }

@@ -551,7 +551,7 @@ th.sortable .srt { margin-left: 4px; opacity: .55; font-size: 10px; }
   box-shadow: var(--shd-lg);
   display: none;
   max-width: min(380px, calc(100vw - 32px));
-  z-index: 50;
+  z-index: 950;
 }
 
 .toast.show  { display: block; animation: slideUp .18s ease; }
@@ -1727,13 +1727,25 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 </section>
 
 </main>
+</div><!-- end appRoot wrap -->
+
+<!-- Busy overlay -->
 <div aria-busy="true" aria-live="polite" class="busy" id="busy">
 <div aria-hidden="true" class="spinner"></div>
 <div>
 <div class="b1" id="busyT1"></div>
 <div class="b2" id="busyT2"></div>
+</div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+<div class="t1" id="toastT1"></div>
+<div class="t2" id="toastT2"></div>
+</div>
+
 <!-- Botón flotante Links útiles -->
-<button id="btnLinksUtiles" title="Links útiles" aria-label="Links útiles" style="position:fixed;bottom:24px;right:24px;z-index:900;width:48px;height:48px;border-radius:50%;border:none;background:var(--pri);color:#fff;font-size:20px;cursor:pointer;box-shadow:var(--shd-lg);display:flex;align-items:center;justify-content:center;transition:transform .15s">🔗</button>
+<button id="btnLinksUtiles" title="Links útiles" aria-label="Links útiles" style="position:fixed;bottom:80px;right:24px;z-index:800;width:48px;height:48px;border-radius:50%;border:none;background:var(--pri);color:#fff;font-size:20px;cursor:pointer;box-shadow:var(--shd-lg);display:flex;align-items:center;justify-content:center;transition:transform .15s">🔗</button>
 
 <!-- Drawer Links útiles -->
 <div id="linksDrawerOverlay" style="display:none;position:fixed;inset:0;z-index:910;background:rgba(0,0,0,.35)" aria-hidden="true"></div>
@@ -1755,14 +1767,99 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
   </div>
 </aside>
 
-</div><!-- end app -->
-<div class="toast" id="toast">
-<div class="t1" id="toastT1"></div>
-<div class="t2" id="toastT2"></div>
-</div>
-</div>
 <script src="/api.js" type="module"></script>
 <script src="/app.js" type="module"></script>
+
+<!-- Modal Asignación Semanal -->
+<div id="asignacionModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;overflow:auto">
+  <div style="background:var(--surface);border-radius:var(--r-lg);max-width:540px;width:calc(100% - 32px);margin:80px auto;padding:28px;box-shadow:var(--shd-lg)">
+    <div class="row" style="margin-bottom:20px">
+      <h2 id="asignacionModalTitle" style="margin:0">Nueva tarea</h2>
+      <div class="spacer"></div>
+      <button class="xbtn" id="asignacionModalClose" style="font-size:20px">×</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <div class="form-label">Tarea *</div>
+        <input class="input" id="amTarea" placeholder="Nombre de la tarea"/>
+      </div>
+      <div>
+        <div class="form-label">Descripción</div>
+        <textarea class="input" id="amDesc" placeholder="Descripción breve..." rows="2" style="resize:vertical;font-family:inherit"></textarea>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <div class="form-label">Owner Semana 1</div>
+          <input class="input" id="amS1" placeholder="Ej: José"/>
+        </div>
+        <div>
+          <div class="form-label">Owner Semana 2</div>
+          <input class="input" id="amS2" placeholder="Ej: Mati L."/>
+        </div>
+        <div>
+          <div class="form-label">Owner Semana 3</div>
+          <input class="input" id="amS3" placeholder="Ej: Mati M."/>
+        </div>
+        <div>
+          <div class="form-label">Backup</div>
+          <input class="input" id="amBackup" placeholder="Ej: Cele, Vicky"/>
+        </div>
+      </div>
+    </div>
+    <div class="hr" style="margin:20px 0"></div>
+    <div class="row" style="justify-content:flex-end;gap:8px">
+      <button class="btn ghost" id="asignacionModalCancel">Cancelar</button>
+      <button class="btn primary" id="asignacionModalSave">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Gestión de Canales -->
+<div id="canalesModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;overflow:auto">
+  <div style="background:var(--surface);border-radius:var(--r-lg);max-width:540px;width:calc(100% - 32px);margin:80px auto;padding:28px;box-shadow:var(--shd-lg)">
+    <div class="row" style="margin-bottom:20px">
+      <h2 id="canalesModalTitle" style="margin:0">Nuevo canal</h2>
+      <div class="spacer"></div>
+      <button class="xbtn" id="canalesModalClose" style="font-size:20px">×</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <div class="form-label">Canal * <span class="muted">(sin #)</span></div>
+          <input class="input" id="cmCanal" placeholder="flujo-mixto"/>
+        </div>
+        <div>
+          <div class="form-label">Grupo</div>
+          <input class="input" id="cmGrupo" placeholder="Ej: Internos · Operativo" list="canalesGrupoList"/>
+          <datalist id="canalesGrupoList"></datalist>
+        </div>
+      </div>
+      <div>
+        <div class="form-label">Foco</div>
+        <input class="input" id="cmFoco" placeholder="Demanda / Enhancement / EC"/>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div>
+          <div class="form-label">Owner Semana 1</div>
+          <input class="input" id="cmOwnerS1" placeholder="José"/>
+        </div>
+        <div>
+          <div class="form-label">Owner Semana 2</div>
+          <input class="input" id="cmOwnerS2" placeholder="Mati L."/>
+        </div>
+        <div>
+          <div class="form-label">Owner Semana 3</div>
+          <input class="input" id="cmOwnerS3" placeholder="Mati M."/>
+        </div>
+      </div>
+    </div>
+    <div class="hr" style="margin:20px 0"></div>
+    <div class="row" style="justify-content:flex-end;gap:8px">
+      <button class="btn ghost" id="canalesModalCancel">Cancelar</button>
+      <button class="btn primary" id="canalesModalSave">Guardar</button>
+    </div>
+  </div>
+</div>
 
 <!-- Modal Colaborador (Agregar / Editar) -->
 <div id="colabModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;overflow:auto">
