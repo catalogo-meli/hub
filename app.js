@@ -270,9 +270,10 @@ function roleBucket(raw) {
 function copyToClipboard(text) {
   const t = String(text ?? "");
   if (!t) return;
+  const label = t.length > 40 ? t.slice(0, 38) + "…" : t;
   navigator.clipboard?.writeText(t).then(
-    () => toast("Copiado", t),
-    () => toast("No se pudo copiar", t)
+    () => toast("Copiado ✓", label),
+    () => toast("No se pudo copiar", label)
   );
 }
 
@@ -2532,16 +2533,16 @@ function renderColabs() {
       return `
         <tr data-id="${escapeAttr(v.id)}">
           <td class="nowrap"><input type="checkbox" data-sel ${checked} /></td>
-          <td class="copyable" data-copy="${escapeAttr(v.id)}">${escapeHtml(v.id)}</td>
-          <td>${escapeHtml(v.nombre)}</td>
-          <td class="copyable" data-copy="${escapeAttr(v.slackId)}">${escapeHtml(v.slackId)}</td>
-          <td>${escapeHtml(v.rol)}</td>
-          <td>${escapeHtml(v.equipo)}</td>
-          <td>${escapeHtml(v.ubic)}</td>
-          <td class="nowrap">${escapeHtml(fmtDateAny(v.ingreso))}</td>
-          <td class="copyable" data-copy="${escapeAttr(v.cuil)}">${escapeHtml(v.cuil)}</td>
-          <td class="copyable" data-copy="${escapeAttr(v.mailProd)}">${escapeHtml(v.mailProd)}</td>
-          <td class="copyable" data-copy="${escapeAttr(v.mailExt)}">${escapeHtml(v.mailExt)}</td>
+          <td class="copyable" data-copy="${escapeAttr(v.id)}" title="${escapeAttr(v.id)}">${escapeHtml(v.id)}</td>
+          <td title="${escapeAttr(v.nombre)}">${escapeHtml(v.nombre)}</td>
+          <td class="copyable" data-copy="${escapeAttr(v.slackId)}" title="${escapeAttr(v.slackId)}">${escapeHtml(v.slackId)}</td>
+          <td title="${escapeAttr(v.rol)}">${escapeHtml(v.rol)}</td>
+          <td title="${escapeAttr(v.equipo)}">${escapeHtml(v.equipo)}</td>
+          <td title="${escapeAttr(v.ubic)}">${escapeHtml(v.ubic)}</td>
+          <td class="nowrap" title="${escapeAttr(fmtDateAny(v.ingreso))}">${escapeHtml(fmtDateAny(v.ingreso))}</td>
+          <td class="copyable" data-copy="${escapeAttr(v.cuil)}" title="${escapeAttr(v.cuil)}">${escapeHtml(v.cuil)}</td>
+          <td class="copyable" data-copy="${escapeAttr(v.mailProd)}" title="${escapeAttr(v.mailProd)}">${escapeHtml(v.mailProd)}</td>
+          <td class="copyable" data-copy="${escapeAttr(v.mailExt)}" title="${escapeAttr(v.mailExt)}">${escapeHtml(v.mailExt)}</td>
           <td class="nowrap">
             <button class="btn ghost" data-colab-edit="${escapeAttr(v.id)}" style="font-size:11px;padding:3px 8px" title="Editar">✏️</button>
           </td>
