@@ -1304,6 +1304,14 @@ function renderPlan() {
     flujos.sort((a, b) => a.localeCompare(b));
   }
 
+  // Detectar colaboradores asignados a más de un flujo
+  const _allPlanIds_ = plan
+    .filter(r => r?.id_meli && r.id_meli !== "SIN PERFILES DISPONIBLES")
+    .map(r => r.id_meli);
+  const _idCount_ = new Map();
+  _allPlanIds_.forEach(id => _idCount_.set(id, (_idCount_.get(id) || 0) + 1));
+  const _planDupIds_ = new Set([..._idCount_.entries()].filter(([, c]) => c > 1).map(([id]) => id));
+
   host.innerHTML = flujos
     .map((f) => {
       const itemsRaw = (by[f] || []).filter((x) => x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES");
@@ -1318,8 +1326,9 @@ function renderPlan() {
       const maxPeek = 5;
       const peekNames = items.slice(0, maxPeek).map((x) => {
         const fijo = x.es_fijo === "SI" ? " <b>F</b>" : "";
+        const dup  = _planDupIds_.has(x.id_meli) ? " <span style=\"color:var(--warn-txt);font-size:10px\" title=\"Aparece en otro flujo\">⚠</span>" : "";
         const name = escapeHtml(x.nombre || x.id_meli || "");
-        return `${name}${fijo}`;
+        return `${name}${fijo}${dup}`;
       }).join(" · ");
       const remaining = Math.max(0, assigned - maxPeek);
 
@@ -1327,8 +1336,9 @@ function renderPlan() {
         ? items
             .map((x) => {
               const fijo = x.es_fijo === "SI" ? " <b>F</b>" : "";
+              const dup  = _planDupIds_.has(x.id_meli) ? " <span style=\"color:var(--warn-txt);font-size:10px\" title=\"Aparece en otro flujo\">⚠</span>" : "";
               const name = x.nombre || x.id_meli || "";
-              return `<li>${escapeHtml(name)}${fijo}</li>`;
+              return `<li>${escapeHtml(name)}${fijo}${dup}</li>`;
             })
             .join("")
         : "";
@@ -1837,7 +1847,7 @@ function renderOutbox() {
 
       if (mode !== "draft") return;
 
-      const triggerSave = () => outboxAutosave(row, sel ? sel.value : "", txt ? txt.value : "");
+      const triggerSave = () => outboxAutosave(row, sel ? sel.value : "", txt ? dehumanizeSlackTokens_(txt.value) : "");
       sel && sel.addEventListener("change", triggerSave);
       txt && txt.addEventListener("input", triggerSave);
       txt && txt.addEventListener("blur", triggerSave);
@@ -1885,10 +1895,11 @@ function renderOutbox() {
         const canal = (S.canales || []).find(c => c.channel_id === chVal)?.canal || "";
         outboxAutosave.cancel && outboxAutosave.cancel();
         try {
-          await API.slackOutboxUpdate(row, canal, chVal, txtVal);
+          const rawMsg = dehumanizeSlackTokens_(txtVal);
+          await API.slackOutboxUpdate(row, canal, chVal, rawMsg);
           await onOutboxSend(row);
           const stamp = new Date().toISOString();
-          patchOutbox_(row, { estado: "ENVIADO ✅ " + stamp, channel_id: chVal, canal, mensaje: txtVal });
+          patchOutbox_(row, { estado: "ENVIADO ✅ " + stamp, channel_id: chVal, canal, mensaje: rawMsg });
           toast("Mensajes", "✓ Mensaje enviado por Slack");
         } catch (e) {
           setErr("No se pudo enviar. Revisá el canal y el mensaje.");
@@ -5031,7 +5042,32 @@ async function onGenerarPlanificacionYOutbox_() {
     renderPlan();
     renderOutbox();
     renderDashboard();
-    toast("Planificación del día", "✓ Planificación y mensajes generados");
+
+    // Detectar colaboradores duplicados y mostrar alerta
+    const planRows = (S.plan || []).filter(r => r?.id_meli && r.id_meli !== "SIN PERFILES DISPONIBLES");
+    const idCount = new Map();
+    planRows.forEach(r => idCount.set(r.id_meli, (idCount.get(r.id_meli) || 0) + 1));
+    const dups = [...idCount.entries()].filter(([, c]) => c > 1);
+    if (dups.length > 0) {
+      const dupNames = dups.map(([id]) => {
+        const colab = (S.colabs || []).map(c => { const v = colabRowView(c); return v; }).find(v => v.id === id);
+        return colab?.nombre || id;
+      });
+      const flujosPorId = {};
+      planRows.forEach(r => {
+        if (!flujosPorId[r.id_meli]) flujosPorId[r.id_meli] = [];
+        if (!flujosPorId[r.id_meli].includes(r.flujo)) flujosPorId[r.id_meli].push(r.flujo);
+      });
+      const dupDetail = dups.map(([id]) => {
+        const colab = (S.colabs || []).map(c => colabRowView(c)).find(v => v.id === id);
+        const name = colab?.nombre || id;
+        const flujos = (flujosPorId[id] || []).join(" y ");
+        return `${name} (${flujos})`;
+      }).join(", ");
+      setErr(`⚠️ ${dups.length} colaborador${dups.length > 1 ? "es aparecen" : " aparece"} en más de un flujo: ${dupDetail}`);
+    } else {
+      toast("Planificación del día", "✓ Planificación y mensajes generados");
+    }
   } catch (e) {
     setErr("No se pudo generar la planificación. Intentá de nuevo.");
   } finally {
