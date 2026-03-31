@@ -2,6 +2,13 @@
   publish = "."
   functions = "netlify/functions"
 
+# Excluir functions del redirect SPA
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+  force = true
+
 # SPA fallback (si usás navegación interna / rutas)
 [[redirects]]
   from = "/*"
