@@ -1427,14 +1427,24 @@ function mountPlanControls_() {
 function flowMsgStatus_(flow) {
   const today = todayYMD();
   const out = (S.outbox || []).slice();
-  // POR_FLUJO guarda el nombre del flujo en el campo "canal"
-  const rows = out.filter((r) => String(r?.tipo || "").toUpperCase() === "POR_FLUJO" && String(r?.canal || "") === String(flow) && String(r?.fecha || "") === String(today));
+  const flujoConfig = (S.flujos || []).find(f => String(f.flujo || f).trim() === flow);
+  const chId = String(flujoConfig?.channel_id || "").trim();
+
+  const rows = out.filter((r) => {
+    if (String(r?.fecha || "") !== String(today)) return false;
+    const tipo = String(r?.tipo || "").toUpperCase();
+    // POR_FLUJO: el campo canal guarda el nombre del flujo
+    if (tipo === "POR_FLUJO" && String(r?.canal || "") === String(flow)) return true;
+    // PLAN: mensaje general que incluye este flujo — matchear por channel_id
+    if (tipo === "PLAN" && chId && String(r?.channel_id || "") === chId) return true;
+    return false;
+  });
+
   if (!rows.length) return { label: "Mensaje: —", cls: "" };
-  // tomamos la última por row (mayor)
   rows.sort((a, b) => Number(b.row || 0) - Number(a.row || 0));
   const estado = String(rows[0].estado || "").toUpperCase();
   if (estado.includes("ENVIADO")) return { label: "Mensaje: enviado", cls: "ok" };
-  if (estado.includes("ERROR")) return { label: "Mensaje: error", cls: "bad" };
+  if (estado.includes("ERROR"))   return { label: "Mensaje: error",   cls: "bad" };
   if (estado.includes("PROGRAMADO")) return { label: "Mensaje: programado", cls: "warn" };
   return { label: "Mensaje: pendiente", cls: "warn" };
 }
