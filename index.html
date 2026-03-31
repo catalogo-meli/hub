@@ -1316,8 +1316,8 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <thead>
 <tr>
 <th class="sortable" data-sort="rol">Rol <span class="srt"></span></th>
-<th class="right sortable" data-sort="nomina">En nómina <span class="srt"></span></th>
-<th class="right sortable" data-sort="presentes">Presentes hoy <span class="srt"></span></th>
+<th class="sortable" data-sort="nomina">En nómina <span class="srt"></span></th>
+<th class="sortable" data-sort="presentes">Presentes hoy <span class="srt"></span></th>
 </tr>
 </thead>
 <tbody></tbody>
@@ -1417,19 +1417,8 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 </div>
 <div>
 <div class="muted" style="font-size:12px;margin-bottom:6px">Mensaje</div>
-<div style="position:relative">
-<textarea class="input" id="slackComposeMsg" placeholder="Escribí el mensaje..." style="padding-right:56px"></textarea>
-<button class="btn icon-btn" id="btnEmoji" style="position:absolute;right:10px;top:10px" title="Emojis" type="button">😀</button>
-<div class="card" id="emojiModal" style="display:none;position:absolute;right:0;top:50px;min-width:380px;max-width:460px;padding:10px;z-index:120">
-<div class="row" style="gap:8px;align-items:center">
-<div class="search" style="min-width:0;flex:1">
-<input class="input" id="emojiSearch" placeholder="Buscar emoji..."/>
-<div class="x" id="emojiSearchClear" title="Limpiar">×</div>
-</div>
-<button class="btn ghost" id="btnEmojiClose" type="button">Cerrar</button>
-</div>
-<div id="emojiGroups" style="margin-top:10px;max-height:280px;overflow:auto"></div>
-</div>
+<div>
+<textarea class="input" id="slackComposeMsg" placeholder="Escribí el mensaje..."></textarea>
 </div>
 </div>
 </div>
@@ -1511,10 +1500,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div id="sentSection" style="display:none;margin-top:12px">
 <!-- Filtros Enviados -->
 <div id="sentFilters" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center">
-  <select class="input" id="sentFilterFlujo" style="max-width:180px;font-size:12px">
-    <option value="">Todos los flujos</option>
-  </select>
-  <select class="input" id="sentFilterCanal" style="max-width:180px;font-size:12px">
+  <select class="input" id="sentFilterCanal" style="max-width:200px;font-size:12px">
     <option value="">Todos los canales</option>
   </select>
   <select class="input" id="sentFilterFecha" style="max-width:180px;font-size:12px">
@@ -1939,6 +1925,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
         <div class="form-label">Nombre del flujo</div>
         <input class="input" id="fcFlujo" placeholder="Ej: Soporte técnico"/>
         <div id="fcFlujoReadonly" style="display:none;padding:8px 10px;background:var(--surface-2);border:1px solid var(--brd-2);border-radius:var(--r);font-size:13px;font-weight:600;color:var(--text-1)"></div>
+        <div id="fcFlujoRenameWarn" style="display:none;font-size:11px;color:var(--warn);margin-top:4px">⚠️ Renombrar el flujo puede afectar datos históricos.</div>
       </div>
       <!-- Rotación -->
       <div>
@@ -1962,12 +1949,9 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
         </select>
       </div>
       <!-- Permite perfiles fijos -->
-      <div style="grid-column:1/-1;display:flex;align-items:flex-start;gap:10px;padding:12px;background:var(--surface-2);border-radius:var(--r);border:1px solid var(--brd-2)">
-        <input type="checkbox" id="fcPermiteFijos" style="width:16px;height:16px;accent-color:var(--pri);flex-shrink:0;margin-top:2px"/>
-        <div>
-          <label for="fcPermiteFijos" class="form-label" style="margin:0;cursor:pointer">Permite perfiles fijos</label>
-          <div class="muted" style="font-size:11px;margin-top:2px">Los perfiles fijos se asignan siempre al mismo flujo, sin entrar en rotación.</div>
-        </div>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px;padding:12px;background:var(--surface-2);border-radius:var(--r);border:1px solid var(--brd-2)">
+        <input type="checkbox" id="fcPermiteFijos" style="width:16px;height:16px;accent-color:var(--pri);flex-shrink:0"/>
+        <label for="fcPermiteFijos" class="form-label" style="margin:0;cursor:pointer">Permite perfiles fijos</label>
       </div>
     </div>
     <div class="hr" style="margin:20px 0"></div>

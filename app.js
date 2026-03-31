@@ -1156,11 +1156,10 @@ function renderFlujos() {
             <input type="checkbox" data-inc-msg ${incluir ? "checked" : ""} />
           </td>
           <td style="min-width:240px">
-            <div class="flow-channel ${invalid ? "invalid" : ""}" data-ch-wrap>
-              <input class="input" data-ch-inp placeholder="Seleccionar canal..." value="${escapeAttr(ch.canal || "")}" ${incluir ? "" : "disabled"} />
-              <div class="dd" data-ch-dd></div>
-              <div class="err">Seleccioná un canal.</div>
-            </div>
+            <select class="input" data-ch-sel ${incluir ? "" : "disabled"} style="font-size:13px">
+              <option value="">— Sin canal —</option>
+              ${(S.canales || []).map(c => `<option value="${escapeAttr(c.channel_id)}" ${ch.channel_id === c.channel_id ? "selected" : ""}>${escapeHtml(c.canal)}</option>`).join("")}
+            </select>
           </td>
           <td class="right nowrap" style="min-width:140px">
             <input class="input smallnum" type="number" min="0" step="1" value="${req}" data-req />
@@ -1177,119 +1176,45 @@ function renderFlujos() {
   tb.querySelectorAll("tr").forEach((tr) => {
     const flujo = tr.getAttribute("data-flujo");
     const inp = tr.querySelector("[data-req]");
-    const chWrap = tr.querySelector("[data-ch-wrap]");
-    const chInp = tr.querySelector("[data-ch-inp]");
-    const chDd = tr.querySelector("[data-ch-dd]");
-    const getChannelId = () => String(tr.getAttribute("data-channel-id") || "").trim();
-    const setChannelId = (id) => tr.setAttribute("data-channel-id", String(id || ""));
     // Incluir / Excluir en mensaje GENERAL (persistido en Config_Flujos)
     const chk = tr.querySelector("[data-inc-msg]");
+    const chSel = tr.querySelector("[data-ch-sel]");
+
     chk?.addEventListener("change", async () => {
       const value = !!chk.checked;
       try {
         await API.configFlujosSetIncluirMensaje(unescapeAttr(flujo), value);
-        // Si se desactiva Slack, se limpia el canal (no se exige)
-        if (!value) {
-          // UX: ocultar el valor cuando está deshabilitado, pero NO borrar el canal guardado.
-          // Esto permite que, al volver a activar Slack, el canal vuelva por defecto.
-          if (chInp) { chInp.value = ""; chInp.disabled = true; }
-          chWrap?.classList.remove("invalid");
-        } else {
-          if (chInp) { chInp.disabled = false; chInp.focus(); }
-          // si ya había canal guardado, mostrarlo por defecto
-          const existing = getChannelId();
-          if (existing) {
-            const ch = resolveChannel_(existing);
-            chInp.value = ch ? ch.name : existing;
-            chWrap?.classList.remove("invalid");
-          } else {
-            // si no hay canal, marcar error
-            chWrap?.classList.add("invalid");
-          }
-        }
-        // actualizar cache local si existe
+        if (chSel) chSel.disabled = !value;
         const idx = (S.flujos || []).findIndex((x) => String(x.flujo) === String(unescapeAttr(flujo)));
         if (idx >= 0) S.flujos[idx].incluir_en_mensaje = value;
         toast("Flujos", value ? "Incluido en mensaje" : "Excluido del mensaje");
       } catch (e) {
         setErr(e?.message || String(e));
-        chk.checked = !value; // rollback visual
+        chk.checked = !value;
       }
       updateDailyGenerateDisabled_();
     });
 
-    // autosave on input (debounced) + blur (for mobile)
+    // autosave perfiles
     inp.addEventListener("input", () => {
       const perfiles = Number(inp.value || 0) || 0;
-      saveFlujoDebounced(unescapeAttr(flujo), perfiles, getChannelId());
+      const chId = String(chSel?.value || "").trim();
+      saveFlujoDebounced(unescapeAttr(flujo), perfiles, chId);
     });
     inp.addEventListener("blur", () => {
       const perfiles = Number(inp.value || 0) || 0;
-      saveFlujoDebounced(unescapeAttr(flujo), perfiles, getChannelId());
+      const chId = String(chSel?.value || "").trim();
+      saveFlujoDebounced(unescapeAttr(flujo), perfiles, chId);
     });
 
-    // Canal Slack combo (búsqueda, dropdown absoluto)
-    if (chInp && chDd && chWrap) {
-      const close = () => chWrap.classList.remove("open");
-      const open = () => chWrap.classList.add("open");
-
-      const renderDd = (q) => {
-        const qq = norm(q || "");
-        const list = (S.canales || [])
-          .filter((c) => {
-            const name = String(c.canal || "");
-            return !qq || norm(name).includes(qq);
-          })
-          .slice(0, 10);
-
-        if (!list.length) {
-          chDd.innerHTML = `<div class="it"><span class="muted">Sin resultados</span></div>`;
-          return;
-        }
-
-        chDd.innerHTML = list
-          .map((c) => {
-            const name = String(c.canal || "");
-            const id = String(c.channel_id || "");
-            return `<div class="it" data-pick="${escapeAttr(id)}"><span>${escapeHtml(name)}</span><span class="muted">${escapeHtml(id)}</span></div>`;
-          })
-          .join("");
-
-        chDd.querySelectorAll("[data-pick]").forEach((it) => {
-          it.addEventListener("mousedown", (ev) => {
-            ev.preventDefault(); // evita blur antes de seleccionar
-            const id = it.getAttribute("data-pick");
-            const c = (S.canales || []).find((x) => String(x.channel_id || "") === String(id));
-            const canal = String(c?.canal || "").trim();
-            setChannelId(id);
-            chInp.value = canal;
-            chWrap.classList.remove("invalid");
-            close();
-            const perfiles = Number(inp?.value || 0) || 0;
-            saveFlujoDebounced(unescapeAttr(flujo), perfiles, id);
-            updateDailyGenerateDisabled_();
-          });
-        });
-      };
-
-      chInp.addEventListener("focus", () => {
-        if (chInp.disabled) return;
-        renderDd(chInp.value);
-        open();
-      });
-      chInp.addEventListener("input", () => {
-        if (chInp.disabled) return;
-        renderDd(chInp.value);
-        open();
-        // si escribe, invalido hasta que seleccione un canal válido
-        if (!getChannelId()) chWrap.classList.add("invalid");
-        updateDailyGenerateDisabled_();
-      });
-
-      document.addEventListener("mousedown", (ev) => {
-        if (!chWrap.contains(ev.target)) close();
-      });
-    }
+    // Canal select — guardar al cambiar
+    chSel?.addEventListener("change", () => {
+      const chId = chSel.value;
+      tr.setAttribute("data-channel-id", chId);
+      const perfiles = Number(inp?.value || 0) || 0;
+      saveFlujoDebounced(unescapeAttr(flujo), perfiles, chId);
+      updateDailyGenerateDisabled_();
+    });
 
     tr.querySelector("[data-cfg]")?.addEventListener("click", () => {
       openFlujoConfigModal_(unescapeAttr(flujo));
@@ -1320,7 +1245,8 @@ function updateDailyGenerateDisabled_() {
     const on = !!chk?.checked;
     if (on) {
       anySlack = true;
-      const ch = String(tr.getAttribute("data-channel-id") || "").trim();
+      const chSel = tr.querySelector("[data-ch-sel]");
+      const ch = String(chSel?.value || tr.getAttribute("data-channel-id") || "").trim();
       if (!ch) missing = true;
     }
   }
@@ -1537,7 +1463,8 @@ async function generarMensajePorFlujo_(flujo, btn = null) {
       ? (S.canales || []).find(c => c.channel_id === chId)?.canal || ""
       : "";
     const estado = chId ? "BORRADOR" : "SIN CANAL CONFIGURADO";
-    await API.slackOutboxAppend(fechaISO, "POR_FLUJO", chName || flujo, chId, msg, estado);
+    // Para POR_FLUJO: canal siempre es el nombre del flujo (el channel_id técnico va separado)
+    await API.slackOutboxAppend(fechaISO, "POR_FLUJO", flujo, chId, msg, estado);
     S.outbox = await API.slackOutboxList();
     renderOutbox();
     renderPlan();
@@ -2069,13 +1996,6 @@ function mountSlackCompose_() {
   const btnDraft = $("btnSaveDraft");
   const btnSendNow = $("btnSendNow");
   const btnSched = $("btnSchedule");
-  const btnEmoji = $("btnEmoji");
-  const emojiModal = $("emojiModal");
-  const emojiGroups = $("emojiGroups");
-  const emojiSearch = $("emojiSearch");
-  const emojiSearchClear = $("emojiSearchClear");
-  const btnEmojiClose = $("btnEmojiClose");
-  
 
   const mentionSearch = $("slackMentionSearch");
   const mentionResults = $("slackMentionResults");
@@ -2444,74 +2364,6 @@ function mountSlackCompose_() {
     }
     return out;
   })();
-
-const renderEmojiPanel = () => {
-    if (!emojiGroups) return;
-    const q = norm(String(emojiSearch?.value || ""));
-
-    const items = q ? EMOJI_INDEX.filter((x) => x.hay.includes(q)) : EMOJI_INDEX;
-
-    emojiGroups.innerHTML = `
-      <div class="emoji-grid">${items.map((x) => `<button type="button" class="emoji-btn" data-e="${escapeAttr(x.e)}">${escapeHtml(x.e)}</button>`).join("")}</div>
-      ${q && !items.length ? `<div class="muted" style="font-size:12px;margin-top:10px">Sin resultados.</div>` : ""}
-    `;
-
-    emojiGroups.querySelectorAll("[data-e]").forEach((b) => {
-      b.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        insertAtCursor(ta, b.getAttribute("data-e") + " ");
-      });
-    });
-  };
-
-  const openEmoji = () => { if (emojiModal) emojiModal.style.display = "block"; };
-  const closeEmoji = () => { if (emojiModal) emojiModal.style.display = "none"; };
-
-  btnEmoji?.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!emojiModal) return;
-    emojiModal.style.display = emojiModal.style.display === "none" ? "block" : "none";
-  });
-
-  btnEmojiClose?.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    closeEmoji();
-  });
-
-  emojiSearch?.addEventListener("input", debounce(() => {
-    // mostrar/ocultar X de limpieza (mismo patrón que otros search del hub)
-    try {
-      const wrap = emojiSearch?.closest?.(".search");
-      if (wrap) wrap.classList.toggle("has", !!String(emojiSearch.value || "").trim());
-    } catch (_) {}
-    renderEmojiPanel();
-  }, 80));
-
-  emojiSearchClear?.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!emojiSearch) return;
-    emojiSearch.value = "";
-    try {
-      const wrap = emojiSearch.closest?.(".search");
-      if (wrap) wrap.classList.remove("has");
-    } catch (_) {}
-    renderEmojiPanel();
-    emojiSearch.focus();
-  });
-
-  document.addEventListener("click", (e) => {
-    if (!emojiModal || !btnEmoji) return;
-    const t = e.target;
-    if (emojiModal.contains(t) || btnEmoji.contains(t)) return;
-    closeEmoji();
-  });
-
-  // init emojis
-  renderEmojiPanel();
 
   // estado inicial
   renderPills();
@@ -3637,7 +3489,10 @@ function renderDashboard() {
     ${absenceCards ? `<div style="width:100%;margin-top:10px;display:flex;flex-wrap:wrap;gap:8px">${absenceCards}</div>` : ""}
   `;
 
-  tb.innerHTML = rowsRoles.map((r) => `<tr><td>${escapeHtml(r.rol)}</td><td class="right">${r.nomina}</td><td class="right">${r.presentes}</td></tr>`).join("");
+  tb.innerHTML = rowsRoles.map((r) => `<tr><td>${escapeHtml(r.rol)}</td><td>${r.nomina}</td><td>${r.presentes}</td></tr>`).join("");
+
+  // Re-aplicar indicadores de sort en cada render
+  mountTableSort_("tblDashRoles", S.sort.dashRoles, (st) => { S.sort.dashRoles = st; renderDashboard(); });
 
   // Actualizar card de Agenda
   _updateKpiAgenda_();
@@ -5600,11 +5455,9 @@ async function main() {
   $("templatesModal")?.addEventListener("click", e => { if (e.target === $("templatesModal")) closeTemplatesModal_(); });
 
   // Filtros Enviados
-  $("sentFilterFlujo")?.addEventListener("change", applySentFilters_);
   $("sentFilterCanal")?.addEventListener("change", applySentFilters_);
   $("sentFilterFecha")?.addEventListener("change", applySentFilters_);
   $("btnSentFilterClear")?.addEventListener("click", () => {
-    if ($("sentFilterFlujo")) $("sentFilterFlujo").value = "";
     if ($("sentFilterCanal")) $("sentFilterCanal").value = "";
     if ($("sentFilterFecha")) $("sentFilterFecha").value = "14";
     applySentFilters_();
@@ -6349,11 +6202,22 @@ function openFlujoConfigModal_(flujoName) {
   $("flujoConfigModalTitle").textContent = `⚙️ ${flujoName}`;
   $("flujoConfigModalSave").textContent = "Guardar configuración";
 
-  // Nombre: mostrar readonly, ocultar input editable
+  // Nombre: editable en modo edición también, con aviso
   const inp = $("fcFlujo");
   const ro  = $("fcFlujoReadonly");
-  if (inp) { inp.style.display = "none"; inp.value = flujoName; }
-  if (ro)  { ro.style.display = ""; ro.textContent = flujoName; }
+  const warn = $("fcFlujoRenameWarn");
+  if (inp) { inp.style.display = ""; inp.value = flujoName; inp.dataset.originalName = flujoName; }
+  if (ro)  ro.style.display = "none";
+  if (warn) warn.style.display = "none";
+
+  // Mostrar aviso si cambia el nombre
+  if (inp && !inp._renameWired) {
+    inp._renameWired = true;
+    inp.addEventListener("input", () => {
+      const w = $("fcFlujoRenameWarn");
+      if (w) w.style.display = inp.value.trim() !== inp.dataset.originalName ? "" : "none";
+    });
+  }
 
   _flujoConfigPopulateCanales_();
   const sel = $("fcCanalSlack");
@@ -6369,6 +6233,7 @@ function openFlujoConfigModal_(flujoName) {
   if (fijos) fijos.checked = f.permite_fijos === true;
 
   $("flujoConfigModal").style.display = "block";
+  setTimeout(() => inp?.focus(), 50);
 }
 
 function openFlujoCreateModal_() {
@@ -6411,8 +6276,8 @@ async function saveFlujoConfigModal_() {
       setErr(`Ya existe un flujo llamado "${flujo}". Elegí otro nombre.`); return;
     }
   } else {
-    flujo = $("fcFlujoReadonly")?.textContent?.trim() || $("fcFlujo")?.value?.trim();
-    if (!flujo) return;
+    flujo = $("fcFlujo")?.value?.trim();
+    if (!flujo) { setErr("El nombre del flujo no puede estar vacío."); return; }
   }
 
   // Resolver channel_id desde el select de canal
@@ -6423,8 +6288,12 @@ async function saveFlujoConfigModal_() {
   const rotMode = $("fcRotMode")?.value || "Off";
   const rotWindow = rotMode === "diaria" ? Number($("fcRotWindow")?.value || 0) : 0;
 
+  // En modo edición, el nombre original puede diferir si el usuario lo cambió
+  const originalName = $("fcFlujo")?.dataset?.originalName || flujo;
+
   const payload = {
     flowName:           flujo,
+    originalName:       originalName !== flujo ? originalName : flujo,
     slackChannel:       canalNombre,
     channel_id:         selectedChannelId,
     rotationMode:       rotMode,
@@ -6486,6 +6355,14 @@ async function saveFlujoConfigModal_() {
 // ─── Templates Modal ───
 
 let _templatesData = []; // [{ key, template }]
+let _templatesCache = null; // cache cliente
+let _templatesCacheTs = 0;
+const TEMPLATES_CACHE_TTL = 5 * 60 * 1000; // 5 min
+
+const TEMPLATES_DESCRIPTIONS = {
+  "OUTBOX_GENERAL": "Mensaje general del día — se envía al canal principal con todos los flujos al hacer 'Generar planificación'.",
+  "OUTBOX_POR_FLUJO": "Mensaje individual por flujo — se genera desde 'Planificación → Generar mensaje' en cada tarjeta de flujo.",
+};
 
 function _slackFmtWrapTemplate_(textarea, open, close) {
   const start = textarea.selectionStart;
@@ -6500,21 +6377,20 @@ function _slackFmtWrapTemplate_(textarea, open, close) {
 }
 
 function _templateRowHtml_(idx, key, template) {
+  const desc = TEMPLATES_DESCRIPTIONS[key] || "";
   return `
     <div class="template-row" data-tidx="${idx}" style="border:1px solid var(--brd-2);border-radius:var(--r);padding:12px;background:var(--surface-2);display:flex;flex-direction:column;gap:8px">
       <div style="display:flex;align-items:center;gap:8px">
-        <input class="input template-key" placeholder="Nombre del template (key)" value="${escapeAttr(key)}" style="font-size:12px;font-weight:600;flex:1"/>
+        <input class="input template-key" placeholder="Nombre del template" value="${escapeAttr(key)}" style="font-size:12px;font-weight:600;flex:1"/>
         <button class="btn ghost template-del" data-tidx="${idx}" style="font-size:11px;padding:3px 8px;color:var(--err-txt)" title="Eliminar template">×</button>
       </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
-        <button type="button" class="btn ghost template-fmt" data-open="*" data-close="*" style="font-size:12px;padding:2px 8px;font-weight:700" title="Negrita">B</button>
-        <button type="button" class="btn ghost template-fmt" data-open="_" data-close="_" style="font-size:12px;padding:2px 8px;font-style:italic" title="Cursiva">I</button>
-        <button type="button" class="btn ghost template-fmt" data-open="~" data-close="~" style="font-size:12px;padding:2px 8px;text-decoration:line-through" title="Tachado">S</button>
-        <button type="button" class="btn ghost template-fmt" data-open="\`" data-close="\`" style="font-size:12px;padding:2px 8px;font-family:monospace" title="Código">&#96;&#96;</button>
-        <button type="button" class="btn ghost template-fmt" data-open="\`\`\`\n" data-close="\n\`\`\`" style="font-size:12px;padding:2px 8px;font-family:monospace" title="Bloque de código">&#96;&#96;&#96;</button>
-        <button type="button" class="btn ghost template-fmt" data-open="> " data-close="" style="font-size:12px;padding:2px 8px;color:var(--text-2)" title="Cita">❝</button>
+      ${desc ? `<div class="muted" style="font-size:11px">${escapeHtml(desc)}</div>` : ""}
+      <div style="display:flex;gap:4px;align-items:center">
+        <button type="button" class="btn ghost template-fmt" data-open="*" data-close="*" style="font-size:12px;padding:2px 10px;font-weight:700" title="Negrita Slack (*texto*)">N</button>
+        <button type="button" class="btn ghost template-fmt" data-open="_" data-close="_" style="font-size:12px;padding:2px 10px;font-style:italic" title="Cursiva Slack (_texto_)">I</button>
+        <button type="button" class="btn ghost template-fmt" data-open="~" data-close="~" style="font-size:12px;padding:2px 10px;text-decoration:line-through" title="Tachado Slack (~texto~)">~</button>
       </div>
-      <textarea class="input template-body" placeholder="Texto del template... Podés usar *negrita*, _cursiva_, variables como {nombre}, {flujo}" rows="4" style="font-size:12px;resize:vertical;font-family:inherit">${escapeHtml(template)}</textarea>
+      <textarea class="input template-body" placeholder="Escribí el texto del template..." rows="4" style="font-size:12px;resize:vertical;font-family:inherit">${escapeHtml(template)}</textarea>
     </div>
   `;
 }
@@ -6561,12 +6437,23 @@ function addTemplateRow_() {
 async function openTemplatesModal_() {
   const modal = $("templatesModal");
   if (!modal) return;
+  modal.style.display = "block";
+
+  // Usar cache si está fresco
+  const now = Date.now();
+  if (_templatesCache && (now - _templatesCacheTs) < TEMPLATES_CACHE_TTL) {
+    _templatesData = _templatesCache.map(t => ({ key: t.key || "", template: t.template || "" }));
+    _renderTemplateRows_();
+    return;
+  }
+
   const wrap = $("templatesListWrap");
   if (wrap) wrap.innerHTML = `<div class="muted" style="text-align:center;padding:20px">Cargando templates...</div>`;
-  modal.style.display = "block";
   try {
     const data = await API.templatesList();
-    _templatesData = Array.isArray(data) ? data.map(t => ({ key: t.key || "", template: t.template || "" })) : [];
+    _templatesCache = Array.isArray(data) ? data : [];
+    _templatesCacheTs = Date.now();
+    _templatesData = _templatesCache.map(t => ({ key: t.key || "", template: t.template || "" }));
   } catch (e) {
     _templatesData = [];
   }
@@ -6575,7 +6462,7 @@ async function openTemplatesModal_() {
 
 function closeTemplatesModal_() {
   $("templatesModal").style.display = "none";
-  _templatesData = [];
+  _templatesData = []; // solo el array de trabajo, el cache persiste
 }
 
 async function saveTemplatesModal_() {
@@ -6597,6 +6484,8 @@ async function saveTemplatesModal_() {
   setErr("");
   try {
     await API.templatesSave(items);
+    _templatesCache = null; // invalidar cache
+    _templatesCacheTs = 0;
     closeTemplatesModal_();
     toast("Mensajes de Slack", `✓ ${items.length} template${items.length !== 1 ? "s" : ""} guardado${items.length !== 1 ? "s" : ""}`);
   } catch (e) {
@@ -6611,20 +6500,12 @@ async function saveTemplatesModal_() {
 let _sentAllRows = []; // caché de todos los enviados sin filtrar
 
 function populateSentFilters_(rows) {
-  const flujos  = [...new Set(rows.map(r => r.canal || "").filter(Boolean))].sort();
   const canales = [...new Set(rows.map(r => {
     const c = (S.canales || []).find(c => c.channel_id === r.channel_id);
     return c ? c.canal : (r.canal || "");
   }).filter(Boolean))].sort();
 
-  const selFlujo = $("sentFilterFlujo");
   const selCanal = $("sentFilterCanal");
-  if (selFlujo) {
-    const cur = selFlujo.value;
-    selFlujo.innerHTML = '<option value="">Todos los flujos</option>' +
-      flujos.map(f => `<option value="${escapeAttr(f)}">${escapeHtml(f)}</option>`).join("");
-    if (cur) selFlujo.value = cur;
-  }
   if (selCanal) {
     const cur = selCanal.value;
     selCanal.innerHTML = '<option value="">Todos los canales</option>' +
@@ -6634,7 +6515,6 @@ function populateSentFilters_(rows) {
 }
 
 function applySentFilters_() {
-  const flujoVal = $("sentFilterFlujo")?.value || "";
   const canalVal = $("sentFilterCanal")?.value || "";
   const diasVal  = Number($("sentFilterFecha")?.value ?? 14);
 
@@ -6642,7 +6522,6 @@ function applySentFilters_() {
   const cutoff = diasVal > 0 ? new Date(now.getTime() - diasVal * 24 * 60 * 60 * 1000) : null;
 
   const filtered = _sentAllRows.filter(r => {
-    if (flujoVal && (r.canal || "") !== flujoVal) return false;
     if (canalVal) {
       const c = (S.canales || []).find(c => c.channel_id === r.channel_id);
       const label = c ? c.canal : (r.canal || "");
