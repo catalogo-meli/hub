@@ -5610,6 +5610,7 @@ async function main() {
     applySentFilters_();
   });
 
+} // cierre de main()
 
 /* Inyectar estilos para habilitaciones masivas (una sola vez) */
 (function() {
@@ -6679,5 +6680,4 @@ function applySentFilters_() {
       `;
     }).join("");
   }
-}
 }
