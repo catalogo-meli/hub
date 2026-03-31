@@ -1352,13 +1352,12 @@ function renderPlan() {
             <div class="flow-meta">
               <span class="chip ${loadCls}" title="Asignados / Requeridos"><span class="dot"></span>${assigned} / ${req || "—"}</span>
               <span class="chip ${status.cls}" title="Estado del mensaje"><span class="dot"></span>${escapeHtml(status.label)}</span>
-              ${canToggle ? `<button class="linkbtn" type="button" data-toggle>${escapeHtml(toggleLabel)}</button>` : ``}
             </div>
           </div>
 
           <div class="flow-peek">
             ${expanded
-              ? allNames.join(" · ")
+              ? allNames.join(" · ") + ` · <button class="linkbtn" type="button" data-toggle>Colapsar</button>`
               : peekNames + (remaining > 0 ? ` · <button class="linkbtn" type="button" data-toggle>+${remaining} más</button>` : "")
             }
           </div>
