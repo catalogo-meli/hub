@@ -4756,9 +4756,8 @@ function renderAgenda() {
       }
       await saveRow_(rowId, card);
       if (btn) { btn.disabled = false; btn.textContent = "Guardar"; }
-      // Volver a vista lectura
-      if (readView) readView.style.display = "";
-      if (editView) editView.style.display = "none";
+      // Re-renderizar para que la vista lectura muestre los datos actualizados
+      renderAgenda();
     });
 
     // Cancelar: volver a vista lectura sin guardar
