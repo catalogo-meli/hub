@@ -1332,16 +1332,12 @@ function renderPlan() {
       }).join(" · ");
       const remaining = Math.max(0, assigned - maxPeek);
 
-      const lis = expanded
-        ? items
-            .map((x) => {
-              const fijo = x.es_fijo === "SI" ? " <b>F</b>" : "";
-              const dup  = _planDupIds_.has(x.id_meli) ? " <span style=\"color:var(--warn-txt);font-size:10px\" title=\"Aparece en otro flujo\">⚠</span>" : "";
-              const name = x.nombre || x.id_meli || "";
-              return `<li>${escapeHtml(name)}${fijo}${dup}</li>`;
-            })
-            .join("")
-        : "";
+      const allNames = items.map((x) => {
+        const fijo = x.es_fijo === "SI" ? " <b>F</b>" : "";
+        const dup  = _planDupIds_.has(x.id_meli) ? ` <span style="color:var(--warn-txt);font-size:10px" title="Aparece en otro flujo">⚠</span>` : "";
+        const name = escapeHtml(x.nombre || x.id_meli || "");
+        return `${name}${fijo}${dup}`;
+      });
 
       const toggleLabel = expanded ? "Colapsar" : (remaining > 0 ? `+${remaining} más` : "Ver");
       const canToggle = assigned > maxPeek;
@@ -1361,11 +1357,11 @@ function renderPlan() {
           </div>
 
           <div class="flow-peek">
-            ${peekNames || `<span class="muted">—</span>`}
-            ${(!expanded && remaining > 0) ? ` · <button class="linkbtn" type="button" data-toggle>+${remaining} más</button>` : ``}
+            ${expanded
+              ? allNames.join(" · ")
+              : peekNames + (remaining > 0 ? ` · <button class="linkbtn" type="button" data-toggle>+${remaining} más</button>` : "")
+            }
           </div>
-
-          ${expanded ? `<ul class="flow-list">${lis}</ul>` : ``}
         </div>
       `;
     })
