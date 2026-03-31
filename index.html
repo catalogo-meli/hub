@@ -1354,25 +1354,18 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <thead>
 <tr>
 <th>Flujo</th>
-<th class="nowrap" style="text-align:center;min-width:140px">Notificar por Slack</th>
+<th class="nowrap" style="text-align:center;width:140px;min-width:140px">Notificar por Slack</th>
 <th class="nowrap" style="min-width:240px">Canal Slack</th>
-<th class="right nowrap">Perfiles requeridos</th>
-<th class="right nowrap">Acciones</th>
+<th class="right nowrap" style="width:140px;min-width:140px">Perfiles requeridos</th>
+<th class="right nowrap" style="width:120px;min-width:120px">Acciones</th>
 </tr>
 </thead>
 <tbody></tbody>
 <tfoot>
 <tr>
-<td style="min-width:240px">
-<div class="row" style="gap:10px">
-<input class="input" id="newFlujoName" placeholder="+ Nuevo flujo..."/>
-<button class="btn primary" id="btnAddFlujo">Agregar</button>
-</div>
+<td colspan="5" style="padding-top:10px">
+<button class="btn ghost" id="btnAddFlujo" style="border:1px dashed var(--brd-2);color:var(--text-2);font-size:13px;width:100%">+ Nuevo flujo</button>
 </td>
-<td style="min-width:140px"></td>
-<td style="min-width:240px"></td>
-<td class="right nowrap" style="min-width:140px"></td>
-<td class="right nowrap" style="min-width:140px"></td>
 </tr>
 </tfoot>
 </table>
@@ -1405,8 +1398,14 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 </div>
 <div class="flow-grid" id="planGrid" style="margin-top:12px"></div>
 <div class="hr"></div>
-<h2 id="daily-slack" style="margin-top:0">Mensajes de Slack</h2>
+<div class="row" style="align-items:center;margin-bottom:0">
+<div>
+<h2 id="daily-slack" style="margin-top:0;margin-bottom:2px">Mensajes de Slack</h2>
 <div class="muted">Gestión de comunicación</div>
+</div>
+<div class="spacer"></div>
+<button class="btn ghost" id="btnEditTemplates" type="button" style="font-size:12px">✏️ Editar templates</button>
+</div>
 <!-- Compose (siempre disponible) -->
 <div class="flow-col" id="slackCompose" style="margin-top:12px">
 <div class="slack-compose-grid">
@@ -1509,7 +1508,25 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 </div>
 <button class="btn ghost" id="btnRefreshSent" type="button">Refrescar</button>
 </div>
-<div id="sentSection" style="display:none;margin-top:12px;overflow:auto">
+<div id="sentSection" style="display:none;margin-top:12px">
+<!-- Filtros Enviados -->
+<div id="sentFilters" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center">
+  <select class="input" id="sentFilterFlujo" style="max-width:180px;font-size:12px">
+    <option value="">Todos los flujos</option>
+  </select>
+  <select class="input" id="sentFilterCanal" style="max-width:180px;font-size:12px">
+    <option value="">Todos los canales</option>
+  </select>
+  <select class="input" id="sentFilterFecha" style="max-width:180px;font-size:12px">
+    <option value="14">Últimas 2 semanas</option>
+    <option value="7">Última semana</option>
+    <option value="3">Últimos 3 días</option>
+    <option value="1">Hoy</option>
+    <option value="0">Todos</option>
+  </select>
+  <button class="btn ghost" id="btnSentFilterClear" style="font-size:12px;padding:3px 10px">Limpiar filtros</button>
+</div>
+<div style="overflow:auto">
 <table class="table" id="tblSent">
 <thead>
 <tr>
@@ -1521,6 +1538,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 </thead>
 <tbody></tbody>
 </table>
+</div>
 </div>
 </section>
 <!-- Agenda -->
@@ -1907,32 +1925,22 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <script src="/api.js" type="module"></script>
 <script src="/app.js" type="module"></script>
 
-<!-- Modal Configuración de Flujo -->
+<!-- Modal Configuración de Flujo (unificado: creación + edición) -->
 <div id="flujoConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;overflow:auto">
-  <div style="background:var(--surface);border-radius:var(--r-lg);max-width:560px;width:calc(100% - 32px);margin:60px auto;padding:28px;box-shadow:var(--shd-lg)">
-    <div class="row" style="margin-bottom:4px">
+  <div style="background:var(--surface);border-radius:var(--r-lg);max-width:520px;width:calc(100% - 32px);margin:60px auto;padding:28px;box-shadow:var(--shd-lg)">
+    <div class="row" style="margin-bottom:20px">
       <h2 id="flujoConfigModalTitle" style="margin:0;font-size:15px">⚙️ Configuración del flujo</h2>
       <div class="spacer"></div>
       <button class="xbtn" id="flujoConfigModalClose" style="font-size:20px">×</button>
     </div>
-    <p class="muted" style="margin:0 0 20px;font-size:12px">Los cambios se guardan en la hoja <b>Config_Flujos</b> del Sheets.</p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <!-- Nombre del flujo -->
       <div style="grid-column:1/-1">
-        <div class="form-label">Flujo</div>
-        <input class="input" id="fcFlujo" disabled style="background:var(--surface-2);color:var(--text-2)"/>
+        <div class="form-label">Nombre del flujo</div>
+        <input class="input" id="fcFlujo" placeholder="Ej: Soporte técnico"/>
+        <div id="fcFlujoReadonly" style="display:none;padding:8px 10px;background:var(--surface-2);border:1px solid var(--brd-2);border-radius:var(--r);font-size:13px;font-weight:600;color:var(--text-1)"></div>
       </div>
-      <div>
-        <div class="form-label">Canal Slack <span class="muted">(nombre o ID)</span></div>
-        <input class="input" id="fcSlackChannel" placeholder="tareas-soporte-netkel"/>
-      </div>
-      <div>
-        <div class="form-label">Channel ID <span class="muted">(técnico)</span></div>
-        <input class="input" id="fcChannelId" placeholder="C0XXXXXXXXX"/>
-      </div>
-      <div>
-        <div class="form-label">Perfiles requeridos</div>
-        <input class="input" id="fcPerfiles" type="number" min="0" placeholder="0"/>
-      </div>
+      <!-- Rotación -->
       <div>
         <div class="form-label">Rotación</div>
         <select class="input" id="fcRotMode">
@@ -1941,21 +1949,25 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
           <option value="semanal">Semanal</option>
         </select>
       </div>
-      <div>
-        <div class="form-label">Ventana de rotación <span class="muted">(días)</span></div>
-        <input class="input" id="fcRotWindow" type="number" min="0" placeholder="0 = auto"/>
+      <!-- Ciclo de rotación (solo si Diaria) -->
+      <div id="fcRotWindowWrap">
+        <div class="form-label">Ciclo de rotación <span class="muted">(días)</span></div>
+        <input class="input" id="fcRotWindow" type="number" min="1" placeholder="Ej: 5"/>
       </div>
+      <!-- Canal Slack -->
       <div style="grid-column:1/-1">
-        <div class="form-label">Notas default <span class="muted">(texto predeterminado en mensajes Slack)</span></div>
-        <textarea class="input" id="fcNotas" rows="2" placeholder="Ej: Recordá actualizar el canal antes de las 9am" style="resize:vertical"></textarea>
+        <div class="form-label">Canal Slack <span class="muted">(opcional)</span></div>
+        <select class="input" id="fcCanalSlack">
+          <option value="">— Sin canal —</option>
+        </select>
       </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <input type="checkbox" id="fcIncluirMensaje" style="width:16px;height:16px;accent-color:var(--pri);flex-shrink:0"/>
-        <label for="fcIncluirMensaje" class="form-label" style="margin:0;cursor:pointer">Incluir en mensaje general</label>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <input type="checkbox" id="fcPermiteFijos" style="width:16px;height:16px;accent-color:var(--pri);flex-shrink:0"/>
-        <label for="fcPermiteFijos" class="form-label" style="margin:0;cursor:pointer">Permite perfiles fijos</label>
+      <!-- Permite perfiles fijos -->
+      <div style="grid-column:1/-1;display:flex;align-items:flex-start;gap:10px;padding:12px;background:var(--surface-2);border-radius:var(--r);border:1px solid var(--brd-2)">
+        <input type="checkbox" id="fcPermiteFijos" style="width:16px;height:16px;accent-color:var(--pri);flex-shrink:0;margin-top:2px"/>
+        <div>
+          <label for="fcPermiteFijos" class="form-label" style="margin:0;cursor:pointer">Permite perfiles fijos</label>
+          <div class="muted" style="font-size:11px;margin-top:2px">Los perfiles fijos se asignan siempre al mismo flujo, sin entrar en rotación.</div>
+        </div>
       </div>
     </div>
     <div class="hr" style="margin:20px 0"></div>
@@ -2132,6 +2144,27 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
     <div class="row" style="justify-content:flex-end;gap:8px">
       <button class="btn ghost" id="colabDeleteCancel">Cancelar</button>
       <button class="btn bad" id="colabDeleteConfirm">Sí, eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Editar Templates -->
+<div id="templatesModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;overflow:auto">
+  <div style="background:var(--surface);border-radius:var(--r-lg);max-width:680px;width:calc(100% - 32px);margin:40px auto;padding:28px;box-shadow:var(--shd-lg)">
+    <div class="row" style="margin-bottom:4px">
+      <h2 style="margin:0;font-size:15px">✏️ Templates de mensajes</h2>
+      <div class="spacer"></div>
+      <button class="xbtn" id="templatesModalClose" style="font-size:20px">×</button>
+    </div>
+    <p class="muted" style="margin:0 0 20px;font-size:12px">Editá los textos base que se usan para generar mensajes de Slack.</p>
+    <div id="templatesListWrap" style="display:flex;flex-direction:column;gap:12px;max-height:60vh;overflow-y:auto;padding-right:4px"></div>
+    <div style="margin-top:14px">
+      <button class="btn ghost" id="btnTemplateAdd" type="button" style="width:100%;border:1px dashed var(--brd-2);color:var(--text-2);font-size:13px">+ Agregar template</button>
+    </div>
+    <div class="hr" style="margin:20px 0"></div>
+    <div class="row" style="justify-content:flex-end;gap:8px">
+      <button class="btn ghost" id="templatesModalCancel">Cancelar</button>
+      <button class="btn primary" id="templatesModalSave">Guardar templates</button>
     </div>
   </div>
 </div>

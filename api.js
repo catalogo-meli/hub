@@ -125,6 +125,10 @@ export const API = {
   configFlujosSetIncluirMensaje: (flujo, value) =>
     post("config.flujos.setIncluirMensaje", { flujo, value: !!value }),
 
+  // Templates (Comunicaciones_Templates)
+  templatesList: () => get("templates.list"),
+  templatesSave: (templates) => post("templates.save", { templates }),
+
   // Links útiles
   linksList:   () => get("links.list"),
   linksCategoriasList: () => get("links.categorias.list"),

@@ -1165,7 +1165,7 @@ function renderFlujos() {
           <td class="right nowrap" style="min-width:140px">
             <input class="input smallnum" type="number" min="0" step="1" value="${req}" data-req />
           </td>
-          <td class="right nowrap">
+          <td class="right nowrap" style="width:120px;min-width:120px">
             <button class="btn ghost" title="Configurar flujo" data-cfg style="font-size:13px;padding:3px 7px;margin-right:4px">⚙️</button>
             <button class="xbtn" title="Eliminar flujo" data-del>×</button>
           </td>
@@ -1593,6 +1593,25 @@ const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
   API.slackOutboxUpdate(row, canal, channel_id, mensaje).catch(() => {});
 }, 1000);
 
+function formatEstado(estado) {
+  const s = String(estado || "");
+  const mProgDMY = s.match(/^PROGRAMADO.*?(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/i);
+  if (mProgDMY) return "\uD83D\uDCC5 " + mProgDMY[1] + "/" + mProgDMY[2] + " a las " + mProgDMY[4] + ":" + mProgDMY[5];
+  const mProgISO = s.match(/^PROGRAMADO\s+(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/i);
+  if (mProgISO) return "\uD83D\uDCC5 " + mProgISO[3] + "/" + mProgISO[2] + " a las " + mProgISO[4] + ":" + mProgISO[5];
+  const mIso = s.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (mIso) return s.replace(mIso[0], mIso[3] + "/" + mIso[2] + "/" + mIso[1] + " " + mIso[4] + ":" + mIso[5]);
+  const _d = new Date(s);
+  if (!isNaN(_d.getTime())) {
+    const _dd = String(_d.getDate()).padStart(2,"0");
+    const _mm = String(_d.getMonth()+1).padStart(2,"0");
+    const _HH = String(_d.getHours()).padStart(2,"0");
+    const _MM = String(_d.getMinutes()).padStart(2,"0");
+    return "\uD83D\uDCC5 " + _dd + "/" + _mm + " a las " + _HH + ":" + _MM;
+  }
+  return s;
+}
+
 function renderOutbox() {
   const tbDrafts = $("tblDrafts")?.querySelector("tbody");
   const tbScheduled = $("tblScheduled")?.querySelector("tbody");
@@ -1618,6 +1637,9 @@ function renderOutbox() {
   const now = new Date();
   const cutoff = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
   const sentAll = out.filter((r) => isSent_(r.estado));
+  // Actualizar caché global para filtros
+  _sentAllRows = sentAll;
+  populateSentFilters_(sentAll);
   const sent = sentAll.filter((r) => {
     const dt = parseEstadoStampToDate(r.estado) || (r.fecha ? parseEstadoStampToDate(String(r.fecha)) : null);
     // si no hay timestamp, lo mostramos igual pero al final; es mejor ver algo que nada
@@ -1625,28 +1647,7 @@ function renderOutbox() {
     return dt >= cutoff;
   }).slice(0, 50); // limitar a 50 más recientes para evitar renders pesados
 
-  const formatEstado = (estado) => {
-    const s = String(estado || "");
-    // "PROGRAMADO ⏰ 31/03/2026 09:47" (formato GAS dd/MM/yyyy)
-    const mProgDMY = s.match(/^PROGRAMADO.*?(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/i);
-    if (mProgDMY) return "\uD83D\uDCC5 " + mProgDMY[1] + "/" + mProgDMY[2] + " a las " + mProgDMY[4] + ":" + mProgDMY[5];
-    // "PROGRAMADO 2026-03-31T09:47" (formato ISO)
-    const mProgISO = s.match(/^PROGRAMADO\s+(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/i);
-    if (mProgISO) return "\uD83D\uDCC5 " + mProgISO[3] + "/" + mProgISO[2] + " a las " + mProgISO[4] + ":" + mProgISO[5];
-    // ISO en cualquier parte
-    const mIso = s.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-    if (mIso) return s.replace(mIso[0], mIso[3] + "/" + mIso[2] + "/" + mIso[1] + " " + mIso[4] + ":" + mIso[5]);
-    // Fallback: si contiene una fecha parseable (Date.toString de GAS)
-    const _d = new Date(s);
-    if (!isNaN(_d.getTime())) {
-      const _dd = String(_d.getDate()).padStart(2,"0");
-      const _mm = String(_d.getMonth()+1).padStart(2,"0");
-      const _HH = String(_d.getHours()).padStart(2,"0");
-      const _MM = String(_d.getMinutes()).padStart(2,"0");
-      return "\uD83D\uDCC5 " + _dd + "/" + _mm + " a las " + _HH + ":" + _MM;
-    }
-    return s;
-  };
+  // formatEstado definida a nivel de módulo (ver arriba de renderOutbox)
 
   const rowHtml = (r, { mode }) => {
     const rawEstado = r.estado || "";
@@ -1793,20 +1794,17 @@ function renderOutbox() {
         sentToggleBtn.textContent = S.sentCollapsed ? "▶ Mostrar" : "▼ Ocultar";
         if (sentSection) sentSection.style.display = S.sentCollapsed ? "none" : "";
         if (!S.sentCollapsed) {
-          tbSent.innerHTML = sent.length
-            ? sent.map(sentRowHtml).join("")
-            : `<tr><td colspan="4" class="muted">Sin mensajes enviados en las últimas 2 semanas.</td></tr>`;
+          applySentFilters_();
         }
       });
     }
   }
 
   if (!S.sentCollapsed) {
-    tbSent.innerHTML = sent.length
-      ? sent.map(sentRowHtml).join("")
-      : `<tr><td colspan="4" class="muted">Sin mensajes enviados en las últimas 2 semanas.</td></tr>`;
+    applySentFilters_();
   } else {
-    tbSent.innerHTML = "";
+    const tbSent2 = $("tblSent")?.querySelector("tbody");
+    if (tbSent2) tbSent2.innerHTML = "";
   }
 
   if (btnRefreshSent && !btnRefreshSent._bound) {
@@ -5222,72 +5220,8 @@ async function main() {
   $("btnGenerarPlan")?.addEventListener("click", onGenerarPlanificacionYOutbox_);
   $("btnCopiarPlan")?.addEventListener("click", onCopiarMensajePlan_);
 
-  $("btnAddFlujo")?.addEventListener("click", async () => {
-    const name = $("newFlujoName")?.value?.trim() || "";
-    if (!name) return setErr("Escribí un nombre para el nuevo flujo.");
-    if ((S.flujos || []).some(f => String(f.flujo || f).trim().toLowerCase() === name.toLowerCase())) {
-      return setErr("Ya existe un flujo con ese nombre. Elegí otro.");
-    }
-    setErr("");
-
-    // ── Optimistic: agregar inmediatamente ──
-    const nuevoObj = { flujo: name, perfiles_requeridos: 0, channel_id: "" };
-    S.flujos = [...(S.flujos || []), nuevoObj];
-    if (S.habil) {
-      S.habil = {
-        ...S.habil,
-        flujos: [...(S.habil.flujos || []), name],
-        rows: (S.habil.rows || []).map(r => ({ ...r, [`H_${name}`]: false, [`F_${name}`]: false })),
-      };
-    }
-    CACHE.invalidate("flujos");
-    CACHE.invalidate("habil");
-    $("newFlujoName").value = "";
-    renderFlujos();
-
-    // Scroll + foco en nueva fila
-    requestAnimationFrame(() => {
-      const tb = $("tblFlujos")?.querySelector("tbody");
-      if (!tb) return;
-      const newRow = Array.from(tb.querySelectorAll("tr")).find(tr => {
-        const b = tr.querySelector("td b");
-        return b && b.textContent.trim() === name;
-      });
-      if (newRow) {
-        newRow.scrollIntoView({ behavior: "smooth", block: "center" });
-        const inp = newRow.querySelector("[data-req]");
-        if (inp) { inp.focus(); inp.select(); }
-      }
-    });
-
-    try {
-      ($("dailyStatus") && ($("dailyStatus").textContent = "Guardando..."));
-      await API.flujosUpsert(name, 0, "");
-
-      // Confirmar con datos reales
-      const [fl, hab] = await Promise.all([API.flujosList(), API.habilitacionesList()]);
-      if (fl)  { S.flujos = fl;  CACHE.set("flujos", fl,  2  * 60_000); }
-      if (hab) { S.habil  = hab; CACHE.set("habil",  hab, 10 * 60_000); }
-      renderFlujos();
-      renderHabil();
-      toast("Operativa diaria", `✓ Flujo "${name}" creado.`);
-    } catch (e) {
-      // Revertir si GAS falla
-      S.flujos = (S.flujos || []).filter(f => String(f.flujo || f).trim() !== name);
-      if (S.habil?.flujos) {
-        S.habil = {
-          ...S.habil,
-          flujos: S.habil.flujos.filter(f => f !== name),
-          rows: (S.habil.rows || []).map(r => {
-            const c = { ...r }; delete c[`H_${name}`]; delete c[`F_${name}`]; return c;
-          }),
-        };
-      }
-      renderFlujos();
-      setErr("No se pudo crear el flujo. Intentá de nuevo.");
-    } finally {
-      ($("dailyStatus") && ($("dailyStatus").textContent = "Listo"));
-    }
+  $("btnAddFlujo")?.addEventListener("click", () => {
+    openFlujoCreateModal_();
   });
 
   // Reload buttons — invalidan cache antes de re-fetch
@@ -5655,7 +5589,26 @@ async function main() {
   $("flujoConfigModalCancel")?.addEventListener("click", closeFlujoConfigModal_);
   $("flujoConfigModalSave")?.addEventListener("click", saveFlujoConfigModal_);
   $("flujoConfigModal")?.addEventListener("click", e => { if (e.target === $("flujoConfigModal")) closeFlujoConfigModal_(); });
-}
+  $("fcRotMode")?.addEventListener("change", _flujoConfigToggleRotWindow_);
+
+  // Modal Templates
+  $("btnEditTemplates")?.addEventListener("click", openTemplatesModal_);
+  $("templatesModalClose")?.addEventListener("click", closeTemplatesModal_);
+  $("templatesModalCancel")?.addEventListener("click", closeTemplatesModal_);
+  $("templatesModalSave")?.addEventListener("click", saveTemplatesModal_);
+  $("btnTemplateAdd")?.addEventListener("click", () => addTemplateRow_());
+  $("templatesModal")?.addEventListener("click", e => { if (e.target === $("templatesModal")) closeTemplatesModal_(); });
+
+  // Filtros Enviados
+  $("sentFilterFlujo")?.addEventListener("change", applySentFilters_);
+  $("sentFilterCanal")?.addEventListener("change", applySentFilters_);
+  $("sentFilterFecha")?.addEventListener("change", applySentFilters_);
+  $("btnSentFilterClear")?.addEventListener("click", () => {
+    if ($("sentFilterFlujo")) $("sentFilterFlujo").value = "";
+    if ($("sentFilterCanal")) $("sentFilterCanal").value = "";
+    if ($("sentFilterFecha")) $("sentFilterFecha").value = "14";
+    applySentFilters_();
+  });
 
 
 /* Inyectar estilos para habilitaciones masivas (una sola vez) */
@@ -6366,22 +6319,81 @@ function wireCanales_() {
    MODAL CONFIGURACIÓN DE FLUJO
    ========================================================= */
 
+// ─── Modal Configuración de Flujo (unificado: creación + edición) ───
+
+let _flujoConfigMode = "edit"; // "edit" | "create"
+
+function _flujoConfigPopulateCanales_() {
+  const sel = $("fcCanalSlack");
+  if (!sel) return;
+  const canales = S.canales || [];
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— Sin canal —</option>' +
+    canales.map(c => `<option value="${escapeAttr(c.channel_id)}">${escapeHtml(c.canal)}</option>`).join("");
+  if (current) sel.value = current;
+}
+
+function _flujoConfigToggleRotWindow_() {
+  const wrap = $("fcRotWindowWrap");
+  if (!wrap) return;
+  const mode = $("fcRotMode")?.value || "Off";
+  wrap.style.display = mode === "diaria" ? "" : "none";
+}
+
 function openFlujoConfigModal_(flujoName) {
+  _flujoConfigMode = "edit";
   const f = (S.flujos || []).find(x => String(x.flujo || "").trim() === flujoName);
   if (!f) return;
 
   $("flujoConfigModalTitle").textContent = `⚙️ ${flujoName}`;
-  $("fcFlujo").value         = flujoName;
-  $("fcSlackChannel").value  = f.channel_id || "";
-  $("fcChannelId").value     = f.channel_id || "";
-  $("fcPerfiles").value      = f.perfiles_requeridos || 0;
-  $("fcRotMode").value       = f.rotacion_modo || "Off";
-  $("fcRotWindow").value     = f.ventana_rotacion_dias || "";
-  $("fcNotas").value         = f.notas_default || "";
-  $("fcIncluirMensaje").checked = f.incluir_en_mensaje !== false;
-  $("fcPermiteFijos").checked   = f.permite_fijos !== false;
+  $("flujoConfigModalSave").textContent = "Guardar configuración";
+
+  // Nombre: mostrar readonly, ocultar input editable
+  const inp = $("fcFlujo");
+  const ro  = $("fcFlujoReadonly");
+  if (inp) { inp.style.display = "none"; inp.value = flujoName; }
+  if (ro)  { ro.style.display = ""; ro.textContent = flujoName; }
+
+  _flujoConfigPopulateCanales_();
+  const sel = $("fcCanalSlack");
+  if (sel) sel.value = f.channel_id || "";
+
+  const rot = $("fcRotMode");
+  if (rot) rot.value = f.rotacion_modo || "Off";
+  _flujoConfigToggleRotWindow_();
+  const win = $("fcRotWindow");
+  if (win) win.value = f.ventana_rotacion_dias || "";
+
+  const fijos = $("fcPermiteFijos");
+  if (fijos) fijos.checked = f.permite_fijos === true;
+
   $("flujoConfigModal").style.display = "block";
-  setTimeout(() => $("fcSlackChannel")?.focus(), 50);
+}
+
+function openFlujoCreateModal_() {
+  _flujoConfigMode = "create";
+  $("flujoConfigModalTitle").textContent = "➕ Nuevo flujo";
+  $("flujoConfigModalSave").textContent = "Crear flujo";
+
+  // Nombre: mostrar input editable, ocultar readonly
+  const inp = $("fcFlujo");
+  const ro  = $("fcFlujoReadonly");
+  if (inp) { inp.style.display = ""; inp.value = ""; }
+  if (ro)  { ro.style.display = "none"; }
+
+  _flujoConfigPopulateCanales_();
+  const sel = $("fcCanalSlack");
+  if (sel) sel.value = "";
+  const rot = $("fcRotMode");
+  if (rot) rot.value = "Off";
+  _flujoConfigToggleRotWindow_();
+  const win = $("fcRotWindow");
+  if (win) win.value = "";
+  const fijos = $("fcPermiteFijos");
+  if (fijos) fijos.checked = false;
+
+  $("flujoConfigModal").style.display = "block";
+  setTimeout(() => inp?.focus(), 50);
 }
 
 function closeFlujoConfigModal_() {
@@ -6389,38 +6401,282 @@ function closeFlujoConfigModal_() {
 }
 
 async function saveFlujoConfigModal_() {
-  const flujo = $("fcFlujo")?.value?.trim();
-  if (!flujo) return;
+  // Resolver nombre del flujo según modo
+  let flujo;
+  if (_flujoConfigMode === "create") {
+    flujo = $("fcFlujo")?.value?.trim();
+    if (!flujo) { setErr("Escribí un nombre para el flujo."); return; }
+    if ((S.flujos || []).some(f => String(f.flujo || f).trim().toLowerCase() === flujo.toLowerCase())) {
+      setErr(`Ya existe un flujo llamado "${flujo}". Elegí otro nombre.`); return;
+    }
+  } else {
+    flujo = $("fcFlujoReadonly")?.textContent?.trim() || $("fcFlujo")?.value?.trim();
+    if (!flujo) return;
+  }
+
+  // Resolver channel_id desde el select de canal
+  const selectedChannelId = $("fcCanalSlack")?.value?.trim() || "";
+  const selectedCanal = (S.canales || []).find(c => c.channel_id === selectedChannelId);
+  const canalNombre = selectedCanal?.canal || "";
+
+  const rotMode = $("fcRotMode")?.value || "Off";
+  const rotWindow = rotMode === "diaria" ? Number($("fcRotWindow")?.value || 0) : 0;
 
   const payload = {
-    flowName:          flujo,
-    slackChannel:      $("fcSlackChannel")?.value?.trim() || "",
-    channel_id:        $("fcChannelId")?.value?.trim()    || "",
-    profilesRequired:  Number($("fcPerfiles")?.value  || 0),
-    rotationMode:      $("fcRotMode")?.value           || "Off",
-    rotationWindowDays:Number($("fcRotWindow")?.value  || 0),
-    notesDefault:      $("fcNotas")?.value?.trim()     || "",
-    includeSlack:      !!$("fcIncluirMensaje")?.checked,
-    allowFixed:        !!$("fcPermiteFijos")?.checked,
+    flowName:           flujo,
+    slackChannel:       canalNombre,
+    channel_id:         selectedChannelId,
+    rotationMode:       rotMode,
+    rotationWindowDays: rotWindow,
+    allowFixed:         !!$("fcPermiteFijos")?.checked,
   };
 
   const btn = $("flujoConfigModalSave");
-  if (btn) { btn.disabled = true; btn.textContent = "Guardando..."; }
+  if (btn) { btn.disabled = true; btn.textContent = _flujoConfigMode === "create" ? "Creando..." : "Guardando..."; }
+  setErr("");
 
   try {
-    await API.flujosUpdate(payload);
-    // Refrescar S.flujos con los nuevos datos
-    const updated = await API.flujosList().catch(() => null);
-    if (updated) {
-      S.flujos = updated;
-      CACHE.set("flujos", updated, 2 * 60_000);
+    if (_flujoConfigMode === "create") {
+      // Optimistic
+      const nuevoObj = { flujo, perfiles_requeridos: 0, channel_id: selectedChannelId, rotacion_modo: rotMode, ventana_rotacion_dias: rotWindow, permite_fijos: !!$("fcPermiteFijos")?.checked };
+      S.flujos = [...(S.flujos || []), nuevoObj];
+      if (S.habil) {
+        S.habil = {
+          ...S.habil,
+          flujos: [...(S.habil.flujos || []), flujo],
+          rows: (S.habil.rows || []).map(r => ({ ...r, [`H_${flujo}`]: false, [`F_${flujo}`]: false })),
+        };
+      }
+      CACHE.invalidate("flujos");
+      CACHE.invalidate("habil");
+      renderFlujos();
+      closeFlujoConfigModal_();
+      toast("Operativa diaria", `✓ Flujo "${flujo}" creado`);
+      await API.flujosUpsert(flujo, 0, selectedChannelId);
+      // Si tiene config extra (rotación, fijos), actualizar también
+      if (rotMode !== "Off" || selectedChannelId || payload.allowFixed) {
+        await API.flujosUpdate(payload).catch(() => {});
+      }
+    } else {
+      await API.flujosUpdate(payload);
+      closeFlujoConfigModal_();
+      toast("Operativa diaria", `✓ Configuración de "${flujo}" guardada`);
+    }
+    // Refrescar con datos reales
+    const [fl, hab] = await Promise.all([
+      API.flujosList().catch(() => null),
+      API.habilitacionesList().catch(() => null),
+    ]);
+    if (fl)  { S.flujos = fl;  CACHE.set("flujos", fl,  2  * 60_000); }
+    if (hab) { S.habil  = hab; CACHE.set("habil",  hab, 10 * 60_000); }
+    renderFlujos();
+  } catch (e) {
+    if (_flujoConfigMode === "create") {
+      // Revert optimistic
+      S.flujos = (S.flujos || []).filter(f => String(f.flujo || f).trim() !== flujo);
       renderFlujos();
     }
-    closeFlujoConfigModal_();
-    toast("Operativa diaria", `✓ Configuración de "${flujo}" guardada`);
-  } catch (e) {
     setErr(`No se pudo guardar: ${e.message || e}`);
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "Guardar configuración"; }
+    if (btn) { btn.disabled = false; btn.textContent = _flujoConfigMode === "create" ? "Crear flujo" : "Guardar configuración"; }
+  }
+}
+
+// ─── Templates Modal ───
+
+let _templatesData = []; // [{ key, template }]
+
+function _slackFmtWrapTemplate_(textarea, open, close) {
+  const start = textarea.selectionStart;
+  const end   = textarea.selectionEnd;
+  const val   = textarea.value;
+  const sel   = val.slice(start, end);
+  const wrapped = sel ? open + sel + close : open + close;
+  textarea.value = val.slice(0, start) + wrapped + val.slice(end);
+  const cursor = sel ? start + open.length + sel.length + close.length : start + open.length;
+  textarea.setSelectionRange(cursor, cursor);
+  textarea.focus();
+}
+
+function _templateRowHtml_(idx, key, template) {
+  return `
+    <div class="template-row" data-tidx="${idx}" style="border:1px solid var(--brd-2);border-radius:var(--r);padding:12px;background:var(--surface-2);display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <input class="input template-key" placeholder="Nombre del template (key)" value="${escapeAttr(key)}" style="font-size:12px;font-weight:600;flex:1"/>
+        <button class="btn ghost template-del" data-tidx="${idx}" style="font-size:11px;padding:3px 8px;color:var(--err-txt)" title="Eliminar template">×</button>
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+        <button type="button" class="btn ghost template-fmt" data-open="*" data-close="*" style="font-size:12px;padding:2px 8px;font-weight:700" title="Negrita">B</button>
+        <button type="button" class="btn ghost template-fmt" data-open="_" data-close="_" style="font-size:12px;padding:2px 8px;font-style:italic" title="Cursiva">I</button>
+        <button type="button" class="btn ghost template-fmt" data-open="~" data-close="~" style="font-size:12px;padding:2px 8px;text-decoration:line-through" title="Tachado">S</button>
+        <button type="button" class="btn ghost template-fmt" data-open="\`" data-close="\`" style="font-size:12px;padding:2px 8px;font-family:monospace" title="Código">&#96;&#96;</button>
+        <button type="button" class="btn ghost template-fmt" data-open="\`\`\`\n" data-close="\n\`\`\`" style="font-size:12px;padding:2px 8px;font-family:monospace" title="Bloque de código">&#96;&#96;&#96;</button>
+        <button type="button" class="btn ghost template-fmt" data-open="> " data-close="" style="font-size:12px;padding:2px 8px;color:var(--text-2)" title="Cita">❝</button>
+      </div>
+      <textarea class="input template-body" placeholder="Texto del template... Podés usar *negrita*, _cursiva_, variables como {nombre}, {flujo}" rows="4" style="font-size:12px;resize:vertical;font-family:inherit">${escapeHtml(template)}</textarea>
+    </div>
+  `;
+}
+
+function _renderTemplateRows_() {
+  const wrap = $("templatesListWrap");
+  if (!wrap) return;
+  if (!_templatesData.length) {
+    wrap.innerHTML = `<div class="muted empty-state" style="text-align:center;padding:20px">No hay templates. Agregá uno con el botón de abajo.</div>`;
+    return;
+  }
+  wrap.innerHTML = _templatesData.map((t, i) => _templateRowHtml_(i, t.key, t.template)).join("");
+  // Wiring format buttons
+  wrap.querySelectorAll(".template-fmt").forEach(btn => {
+    btn.addEventListener("mousedown", e => {
+      e.preventDefault();
+      const row = btn.closest(".template-row");
+      const ta  = row?.querySelector(".template-body");
+      if (!ta) return;
+      _slackFmtWrapTemplate_(ta, btn.dataset.open, btn.dataset.close);
+    });
+  });
+  // Wiring delete buttons
+  wrap.querySelectorAll(".template-del").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.dataset.tidx);
+      _templatesData.splice(idx, 1);
+      _renderTemplateRows_();
+    });
+  });
+}
+
+function addTemplateRow_() {
+  _templatesData.push({ key: "", template: "" });
+  _renderTemplateRows_();
+  const rows = $("templatesListWrap")?.querySelectorAll(".template-row");
+  if (rows?.length) {
+    const last = rows[rows.length - 1];
+    last.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    last.querySelector(".template-key")?.focus();
+  }
+}
+
+async function openTemplatesModal_() {
+  const modal = $("templatesModal");
+  if (!modal) return;
+  const wrap = $("templatesListWrap");
+  if (wrap) wrap.innerHTML = `<div class="muted" style="text-align:center;padding:20px">Cargando templates...</div>`;
+  modal.style.display = "block";
+  try {
+    const data = await API.templatesList();
+    _templatesData = Array.isArray(data) ? data.map(t => ({ key: t.key || "", template: t.template || "" })) : [];
+  } catch (e) {
+    _templatesData = [];
+  }
+  _renderTemplateRows_();
+}
+
+function closeTemplatesModal_() {
+  $("templatesModal").style.display = "none";
+  _templatesData = [];
+}
+
+async function saveTemplatesModal_() {
+  // Leer valores actuales del DOM antes de guardar
+  const rows = $("templatesListWrap")?.querySelectorAll(".template-row") || [];
+  const items = [];
+  let hasError = false;
+  rows.forEach(row => {
+    const key      = row.querySelector(".template-key")?.value?.trim() || "";
+    const template = row.querySelector(".template-body")?.value || "";
+    if (!key) { hasError = true; row.querySelector(".template-key")?.classList.add("invalid"); return; }
+    row.querySelector(".template-key")?.classList.remove("invalid");
+    items.push({ key, template });
+  });
+  if (hasError) { setErr("Cada template necesita un nombre (key)."); return; }
+
+  const btn = $("templatesModalSave");
+  if (btn) { btn.disabled = true; btn.textContent = "Guardando..."; }
+  setErr("");
+  try {
+    await API.templatesSave(items);
+    closeTemplatesModal_();
+    toast("Mensajes de Slack", `✓ ${items.length} template${items.length !== 1 ? "s" : ""} guardado${items.length !== 1 ? "s" : ""}`);
+  } catch (e) {
+    setErr(`No se pudieron guardar los templates: ${e.message || e}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Guardar templates"; }
+  }
+}
+
+// ─── Filtros Enviados ───
+
+let _sentAllRows = []; // caché de todos los enviados sin filtrar
+
+function populateSentFilters_(rows) {
+  const flujos  = [...new Set(rows.map(r => r.canal || "").filter(Boolean))].sort();
+  const canales = [...new Set(rows.map(r => {
+    const c = (S.canales || []).find(c => c.channel_id === r.channel_id);
+    return c ? c.canal : (r.canal || "");
+  }).filter(Boolean))].sort();
+
+  const selFlujo = $("sentFilterFlujo");
+  const selCanal = $("sentFilterCanal");
+  if (selFlujo) {
+    const cur = selFlujo.value;
+    selFlujo.innerHTML = '<option value="">Todos los flujos</option>' +
+      flujos.map(f => `<option value="${escapeAttr(f)}">${escapeHtml(f)}</option>`).join("");
+    if (cur) selFlujo.value = cur;
+  }
+  if (selCanal) {
+    const cur = selCanal.value;
+    selCanal.innerHTML = '<option value="">Todos los canales</option>' +
+      canales.map(c => `<option value="${escapeAttr(c)}">${escapeHtml(c)}</option>`).join("");
+    if (cur) selCanal.value = cur;
+  }
+}
+
+function applySentFilters_() {
+  const flujoVal = $("sentFilterFlujo")?.value || "";
+  const canalVal = $("sentFilterCanal")?.value || "";
+  const diasVal  = Number($("sentFilterFecha")?.value ?? 14);
+
+  const now    = new Date();
+  const cutoff = diasVal > 0 ? new Date(now.getTime() - diasVal * 24 * 60 * 60 * 1000) : null;
+
+  const filtered = _sentAllRows.filter(r => {
+    if (flujoVal && (r.canal || "") !== flujoVal) return false;
+    if (canalVal) {
+      const c = (S.canales || []).find(c => c.channel_id === r.channel_id);
+      const label = c ? c.canal : (r.canal || "");
+      if (label !== canalVal) return false;
+    }
+    if (cutoff) {
+      const dt = parseEstadoStampToDate(r.estado) || (r.fecha ? parseEstadoStampToDate(String(r.fecha)) : null);
+      if (dt && dt < cutoff) return false;
+    }
+    return true;
+  });
+
+  const tbSent = $("tblSent")?.querySelector("tbody");
+  if (!tbSent) return;
+  if (!filtered.length) {
+    tbSent.innerHTML = `<tr><td colspan="4" class="muted">Sin mensajes enviados con los filtros aplicados.</td></tr>`;
+  } else {
+    tbSent.innerHTML = filtered.map(r => {
+      const rawEstado = r.estado || "";
+      const estUp = String(rawEstado).toUpperCase();
+      const isErr = estUp.includes("ERROR");
+      const badge = isErr ? "badge bad" : "badge ok";
+      const date  = r.fecha || "";
+      const canalTxt = r.canal || "";
+      const chId  = r.channel_id || "";
+      const msg   = r.mensaje || "";
+      const chLabel = canalTxt ? `${canalTxt}${chId ? ` · ${chId}` : ""}` : (chId || "");
+      return `
+        <tr>
+          <td class="nowrap">${escapeHtml(date)}</td>
+          <td>${escapeHtml(chLabel)}</td>
+          <td><div style="max-width:720px;white-space:pre-wrap">${escapeHtml(humanizeSlackTokens_(msg))}</div></td>
+          <td class="nowrap"><span class="${badge}">${escapeHtml(formatEstado(rawEstado))}</span></td>
+        </tr>
+      `;
+    }).join("");
   }
 }
