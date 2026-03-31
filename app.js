@@ -4647,32 +4647,26 @@ function renderAgenda() {
   };
 
   const saveRow_ = async (row, card) => {
-    const statusEl = card.querySelector(`[data-save-status="${row}"]`);
-    const payload  = buildPayload_(card, row);
-    try {
-      const idx = (S.agenda||[]).findIndex(r => r.row === row);
-      if (idx >= 0) Object.assign(S.agenda[idx], {
-        fecha: payload.fecha, owner: payload.owner, tema: payload.tema,
-        tiempo: payload.tiempo, prioridad: payload.prioridad,
-        descripcion: payload.descripcion, estado: payload.estado
-      });
-      // Mostrar "Guardando" solo si tarda más de 400ms
-      const slowTimer = setTimeout(() => {
-        if (statusEl) statusEl.textContent = "Guardando…";
-      }, 400);
-      await API.agendaUpdate(payload);
-      clearTimeout(slowTimer);
+    const payload = buildPayload_(card, row);
+    // Actualizar S.agenda inmediatamente
+    const idx = (S.agenda||[]).findIndex(r => r.row === row);
+    if (idx >= 0) Object.assign(S.agenda[idx], {
+      fecha: payload.fecha, owner: payload.owner, tema: payload.tema,
+      tiempo: payload.tiempo, prioridad: payload.prioridad,
+      descripcion: payload.descripcion, estado: payload.estado
+    });
+    // Guardar en GAS en background — no bloquear la UI
+    API.agendaUpdate(payload).then(() => {
       CACHE.invalidate("agenda");
-      if (statusEl) {
-        statusEl.textContent = "✓";
-        setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 1500);
-      }
       _updateAgendaBadge_();
       _updateKpiAgenda_();
-    } catch (e) {
-      if (statusEl) statusEl.textContent = "Error al guardar";
+    }).catch(e => {
       setErr(`Agenda: ${e.message || e}`);
-    }
+      // Re-fetch para sincronizar si falló
+      API.agendaList().then(d => {
+        if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
+      }).catch(() => {});
+    });
   };
 
   // ── Pill de estado con dropdown (position:fixed) ────────
