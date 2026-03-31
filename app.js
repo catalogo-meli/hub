@@ -4868,8 +4868,12 @@ async function onAgendaAgregar_(ownerParam) {
   const tiempo    = tiempoEl?.value || "10";
   const prioridad = prioEl?.value || "Importante";
   const descText  = _agDescEditor_ ? _agDescEditor_.getValue() : ($("agDesc")?.innerText?.trim() || "");
-  const linkPills = Array.from($("agLinksWrap")?.querySelectorAll("[data-link-pill]") || [])
-    .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
+  const linkPills = (() => {
+    // Confirmar cualquier link que esté en el input sin confirmar
+    $("agLinkInput")?._confirmPending?.();
+    return Array.from($("agLinksWrap")?.querySelectorAll("[data-link-pill]") || [])
+      .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
+  })();
   const desc = joinDescLinks_(descText, linkPills);
 
 
@@ -5182,11 +5186,10 @@ async function main() {
       const inp = $(inputId);
       const wrap = $(wrapId);
       if (!inp || !wrap) return;
-      inp.addEventListener("keydown", (e) => {
-        if (e.key !== "Enter") return;
-        e.preventDefault();
-        const url = inp.value.trim();
-        if (!url || !/^https?:\/\//.test(url)) return;
+
+      function addLinkPill_(url) {
+        url = url.trim();
+        if (!url || !/^https?:\/\//.test(url)) return false;
         const pill = document.createElement("span");
         pill.className = "pill";
         pill.style.cssText = "font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px";
@@ -5195,13 +5198,21 @@ async function main() {
         pill.querySelector("[data-rm-link]")?.addEventListener("click", () => pill.remove());
         wrap.insertBefore(pill, inp);
         inp.value = "";
+        return true;
+      }
+
+      inp.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        addLinkPill_(inp.value);
       });
-      inp.addEventListener("paste", (e) => {
-        setTimeout(() => {
-          const url = inp.value.trim();
-          if (url && /^https?:\/\//.test(url)) inp.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-        }, 10);
+
+      inp.addEventListener("paste", () => {
+        setTimeout(() => addLinkPill_(inp.value), 100);
       });
+
+      // Exponer función para que el guardado pueda confirmar links pendientes
+      inp._confirmPending = () => addLinkPill_(inp.value);
     })("agLinkInput", "agLinksWrap");
 
     // Toggle formulario
