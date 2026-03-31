@@ -1095,25 +1095,207 @@ th.sortable:hover { opacity: .9; }
 th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 
 /* ── RESPONSIVE ──────────────────────────────────────────────── */
-@media (max-width: 600px) {
-  .tabs    { gap: 1px; padding: 3px; border-radius: var(--r-xl); }
-  .tab     { padding: 6px 9px; font-size: 11px; flex: 1 1 auto; text-align: center; min-width: 0; }
-  .brand h1{ font-size: 16px; }
-  .brand p { font-size: 10px; }
-  .top-actions { gap: 5px; }
-  .wrap    { padding: 12px 12px 60px; }
-  .card    { padding: 12px; }
-  .card h2 { font-size: 13px; }
-  .row     { gap: 6px; }
-  .btn     { padding: 6px 10px; font-size: 11px; }
-  .slack-compose-grid { grid-template-columns: 1fr !important; }
-  .table td, .table th { padding: 7px 9px; font-size: 11px; }
-  .pill    { font-size: 10px; padding: 3px 7px; }
+
+/* Tablas con scroll horizontal en mobile */
+.table-scroll-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
-@media (max-width: 400px) {
-  .tab     { padding: 5px 7px; font-size: 10px; }
-  .brand h1{ font-size: 14px; }
+@media (max-width: 768px) {
+  /* ── Layout base ── */
+  .wrap    { padding: 10px 10px 80px; }
+  .card    { padding: 14px; }
+  .card h2 { font-size: 14px; }
+  .row     { gap: 6px; }
+  .btn     { padding: 7px 11px; font-size: 12px; }
+  .pill    { font-size: 10px; padding: 3px 7px; }
+
+  /* ── Header ── */
+  header { flex-wrap: wrap; gap: 8px; padding-bottom: 12px; }
+  .brand h1 { font-size: 17px; }
+  .brand p  { font-size: 10px; }
+  .top-actions { gap: 4px; }
+
+  /* ── Tabs: scroll horizontal ── */
+  .tabs {
+    gap: 1px;
+    padding: 3px;
+    border-radius: var(--r-xl);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { padding: 6px 10px; font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+
+  /* ── Tablas: scroll horizontal forzado ── */
+  .table-scroll-wrap,
+  [style*="overflow-x:auto"],
+  [style*="overflow-x: auto"] { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table td, .table th { padding: 7px 9px; font-size: 11px; }
+
+  /* ── KPI cards: 2 columnas en mobile ── */
+  .kpis { gap: 6px; }
+  .kpi  { min-width: calc(50% - 3px); flex: 1 1 calc(50% - 3px); padding: 10px; }
+  .kpi .v { font-size: 22px; }
+  .kpi .l { font-size: 9px; }
+  .kpis .dash-status { font-size: 12px; padding: 10px 12px; }
+
+  /* ── Operativa diaria ── */
+  #tab_daily > .row:first-child {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  #tab_daily > .row:first-child .spacer { display: none; }
+  #tab_daily > .row:first-child { flex-wrap: wrap; }
+  #btnGenerarPlan, #btnCopiarPlan {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* ── Tabla de flujos: scroll horizontal ── */
+  #tblFlujos { min-width: 600px; }
+
+  /* ── Planificación cards: 1 columna ── */
+  .flow-grid { grid-template-columns: 1fr !important; }
+  .plan-controls { flex-direction: column; align-items: stretch; }
+  .plan-controls .input, .plan-controls select { width: 100%; max-width: 100%; }
+
+  /* ── Mensajes Slack ── */
+  .slack-compose-grid { grid-template-columns: 1fr !important; }
+  #tab_daily .row[style*="align-items:center;justify-content:space-between"] {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  /* Filtros enviados: apilados */
+  #sentFilters { flex-direction: column; align-items: stretch; }
+  #sentFilterCanal, #sentFilterFecha { max-width: 100% !important; width: 100%; }
+
+  /* ── Agenda ── */
+  #agFormBody > div:first-child { flex-direction: column; }
+  #agFormBody [style*="display:flex;flex-wrap:wrap"] { flex-direction: column; }
+  .ag-ctrl { width: 100%; box-sizing: border-box; }
+
+  /* ── Presentismo: scroll horizontal ── */
+  #tab_presentismo [style*="overflow"] { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  #tblPresWeek { min-width: 600px; }
+
+  /* ── Habilitaciones: scroll horizontal ── */
+  #tblHabil { min-width: 500px; }
+
+  /* ── Colaboradores ── */
+  #tblColabs { min-width: 500px; }
+  /* Ocultar columnas menos críticas */
+  #tblColabs td:nth-child(4), #tblColabs th:nth-child(4),
+  #tblColabs td:nth-child(9), #tblColabs th:nth-child(9),
+  #tblColabs td:nth-child(10), #tblColabs th:nth-child(10),
+  #tblColabs td:nth-child(11), #tblColabs th:nth-child(11) { display: none; }
+
+  /* ── Filtros multiselect: apilados ── */
+  #colabFilters, #presFilters, #habilFilters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ms { min-width: 0 !important; width: 100%; }
+
+  /* ── Modales: casi pantalla completa ── */
+  #flujoConfigModal > div,
+  #templatesModal > div,
+  #asignacionModal > div,
+  #canalesModal > div,
+  #colabModal > div,
+  #colabDeleteModal > div {
+    margin: 16px 8px !important;
+    width: calc(100% - 16px) !important;
+    max-width: 100% !important;
+    padding: 18px !important;
+  }
+  #flujoConfigModal > div > div[style*="grid-template-columns"],
+  #asignacionModal > div > div[style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+  /* Templates modal: full height scrolleable */
+  #templatesModal > div { max-height: calc(100vh - 32px); overflow-y: auto; }
+  #templatesListWrap { max-height: 50vh !important; }
+
+  /* ── Dashboard tabla: min-width para scroll ── */
+  #tblDashRoles { min-width: 280px; }
+
+  /* ── Organización: tabs apilados ── */
+  #equipoSubTabsMain, [id^="org"] > div:first-child {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+
+  /* ── Links drawer: full width ── */
+  #linksDrawer { width: 100% !important; max-width: 100% !important; }
+
+  /* ── Botón flotante Links: posición ── */
+  #btnLinksUtiles { bottom: 16px; right: 16px; }
+
+  /* ── Barra de error: ajuste ── */
+  #errBar { font-size: 11px; padding: 8px 12px; }
+
+  /* ── Sub-nav Operativa (pills de sección) ── */
+  #tab_daily > div:nth-child(2) { overflow-x: auto; flex-wrap: nowrap; }
+
+  /* ── Enviados: header row ── */
+  #tab_daily .row[style*="justify-content:space-between"]:has(#btnToggleSent) {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* ── Tabla tblSent, tblDrafts, tblScheduled ── */
+  #tblSent, #tblDrafts, #tblScheduled { min-width: 500px; }
+
+  /* ── selbar (bulk actions) ── */
+  .selbar { flex-wrap: wrap; gap: 4px; }
+  .selbar .btn { font-size: 11px; padding: 5px 8px; }
+
+  /* ── Presentismo: selector de semana ── */
+  #presWeekSelector, #presFilters { flex-direction: column; align-items: stretch; gap: 6px; }
+
+  /* ── Asignación semanal ── */
+  #tblAsignacionBody { min-width: 480px; }
+  [id^="tblAsign"] { min-width: 480px; }
+
+  /* ── Canales tabla ── */
+  #tblCanalesBody { min-width: 480px; }
+  [id^="tblCanales"] { min-width: 480px; }
+}
+
+@media (max-width: 480px) {
+  .wrap { padding: 8px 8px 80px; }
+  .card { padding: 10px; border-radius: var(--r-lg); }
+  .brand h1 { font-size: 15px; }
+  .tab { padding: 5px 8px; font-size: 10px; }
+  .kpi  { min-width: calc(50% - 3px); padding: 8px; }
+  .kpi .v { font-size: 20px; }
+  .btn { font-size: 11px; padding: 6px 9px; }
+
+  /* Dashboard status compacto */
+  .kpis .dash-status { font-size: 11px; padding: 8px 10px; }
+
+  /* Agenda form: sin wrap horizontal */
+  #agFormBody { font-size: 12px; }
+
+  /* Modal padding mínimo */
+  #flujoConfigModal > div,
+  #templatesModal > div,
+  #asignacionModal > div,
+  #canalesModal > div,
+  #colabModal > div { padding: 14px !important; }
+}
+
+@media (max-width: 380px) {
+  .tab { padding: 5px 7px; font-size: 10px; }
+  .brand h1 { font-size: 14px; }
+  .kpi  { min-width: 100%; }
 }
 
 
@@ -1427,7 +1609,7 @@ th.sortable .srt { margin-left: 5px; opacity: .6; font-size: 10px; }
 <div>
 <div class="row" style="gap:6px;align-items:center;margin-bottom:6px">
 <div class="muted" style="font-size:12px">Menciones</div>
-<span class="tip" data-tooltip="Personas, @here, @canal, @everyone\n⚠️ @canal y @here notifican. #canal solo enlaza.">ⓘ</span>
+<span class="tip" data-tooltip="Personas, @here, @canal, @everyone&#10;⚠️ @canal y @here notifican. #canal solo enlaza.">ⓘ</span>
 </div>
 <div class="card mention-box" style="padding:10px">
 <div class="mention-wrap" style="position:relative">
