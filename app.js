@@ -1444,17 +1444,39 @@ async function generarMensajePorFlujo_(flujo, btn = null) {
   try {
     if (btn) { btn.disabled = true; btn.textContent = "Generando..."; }
 
-    // Delegar a GAS: garantiza Slack_IDs correctos independientemente del estado del cliente
-    const result = await API.slackOutboxGenerarPorFlujo(flujo);
-    if (!result?.ok) {
-      setErr(result?.error || "No hay perfiles asignados para este flujo.");
-      return;
+    const items = (S.plan || []).filter((x) => x?.flujo === flujo && x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES");
+    if (!items.length) { toast("Mensaje", "No hay perfiles asignados"); return; }
+
+    // Asegurar colabs frescos para tener Slack_IDs actualizados
+    if (!S.colabs?.length) {
+      const fresh = await API.colaboradoresList().catch(() => null);
+      if (fresh) S.colabs = fresh;
     }
 
+    const map = new Map((S.colabs || []).map((c) => {
+      const v = colabRowView(c);
+      return [v.id, v.slackId];
+    }));
+
+    const mentions = items.map((x) => {
+      const slackId = map.get(x.id_meli);
+      return slackId ? `<@${slackId}>` : x.nombre || x.id_meli;
+    }).join(" - ");
+
+    const tplRaw = (_templatesCache || []).find(t => t.key === "OUTBOX_POR_FLUJO")?.template || null;
+    const msg = tplRaw
+      ? tplRaw.replace(/\{\{flujo\}\}/g, flujo).replace(/\{\{mentions\}\}/g, mentions)
+      : `*${flujo}*\n${mentions}`;
+
+    const fechaISO = todayYMD();
+    const flujoConfig = (S.flujos || []).find(f => String(f.flujo || f).trim() === flujo);
+    const chId = String(flujoConfig?.channel_id || "").trim();
+    const estado = chId ? "BORRADOR" : "SIN CANAL CONFIGURADO";
+    await API.slackOutboxAppend(fechaISO, "POR_FLUJO", flujo, chId, msg, estado);
     S.outbox = await API.slackOutboxList();
     renderOutbox();
     renderPlan();
-    toast("Mensajes", `✓ Borrador generado para ${flujo}`);
+    toast("Mensajes", `✓ Borrador generado para ${flujo} — ${items.length} perfil${items.length !== 1 ? "es" : ""}`);
   } catch (e) {
     setErr("No se pudo generar el mensaje. Intentá de nuevo.");
   } finally {
