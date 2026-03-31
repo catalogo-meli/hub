@@ -5815,8 +5815,13 @@ function wireLinksDrawer_() {
       renderLinksDrawer_();
       _linksResetForm_();
       try {
-        await API.linksAdd({ titulo, url, categoria: cat });
-        await refreshLinks_();
+        const result = await API.linksAdd({ titulo, url, categoria: cat });
+        // Actualizar el row temporal con el real devuelto por GAS
+        if (result?.row) {
+          const idx = S_links.findIndex(l => l._row === tempRow);
+          if (idx >= 0) S_links[idx]._row = result.row;
+        }
+        renderLinksDrawer_();
         toast("Links útiles", "✓ Link agregado");
       } catch (_) {
         S_links = S_links.filter(l => l._row !== tempRow);
