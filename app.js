@@ -4469,8 +4469,6 @@ function renderAgenda() {
               <input class="ag-ctrl" data-ag-fecha type="date" value="${escapeAttr(_fechaToISO_(r.fecha))}" style="width:140px"/>
               <div style="min-width:150px;max-width:200px">${ownerSelectHtml(r.owner, "ag_owner_" + r.row)}</div>
               <select class="ag-ctrl" data-ag-tiempo style="width:auto">${tiempoOpts}</select>
-              <div style="flex:1"></div>
-              <span class="ag-save-status" data-save-status="${r.row}" style="font-size:10px;color:var(--text-3)"></span>
             </div>
 
             <!-- Tema -->
@@ -4487,6 +4485,12 @@ function renderAgenda() {
               style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:28px;padding:4px 8px;border:1px solid var(--brd-2);border-radius:6px;background:var(--surface-2);margin-top:6px">
               ${parseDescLinks_(r.descripcion).urls.map(u => `<span class="pill" style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px" data-link-pill="${escapeAttr(u)}"><a href="${escapeAttr(u)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(u.replace(/^https?:\/\//, "").slice(0,40))}${u.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(u)}">×</span></span>`).join("")}
               <input class="input" data-ag-link-input placeholder="https://..." style="border:none;background:transparent;outline:none;flex:1;min-width:120px;padding:0;font-size:11px"/>
+            </div>
+
+            <!-- Botones acción -->
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+              <button class="btn ghost" data-ag-cancel="${r.row}" style="font-size:12px">Cancelar</button>
+              <button class="btn primary" data-ag-save="${r.row}" style="font-size:12px">Guardar</button>
             </div>
           </div>
         </div>
@@ -4720,25 +4724,47 @@ function renderAgenda() {
     });
   });
 
-  // Registrar auto-save en cada card
+  // Botones Guardar y Cancelar por card
   pendientes.forEach(r => {
     const card = host.querySelector(`[data-agenda-row="${r.row}"]`);
     if (!card) return;
     const rowId = r.row;
-    const autoSave = debounce(() => saveRow_(rowId, card), 2000);
+    const readView = card.querySelector(`[data-ag-read="${rowId}"]`);
+    const editView = card.querySelector(`[data-ag-edit="${rowId}"]`);
 
-    card.querySelectorAll("[data-ag-tema],[data-ag-tiempo],[data-ag-prio]").forEach(el => {
-      el.addEventListener("input",  autoSave);
-      el.addEventListener("change", autoSave);
+    // Guardar: llama saveRow_ y vuelve a vista lectura
+    card.querySelector(`[data-ag-save="${rowId}"]`)?.addEventListener("click", async () => {
+      const btn = card.querySelector(`[data-ag-save="${rowId}"]`);
+      if (btn) { btn.disabled = true; btn.textContent = "Guardando..."; }
+      // Confirmar link pendiente antes de guardar
+      const linkInp = editView?.querySelector("[data-ag-link-input]");
+      if (linkInp?.value?.trim()) {
+        const url = linkInp.value.trim();
+        if (/^https?:\/\//.test(url)) {
+          const wrap = editView.querySelector("[data-ag-links-wrap]");
+          if (wrap && !wrap.querySelector(`[data-link-pill="${CSS.escape(url)}"]`)) {
+            const pill = document.createElement("span");
+            pill.className = "pill";
+            pill.setAttribute("data-link-pill", url);
+            pill.style.cssText = "font-size:11px;display:flex;align-items:center;gap:4px";
+            pill.innerHTML = `<a href="${escapeAttr(url)}" target="_blank" rel="noopener" style="color:var(--pri);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(url.replace(/^https?:\/\//, "").slice(0,40))}${url.length > 43 ? "…" : ""}</a><span style="opacity:0.5;font-size:10px" data-rm-link="${escapeAttr(url)}">×</span>`;
+            pill.querySelector("[data-rm-link]")?.addEventListener("click", () => pill.remove());
+            wrap.insertBefore(pill, linkInp);
+            linkInp.value = "";
+          }
+        }
+      }
+      await saveRow_(rowId, card);
+      if (btn) { btn.disabled = false; btn.textContent = "Guardar"; }
+      // Volver a vista lectura
+      if (readView) readView.style.display = "";
+      if (editView) editView.style.display = "none";
     });
-    card.querySelectorAll("[data-ag-fecha]").forEach(el => {
-      el.addEventListener("change", autoSave);
-    });
-    const descEl = card.querySelector("[data-ag-desc]");
-    if (descEl) descEl.addEventListener("input", autoSave);
-    const ownerMs = host.querySelector(`#ag_owner_${rowId}_wrap`);
-    if (ownerMs) ownerMs.querySelectorAll("input[type=checkbox]").forEach(cb => {
-      cb.addEventListener("change", autoSave);
+
+    // Cancelar: volver a vista lectura sin guardar
+    card.querySelector(`[data-ag-cancel="${rowId}"]`)?.addEventListener("click", () => {
+      if (readView) readView.style.display = "";
+      if (editView) editView.style.display = "none";
     });
   });
 
@@ -4869,7 +4895,8 @@ async function onAgendaAgregar_(ownerParam) {
   const prioridad = prioEl?.value || "Importante";
   const descText  = _agDescEditor_ ? _agDescEditor_.getValue() : ($("agDesc")?.innerText?.trim() || "");
   const linkPills = (() => {
-    // Confirmar cualquier link que esté en el input sin confirmar
+    // El botón Guardar confirma links pendientes en cards de edición.
+    // Aquí solo para el formulario de nuevo tema — confirmamos el input si tiene valor
     $("agLinkInput")?._confirmPending?.();
     return Array.from($("agLinksWrap")?.querySelectorAll("[data-link-pill]") || [])
       .map(el => el.getAttribute("data-link-pill")).filter(Boolean);
