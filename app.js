@@ -1459,8 +1459,10 @@ async function generarMensajePorFlujo_(flujo, btn = null) {
     }));
 
     const mentions = items.map((x) => {
-      const slackId = map.get(x.id_meli);
-      return slackId ? `<@${slackId}>` : x.nombre || x.id_meli;
+      const idNorm = String(x.id_meli || "").replace(/[\r\n\t\u200b\u00a0]/g, "").trim();
+      const slackId = map.get(idNorm) || map.get(x.id_meli);
+      const nombreNorm = String(x.nombre || x.id_meli || "").replace(/[\r\n\t]/g, " ").trim();
+      return slackId ? `<@${slackId}>` : nombreNorm;
     }).join(" - ");
 
     const tplRaw = (_templatesCache || []).find(t => t.key === "OUTBOX_POR_FLUJO")?.template || null;
