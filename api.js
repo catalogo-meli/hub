@@ -129,6 +129,9 @@ export const API = {
   templatesList: () => get("templates.list"),
   templatesSave: (templates) => post("templates.save", { templates }),
 
+  // Generar mensaje por flujo desde GAS (garantiza Slack_IDs correctos)
+  slackOutboxGenerarPorFlujo: (flujo) => post("slack.outbox.generarPorFlujo", { flujo }),
+
   // Links útiles
   linksList:   () => get("links.list"),
   linksCategoriasList: () => get("links.categorias.list"),

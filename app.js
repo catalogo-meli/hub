@@ -1442,61 +1442,23 @@ function flowMsgStatus_(flow) {
 async function generarMensajePorFlujo_(flujo, btn = null) {
   setErr("");
   try {
-    // feedback inmediato y seguro (evita doble click)
-    const prevTxt = btn ? btn.textContent : "";
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = "Generando...";
+    if (btn) { btn.disabled = true; btn.textContent = "Generando..."; }
+
+    // Delegar a GAS: garantiza Slack_IDs correctos independientemente del estado del cliente
+    const result = await API.slackOutboxGenerarPorFlujo(flujo);
+    if (!result?.ok) {
+      setErr(result?.error || "No hay perfiles asignados para este flujo.");
+      return;
     }
 
-    const items = (S.plan || []).filter((x) => x?.flujo === flujo && x?.id_meli && x.id_meli !== "SIN PERFILES DISPONIBLES");
-    if (!items.length) return toast("Mensaje", "No hay perfiles asignados");
-
-    // map slack ids
-    const map = new Map((S.colabs || []).map((c) => {
-      const v = colabRowView(c);
-      return [v.id, v.slackId];
-    }));
-
-    const mentions = items.map((x) => {
-      const slackId = map.get(x.id_meli);
-      return slackId ? `<@${slackId}>` : x.nombre || x.id_meli;
-    }).join(" - ");
-
-    // Aplicar template OUTBOX_POR_FLUJO — cargar cache si no existe
-    if (!_templatesCache) {
-      try {
-        const tplData = await API.templatesList();
-        _templatesCache = Array.isArray(tplData) ? tplData : [];
-        _templatesCacheTs = Date.now();
-      } catch (_) { _templatesCache = []; }
-    }
-    const tplRaw = (_templatesCache || []).find(t => t.key === "OUTBOX_POR_FLUJO")?.template || null;
-    const msg = tplRaw
-      ? tplRaw.replace(/\{\{flujo\}\}/g, flujo).replace(/\{\{mentions\}\}/g, mentions)
-      : `*${flujo}*\n${mentions}`;
-
-    const fechaISO = todayYMD();
-    // Resolver canal del flujo desde S.flujos
-    const flujoConfig = (S.flujos || []).find(f => String(f.flujo || f).trim() === flujo);
-    const chId   = String(flujoConfig?.channel_id || "").trim();
-    const chName = chId
-      ? (S.canales || []).find(c => c.channel_id === chId)?.canal || ""
-      : "";
-    const estado = chId ? "BORRADOR" : "SIN CANAL CONFIGURADO";
-    // Para POR_FLUJO: canal siempre es el nombre del flujo (el channel_id técnico va separado)
-    await API.slackOutboxAppend(fechaISO, "POR_FLUJO", flujo, chId, msg, estado);
     S.outbox = await API.slackOutboxList();
     renderOutbox();
     renderPlan();
-    toast("Mensajes", `✓ Borrador generado para ${flujo} — ${items.length} perfil${items.length !== 1 ? "es" : ""}`);
+    toast("Mensajes", `✓ Borrador generado para ${flujo}`);
   } catch (e) {
     setErr("No se pudo generar el mensaje. Intentá de nuevo.");
   } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Generar mensaje";
-    }
+    if (btn) { btn.disabled = false; btn.textContent = "Generar mensaje"; }
   }
 }
 
