@@ -6257,7 +6257,13 @@ function openFlujoConfigModal_(flujoName) {
   if (sel) sel.value = f.channel_id || "";
 
   const rot = $("fcRotMode");
-  if (rot) rot.value = f.rotacion_modo || "Off";
+  if (rot) {
+    const modeRaw = String(f.rotacion_modo || "Off").trim();
+    const modeNorm = modeRaw.charAt(0).toUpperCase() + modeRaw.slice(1).toLowerCase();
+    // Select tiene values: "Off", "diaria", "semanal"
+    const modeVal = modeNorm === "Off" ? "Off" : modeNorm.toLowerCase();
+    rot.value = modeVal;
+  }
   _flujoConfigToggleRotWindow_();
   const win = $("fcRotWindow");
   if (win) win.value = f.ventana_rotacion_dias || "";
