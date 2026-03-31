@@ -1453,7 +1453,18 @@ async function generarMensajePorFlujo_(flujo, btn = null) {
       return slackId ? `<@${slackId}>` : x.nombre || x.id_meli;
     }).join(" - ");
 
-    const msg = `*${flujo}*\n${mentions}`;
+    // Aplicar template OUTBOX_POR_FLUJO — cargar cache si no existe
+    if (!_templatesCache) {
+      try {
+        const tplData = await API.templatesList();
+        _templatesCache = Array.isArray(tplData) ? tplData : [];
+        _templatesCacheTs = Date.now();
+      } catch (_) { _templatesCache = []; }
+    }
+    const tplRaw = (_templatesCache || []).find(t => t.key === "OUTBOX_POR_FLUJO")?.template || null;
+    const msg = tplRaw
+      ? tplRaw.replace(/\{\{flujo\}\}/g, flujo).replace(/\{\{mentions\}\}/g, mentions)
+      : `*${flujo}*\n${mentions}`;
 
     const fechaISO = todayYMD();
     // Resolver canal del flujo desde S.flujos
@@ -6360,8 +6371,8 @@ let _templatesCacheTs = 0;
 const TEMPLATES_CACHE_TTL = 5 * 60 * 1000; // 5 min
 
 const TEMPLATES_DESCRIPTIONS = {
-  "OUTBOX_GENERAL": "Mensaje general del día — se envía al canal principal con todos los flujos al hacer 'Generar planificación'.",
-  "OUTBOX_POR_FLUJO": "Mensaje individual por flujo — se genera desde 'Planificación → Generar mensaje' en cada tarjeta de flujo.",
+  "OUTBOX_GENERAL":   { label: "Mensaje general",   desc: "Se genera al ejecutar \"Generar planificación\" y se envía a cada canal seleccionado." },
+  "OUTBOX_POR_FLUJO": { label: "Mensaje por flujo", desc: "Se genera desde cada tarjeta de flujo en \"Planificación → Generar mensaje\"." },
 };
 
 function _slackFmtWrapTemplate_(textarea, open, close) {
@@ -6377,14 +6388,19 @@ function _slackFmtWrapTemplate_(textarea, open, close) {
 }
 
 function _templateRowHtml_(idx, key, template) {
-  const desc = TEMPLATES_DESCRIPTIONS[key] || "";
+  const meta = TEMPLATES_DESCRIPTIONS[key];
+  const displayName = meta?.label || key;
+  const desc = meta?.desc || "";
   return `
     <div class="template-row" data-tidx="${idx}" style="border:1px solid var(--brd-2);border-radius:var(--r);padding:12px;background:var(--surface-2);display:flex;flex-direction:column;gap:8px">
       <div style="display:flex;align-items:center;gap:8px">
-        <input class="input template-key" placeholder="Nombre del template" value="${escapeAttr(key)}" style="font-size:12px;font-weight:600;flex:1"/>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600;color:var(--text-1)">${escapeHtml(displayName)}</div>
+          <input type="hidden" class="template-key" value="${escapeAttr(key)}"/>
+          ${desc ? `<div class="muted" style="font-size:11px;margin-top:2px">${escapeHtml(desc)}</div>` : ""}
+        </div>
         <button class="btn ghost template-del" data-tidx="${idx}" style="font-size:11px;padding:3px 8px;color:var(--err-txt)" title="Eliminar template">×</button>
       </div>
-      ${desc ? `<div class="muted" style="font-size:11px">${escapeHtml(desc)}</div>` : ""}
       <div style="display:flex;gap:4px;align-items:center">
         <button type="button" class="btn ghost template-fmt" data-open="*" data-close="*" style="font-size:12px;padding:2px 10px;font-weight:700" title="Negrita Slack (*texto*)">N</button>
         <button type="button" class="btn ghost template-fmt" data-open="_" data-close="_" style="font-size:12px;padding:2px 10px;font-style:italic" title="Cursiva Slack (_texto_)">I</button>
