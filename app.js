@@ -1848,7 +1848,7 @@ function renderOutbox() {
         // Leer DOM ANTES de cualquier re-render
         const v      = (when ? when.value : "").trim();
         const chVal  = sel ? sel.value : "";
-        const txtVal = txt ? txt.value : "";
+        const txtVal = txt ? dehumanizeSlackTokens_(txt.value) : "";
         if (!v)     { setErr("Elegí la fecha y hora antes de programar."); return; }
         if (!chVal) { setErr("Elegí el canal de Slack antes de programar."); return; }
         const canal = (S.canales || []).find(c => c.channel_id === chVal)?.canal || "";
