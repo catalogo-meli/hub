@@ -1,6 +1,68 @@
 // netlify/functions/gas.js
 // Proxy a Google Apps Script + Slack sender (direct from Netlify)
 
+const ALLOWED_GET_ACTIONS = new Set([
+  "health",
+  "hub.init",
+  "colaboradores.list",
+  "colaboradores.equipos",
+  "canales.list",
+  "flujos.list",
+  "habilitaciones.list",
+  "planificacion.list",
+  "slack.outbox.list",
+  "agenda.list",
+  "templates.list",
+  "links.list",
+  "links.categorias.list",
+  "asignacion.list",
+  "canales.gestion.list",
+  "presentismo.semanas",
+  "presentismo.week",
+  "presentismo.stats",
+  "presentismo.weekBySemana",
+  "presentismo.statsBySemana",
+]);
+
+const ALLOWED_POST_ACTIONS = new Set([
+  "hub.batch",
+  "colaboradores.add",
+  "colaboradores.update",
+  "colaboradores.delete",
+  "flujos.update",
+  "flujos.upsert",
+  "flujos.delete",
+  "habilitaciones.set",
+  "planificacion.generar",
+  "slack.outbox.generar",
+  "slack.outbox.generarGeneral",
+  "agenda.add",
+  "agenda.setHecho",
+  "agenda.delete",
+  "agenda.update",
+  "slack.outbox.update",
+  "slack.outbox.append",
+  "slack.outbox.delete",
+  "slack.outbox.programar",
+  "slack.outbox.desprogramar",
+  "slack.outbox.enviar",
+  "slack.sendRow",
+  "slack.sendDue",
+  "config.flujos.setIncluirMensaje",
+  "templates.save",
+  "slack.outbox.generarPorFlujo",
+  "links.categorias.upsert",
+  "links.add",
+  "links.update",
+  "links.delete",
+  "links.reorder",
+  "asignacion.upsert",
+  "asignacion.delete",
+  "canales.upsert",
+  "canales.delete",
+  "presentismo.licencias.set",
+]);
+
 exports.handler = async (event) => {
   try {
     const GAS_URL = process.env.GAS_URL;
@@ -15,6 +77,10 @@ exports.handler = async (event) => {
     
 if (method === "GET") {
   const qs = event.queryStringParameters || {};
+  const action = String(qs.action || "");
+  if (!ALLOWED_GET_ACTIONS.has(action)) {
+    return json(400, { ok: false, error: "action GET no permitida" });
+  }
   const url = new URL(GAS_URL);
   Object.entries(qs).forEach(([k, v]) => {
     if (v === undefined || v === null) return;
@@ -78,6 +144,57 @@ if (method === "GET") {
     if (method === "POST") {
       const body = event.body ? JSON.parse(event.body) : {};
       const action = String(body?.action || "");
+      if (!ALLOWED_POST_ACTIONS.has(action)) {
+        return json(400, { ok: false, error: "action POST no permitida" });
+      }
+
+      const gasPost = async (payload) => {
+        const resp = await fetch(GAS_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ ...payload, token: API_TOKEN }),
+        });
+        const text = await resp.text();
+        let parsed;
+        try { parsed = JSON.parse(text); } catch { parsed = null; }
+        if (!resp.ok) throw new Error(`GAS error (${resp.status})`);
+        if (!parsed || parsed.ok === false) throw new Error(parsed?.error || "GAS error");
+        return parsed.data;
+      };
+
+      if (action === "hub.batch") {
+        const items = Array.isArray(body.items) ? body.items : [];
+        if (!items.length) return json(400, { ok: false, error: "items requerido" });
+        if (items.length > 100) return json(400, { ok: false, error: "batch demasiado grande" });
+
+        const allowedBatchActions = new Set(["habilitaciones.set"]);
+        const results = [];
+        let failed = 0;
+        for (const item of items) {
+          const payload = { ...(item || {}) };
+          if (!payload.action) {
+            failed++;
+            results.push({ ok: false, error: "action requerido" });
+            continue;
+          }
+          if (!allowedBatchActions.has(payload.action)) {
+            failed++;
+            results.push({ ok: false, action: payload.action, error: "action no permitida en batch" });
+            continue;
+          }
+          try {
+            results.push({ ok: true, data: await gasPost(payload) });
+          } catch (e) {
+            failed++;
+            results.push({ ok: false, action: payload.action, error: e?.message || String(e) });
+          }
+        }
+        return json(failed ? 207 : 200, {
+          ok: failed === 0,
+          error: failed ? `${failed} operacion(es) fallaron` : undefined,
+          data: { results, failed, total: items.length },
+        });
+      }
 
       // ===== Slack direct (no UrlFetch in Apps Script) =====
       if (action === "slack.sendRow" || action === "slack.sendDue") {

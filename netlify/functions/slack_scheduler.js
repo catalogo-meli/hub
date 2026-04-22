@@ -1,10 +1,6 @@
 // netlify/functions/slack_scheduler.js
-// Netlify Scheduled Function: envía mensajes vencidos del Slack_Outbox.
+// Endpoint manual: envía mensajes vencidos del Slack_Outbox bajo demanda.
 // Requiere env vars: GAS_URL, API_TOKEN, SLACK_BOT_TOKEN
-
-// Compat (según runtime / versión de Netlify)
-exports.schedule = "*/1 * * * *"; // cada 1 minuto
-exports.config = { schedule: "*/1 * * * *" };
 
 exports.handler = async () => {
   const GAS_URL = process.env.GAS_URL;

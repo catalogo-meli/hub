@@ -324,6 +324,74 @@ function debounce(fn, ms = 350) {
   return d;
 }
 
+const OP_LOCKS = new Set();
+
+function buttonBusy_(btn, busy, label) {
+  if (!btn) return;
+  if (busy) {
+    if (btn.dataset.prevText == null) btn.dataset.prevText = btn.textContent || "";
+    btn.disabled = true;
+    if (label) btn.textContent = label;
+  } else {
+    btn.disabled = false;
+    if (btn.dataset.prevText != null) {
+      btn.textContent = btn.dataset.prevText;
+      delete btn.dataset.prevText;
+    }
+  }
+}
+
+async function withOpLock_(key, fn, btn = null, pendingLabel = "") {
+  if (OP_LOCKS.has(key)) return null;
+  OP_LOCKS.add(key);
+  buttonBusy_(btn, true, pendingLabel);
+  try {
+    return await fn();
+  } finally {
+    buttonBusy_(btn, false);
+    OP_LOCKS.delete(key);
+  }
+}
+
+function recordSaveIssue_(scope, err, context = {}) {
+  const entry = {
+    ts: Date.now(),
+    scope,
+    error: String(err?.message || err || "").slice(0, 400),
+    context,
+  };
+  try {
+    window.__hubSaveIssues = window.__hubSaveIssues || [];
+    if (window.__hubSaveIssues.length >= 100) window.__hubSaveIssues.shift();
+    window.__hubSaveIssues.push(entry);
+    console.warn("[save]", scope, entry.error, context);
+  } catch {}
+  return entry.error;
+}
+
+function isTransientSaveError_(err) {
+  const s = String(err?.message || err || "").toLowerCase();
+  return s.includes("timeout") || s.includes("lock") || s.includes("non-json") || s.includes("upstream") || s.includes("network");
+}
+
+function sleep_(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function retryTransient_(fn, { retries = 1, delayMs = 900 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn(attempt);
+    } catch (e) {
+      lastErr = e;
+      if (attempt >= retries || !isTransientSaveError_(e)) throw e;
+      await sleep_(delayMs * (attempt + 1));
+    }
+  }
+  throw lastErr;
+}
+
 function mountTableSort_(tableId, sortState, onChange) {
   const tbl = $(tableId);
   if (!tbl) return;
@@ -791,7 +859,7 @@ async function loadCore() {
       if (cOutbox) S.outbox    = cOutbox;
 
       // Plan+outbox vencidos o no cacheados: refrescar en background
-      if (!fullyCached) refreshPlanAndOutbox().then(() => { renderPlan(); renderOutbox(); }).catch(() => {});
+      if (!fullyCached) refreshPlanAndOutbox().then(() => { renderPlan(); renderOutbox(); }).catch((err) => recordSaveIssue_("background.refreshPlanOutbox", err));
     } else {
       // Cold: un solo request que trae todo
       const init = await API.hubInit();
@@ -830,7 +898,7 @@ async function loadCore() {
 
   // Todo viene del hubInit en cold start.
   // En cache hit (allCached), habil y presWeek no vienen → refreshear en background.
-  if (!S.habil) refreshHabil().catch(() => {});
+  if (!S.habil) refreshHabil().catch((err) => recordSaveIssue_("background.refreshHabil", err));
 
   // Actualizar filtros de roles con datos frescos (por si vinieron del cache)
   _refreshRoleFilters_();
@@ -842,7 +910,7 @@ async function loadCore() {
     refreshPresentismo().then(() => {
       mountPresentismoSelect();
       renderDashboard();
-    }).catch(() => {});
+    }).catch((err) => recordSaveIssue_("background.refreshPresentismo", err));
   }
   // Pre-cachear agenda en background — siempre actualizar badge y card
   const cAgenda = CACHE.get("agenda");
@@ -860,7 +928,7 @@ async function loadCore() {
         _updateAgendaBadge_();
         _updateKpiAgenda_();
       }
-    }).catch(() => {});
+    }).catch((err) => recordSaveIssue_("background.agendaList", err));
   }
 }
 
@@ -993,14 +1061,15 @@ function saveFlujoOptimistic(flujo, perfiles, channel_id) {
     if (el) el.textContent = "Guardando...";
     setErr("");
     try {
-      await API.flujosUpsert(flujo, perfiles, channel_id || "");
+      await retryTransient_(() => API.flujosUpsert(flujo, perfiles, channel_id || ""));
       if (el) el.textContent = "✓ Guardado";
       setTimeout(() => { if (el && el.textContent === "✓ Guardado") el.textContent = "Listo"; }, 1500);
     } catch (e) {
+      recordSaveIssue_("flujos.autosave", e, { flujo });
       setErr(`Error al guardar ${flujo}: ${e.message || e}`);
       if (el) el.textContent = "Error";
       // Revertir valor local al fallar
-      const flujos = await API.flujosList().catch(() => null);
+      const flujos = await API.flujosList().catch((err) => { recordSaveIssue_("flujos.autosaveReload", err, { flujo }); return null; });
       if (flujos) {
         S.flujos = flujos;
         renderFlujos();
@@ -1071,6 +1140,9 @@ function validateFlujosSlackConfig_(rows) {
 
 async function onFlujoDelete(flujo) {
   setErr("");
+  const lockKey = `flujo-delete-${flujo}`;
+  if (OP_LOCKS.has(lockKey)) return;
+  OP_LOCKS.add(lockKey);
 
   // ── Optimistic: quitar flujo de S.flujos y S.habil inmediatamente ──
   const prevFlujos = S.flujos ? [...S.flujos] : [];
@@ -1091,7 +1163,7 @@ async function onFlujoDelete(flujo) {
 
   try {
     $("dailyStatus") && ($("dailyStatus").textContent = "Eliminando...");
-    await API.flujosDelete(flujo);
+    await retryTransient_(() => API.flujosDelete(flujo));
 
     // Confirmar con datos reales de GAS (ya sin cache por la invalidación)
     const [fl, hab] = await Promise.all([
@@ -1103,8 +1175,9 @@ async function onFlujoDelete(flujo) {
 
     renderFlujos();
     renderHabil();
-    toast("Operativa diaria", `✓ Flujo "${flujo}" eliminado.`);
+    toast("Operativa diaria", `Flujo "${flujo}" eliminado.`, "ok");
   } catch (e) {
+    recordSaveIssue_("flujos.delete", e, { flujo });
     // Revertir si falló
     S.flujos = prevFlujos;
     S.habil  = prevHabil;
@@ -1113,6 +1186,7 @@ async function onFlujoDelete(flujo) {
     setErr("No se pudo eliminar el flujo. Intentá de nuevo.");
   } finally {
     $("dailyStatus") && ($("dailyStatus").textContent = "Listo");
+    OP_LOCKS.delete(lockKey);
   }
 }
 
@@ -1183,12 +1257,13 @@ function renderFlujos() {
     chk?.addEventListener("change", async () => {
       const value = !!chk.checked;
       try {
-        await API.configFlujosSetIncluirMensaje(unescapeAttr(flujo), value);
+        await retryTransient_(() => API.configFlujosSetIncluirMensaje(unescapeAttr(flujo), value));
         if (chSel) chSel.disabled = !value;
         const idx = (S.flujos || []).findIndex((x) => String(x.flujo) === String(unescapeAttr(flujo)));
         if (idx >= 0) S.flujos[idx].incluir_en_mensaje = value;
-        toast("Flujos", value ? "Incluido en mensaje" : "Excluido del mensaje");
+        toast("Flujos", value ? "Incluido en mensaje" : "Excluido del mensaje", "ok");
       } catch (e) {
+        recordSaveIssue_("flujos.incluirMensaje", e, { flujo: unescapeAttr(flujo), value });
         setErr(e?.message || String(e));
         chk.checked = !value;
       }
@@ -1454,7 +1529,7 @@ async function generarMensajePorFlujo_(flujo, btn = null) {
 
     // Asegurar colabs frescos para tener Slack_IDs actualizados
     if (!S.colabs?.length) {
-      const fresh = await API.colaboradoresList().catch(() => null);
+      const fresh = await API.colaboradoresList().catch((err) => { recordSaveIssue_("slack.outbox.colabsForMentions", err, { flujo }); return null; });
       if (fresh) S.colabs = fresh;
     }
 
@@ -1479,12 +1554,13 @@ async function generarMensajePorFlujo_(flujo, btn = null) {
     const flujoConfig = (S.flujos || []).find(f => String(f.flujo || f).trim() === flujo);
     const chId = String(flujoConfig?.channel_id || "").trim();
     const estado = chId ? "BORRADOR" : "SIN CANAL CONFIGURADO";
-    await API.slackOutboxAppend(fechaISO, "POR_FLUJO", flujo, chId, msg, estado);
-    S.outbox = await API.slackOutboxList();
+    await retryTransient_(() => API.slackOutboxAppend(fechaISO, "POR_FLUJO", flujo, chId, msg, estado));
+    S.outbox = await retryTransient_(() => API.slackOutboxList());
     renderOutbox();
     renderPlan();
-    toast("Mensajes", `✓ Borrador generado para ${flujo} — ${items.length} perfil${items.length !== 1 ? "es" : ""}`);
+    toast("Mensajes", `Borrador generado para ${flujo} — ${items.length} perfil${items.length !== 1 ? "es" : ""}`, "ok");
   } catch (e) {
+    recordSaveIssue_("slack.outbox.generarPorFlujo", e, { flujo });
     setErr("No se pudo generar el mensaje. Intentá de nuevo.");
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "Generar mensaje"; }
@@ -1529,7 +1605,12 @@ const outboxAutosave = debounce(async (row, channel_id, mensaje) => {
   const est = String(current.estado || "").toUpperCase();
   if (est.includes("PROGRAMADO") || est.includes("ENVIADO")) return;
   const canal = (S.canales || []).find(c => c.channel_id === channel_id)?.canal || "";
-  API.slackOutboxUpdate(row, canal, channel_id, mensaje).catch(() => {});
+  try {
+    await retryTransient_(() => API.slackOutboxUpdate(row, canal, channel_id, mensaje));
+  } catch (e) {
+    recordSaveIssue_("slack.outbox.autosave", e, { row });
+    setErr("No se pudo guardar el borrador automaticamente. Intenta guardar o enviar de nuevo.");
+  }
 }, 1000);
 
 function formatEstado(estado) {
@@ -1751,9 +1832,9 @@ function renderOutbox() {
     btnRefreshSent.addEventListener("click", async () => {
       try {
         setErr("");
-        S.outbox = await API.slackOutboxList();
+        S.outbox = await retryTransient_(() => API.slackOutboxList());
         renderOutbox();
-        toast("Mensajes", "✓ Actualizado");
+        toast("Mensajes", "Actualizado", "ok");
       } catch (e) {
         setErr("No se pudo completar la acción. Intentá de nuevo.");
       }
@@ -1774,16 +1855,22 @@ function renderOutbox() {
         setErr("");
         const confirmed = await hubConfirm_("¿Eliminás este mensaje? No se puede recuperar.", "Sí, eliminar");
         if (!confirmed) return;
-        // Optimistic: quitar de UI inmediatamente
-        const prevOutbox = (S.outbox || []).slice();
-        S.outbox = prevOutbox.filter((x) => Number(x.row) !== Number(row));
-        renderOutbox();
-        toast("Mensajes", "✓ Mensaje eliminado");
-        // GAS en background
-        API.slackOutboxDelete(row).catch(() => {
-          S.outbox = prevOutbox;
+        await withOpLock_(`outbox-delete-${row}`, async () => {
+          const prevOutbox = (S.outbox || []).slice();
+          S.outbox = prevOutbox.filter((x) => Number(x.row) !== Number(row));
           renderOutbox();
-          setErr("No se pudo eliminar. Intentá de nuevo.");
+          setBusy("Mensajes", "Eliminando...");
+          try {
+            await retryTransient_(() => API.slackOutboxDelete(row));
+            toast("Mensajes", "Mensaje eliminado", "ok");
+          } catch (err) {
+            recordSaveIssue_("slack.outbox.delete", err, { row });
+            S.outbox = prevOutbox;
+            renderOutbox();
+            setErr("No se pudo eliminar. Intentá de nuevo.");
+          } finally {
+            clearBusy();
+          }
         });
       });
 
@@ -1809,29 +1896,37 @@ function renderOutbox() {
           if (!nWhen) { setErr("Elegí fecha y hora para programar."); return; }
           if (!nMsg)  { setErr("El mensaje no puede estar vacío."); return; }
           var nCanal = (S.canales || []).find(function(c) { return c.channel_id === nChId; })?.canal || "";
-          // Optimistic inmediato
-          const estOpt = fmtProgLocal_(nWhen);
-          patchOutbox_(row, { channel_id: nChId, canal: nCanal, programado_para: nWhen, mensaje: nMsg, estado: estOpt });
-          _ePan.style.display = "none"; _eBtn.textContent = "\u270F\uFE0F";
-          toast("Mensajes", "\u2713 Cambios guardados");
-          // 1 round-trip: programar + canal/msg en la misma llamada
-          API.slackOutboxProgramar(row, nWhen, nCanal, nChId, nMsg).catch(function() {
-            setErr("No se pudo guardar. Intent\u00E1 de nuevo.");
-          });
+          await withOpLock_(`outbox-program-edit-${row}`, async () => {
+            const prev = { ...((S.outbox||[]).find(function(x){return Number(x.row)===row;}) || {}) };
+            const estOpt = fmtProgLocal_(nWhen);
+            patchOutbox_(row, { channel_id: nChId, canal: nCanal, programado_para: nWhen, mensaje: nMsg, estado: estOpt });
+            _ePan.style.display = "none"; _eBtn.textContent = "\u270F\uFE0F";
+            try {
+              await retryTransient_(() => API.slackOutboxProgramar(row, nWhen, nCanal, nChId, nMsg));
+              toast("Mensajes", "Cambios guardados", "ok");
+            } catch (err) {
+              recordSaveIssue_("slack.outbox.programar.edit", err, { row });
+              patchOutbox_(row, prev);
+              setErr("No se pudo guardar. Intentá de nuevo.");
+            }
+          }, _eSav, "Guardando...");
         });
         // Desprogramar desde panel de edición
         var _eDesch = tr.querySelector("[data-edit-desch]");
-        if (_eDesch) _eDesch.addEventListener("click", function() {
-          _ePan.style.display = "none"; _eBtn.textContent = "\u270F\uFE0F";
-          // Optimistic inmediato
-          const curMsg = (S.outbox||[]).find(function(x){return Number(x.row)===row;})?.mensaje||"";
-          const curCh  = (S.outbox||[]).find(function(x){return Number(x.row)===row;})?.channel_id||"";
-          const curCanal = (S.outbox||[]).find(function(x){return Number(x.row)===row;})?.canal||"";
-          patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
-          toast("Mensajes", "\u2713 Mensaje movido a Borradores");
-          API.slackOutboxDesprogramar(row).catch(function() {
-            setErr("No se pudo desprogramar. Intent\u00E1 de nuevo.");
-          });
+        if (_eDesch) _eDesch.addEventListener("click", async function() {
+          await withOpLock_(`outbox-desch-edit-${row}`, async () => {
+            _ePan.style.display = "none"; _eBtn.textContent = "\u270F\uFE0F";
+            const prev = { ...((S.outbox||[]).find(function(x){return Number(x.row)===row;}) || {}) };
+            patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
+            try {
+              await retryTransient_(() => API.slackOutboxDesprogramar(row));
+              toast("Mensajes", "Mensaje movido a Borradores", "ok");
+            } catch (err) {
+              recordSaveIssue_("slack.outbox.desprogramar.edit", err, { row });
+              patchOutbox_(row, prev);
+              setErr("No se pudo desprogramar. Intentá de nuevo.");
+            }
+          }, _eDesch, "...");
         });
         return;
       }
@@ -1854,27 +1949,36 @@ function renderOutbox() {
         const canal = (S.canales || []).find(c => c.channel_id === chVal)?.canal || "";
         // Cancelar autosave pendiente para evitar race condition en GAS
         outboxAutosave.cancel && outboxAutosave.cancel();
-        // Optimistic inmediato
-        const estadoOpt = fmtProgLocal_(v);
-        patchOutbox_(row, { estado: estadoOpt, channel_id: chVal, canal, mensaje: txtVal, programado_para: v });
-        toast("Mensajes", "✓ Mensaje programado");
-        // 1 solo round-trip a GAS: programar + guardar canal/msg en la misma llamada
-        API.slackOutboxProgramar(row, v, canal, chVal, txtVal).catch((e) => {
-          patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
-          setErr("No se pudo programar. Intentá de nuevo.");
-        });
+        await withOpLock_(`outbox-program-${row}`, async () => {
+          const prev = { ...((S.outbox || []).find(x => Number(x.row) === row) || {}) };
+          const estadoOpt = fmtProgLocal_(v);
+          patchOutbox_(row, { estado: estadoOpt, channel_id: chVal, canal, mensaje: txtVal, programado_para: v });
+          try {
+            await retryTransient_(() => API.slackOutboxProgramar(row, v, canal, chVal, txtVal));
+            toast("Mensajes", "Mensaje programado", "ok");
+          } catch (err) {
+            recordSaveIssue_("slack.outbox.programar", err, { row });
+            patchOutbox_(row, prev);
+            setErr("No se pudo programar. Intentá de nuevo.");
+          }
+        }, tr.querySelector("[data-prog]"), "...");
       });
 
       // Desprogramar (solo en filas programadas)
       tr.querySelector("[data-desch]")?.addEventListener("click", async () => {
         outboxAutosave.cancel && outboxAutosave.cancel();
-        const prevEstado = (S.outbox || []).find(x => Number(x.row) === row)?.estado || "";
-        patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
-        toast("Mensajes", "✓ Mensaje desprogramado");
-        API.slackOutboxDesprogramar(row).catch(() => {
-          patchOutbox_(row, { estado: prevEstado });
-          setErr("No se pudo desprogramar. Intentá de nuevo.");
-        });
+        await withOpLock_(`outbox-desch-${row}`, async () => {
+          const prev = { ...((S.outbox || []).find(x => Number(x.row) === row) || {}) };
+          patchOutbox_(row, { estado: "BORRADOR", programado_para: "" });
+          try {
+            await retryTransient_(() => API.slackOutboxDesprogramar(row));
+            toast("Mensajes", "Mensaje desprogramado", "ok");
+          } catch (err) {
+            recordSaveIssue_("slack.outbox.desprogramar", err, { row });
+            patchOutbox_(row, prev);
+            setErr("No se pudo desprogramar. Intentá de nuevo.");
+          }
+        }, tr.querySelector("[data-desch]"), "...");
       });
 
       tr.querySelector("[data-send]")?.addEventListener("click", async () => {
@@ -1885,16 +1989,19 @@ function renderOutbox() {
         if (!txtVal.trim()) { setErr("Escribí un mensaje antes de enviar."); return; }
         const canal = (S.canales || []).find(c => c.channel_id === chVal)?.canal || "";
         outboxAutosave.cancel && outboxAutosave.cancel();
-        try {
-          const rawMsg = dehumanizeSlackTokens_(txtVal);
-          await API.slackOutboxUpdate(row, canal, chVal, rawMsg);
-          await onOutboxSend(row);
-          const stamp = new Date().toISOString();
-          patchOutbox_(row, { estado: "ENVIADO ✅ " + stamp, channel_id: chVal, canal, mensaje: rawMsg });
-          toast("Mensajes", "✓ Mensaje enviado por Slack");
-        } catch (e) {
-          setErr("No se pudo enviar. Revisá el canal y el mensaje.");
-        }
+        await withOpLock_(`outbox-send-${row}`, async () => {
+          try {
+            const rawMsg = dehumanizeSlackTokens_(txtVal);
+            await retryTransient_(() => API.slackOutboxUpdate(row, canal, chVal, rawMsg));
+            await retryTransient_(() => API.slackSendRow(row));
+            const stamp = new Date().toISOString();
+            patchOutbox_(row, { estado: "ENVIADO ✅ " + stamp, channel_id: chVal, canal, mensaje: rawMsg });
+            toast("Mensajes", "Mensaje enviado por Slack", "ok");
+          } catch (err) {
+            recordSaveIssue_("slack.outbox.send", err, { row });
+            setErr("No se pudo enviar. Revisá el canal y el mensaje.");
+          }
+        }, tr.querySelector("[data-send]"), "...");
       });
     });
   };
@@ -1983,14 +2090,22 @@ function renderDailyDrafts_() {
       const row = Number(b.getAttribute("data-del"));
       if (!row) return;
       if (!await hubConfirm_("¿Eliminás este borrador? No se puede recuperar.", "Sí, eliminar")) return;
-      try {
-        await API.slackOutboxDelete(row);
-        S.outbox = await API.slackOutboxList();
+      await withOpLock_(`daily-draft-delete-${row}`, async () => {
+        const prev = (S.outbox || []).slice();
+        S.outbox = prev.filter(x => Number(x.row) !== row);
         renderOutbox();
-        toast("Mensajes", "✓ Mensaje eliminado");
-      } catch (e) {
-        setErr(`Eliminar borrador: ${e.message || e}`);
-      }
+        try {
+          await retryTransient_(() => API.slackOutboxDelete(row));
+          S.outbox = await retryTransient_(() => API.slackOutboxList());
+          renderOutbox();
+          toast("Mensajes", "Mensaje eliminado", "ok");
+        } catch (e) {
+          recordSaveIssue_("slack.dailyDraft.delete", e, { row });
+          S.outbox = prev;
+          renderOutbox();
+          setErr(`Eliminar borrador: ${e.message || e}`);
+        }
+      }, b, "...");
     });
   });
 }
@@ -2259,32 +2374,34 @@ function mountSlackCompose_() {
     if (!mensaje) { setErr("Escribí un mensaje antes de guardar."); return; }
     const canal = (S.canales || []).find((c) => c.channel_id === channel_id)?.canal || "";
 
-    // Optimistic: agregar borrador a S.outbox inmediatamente
-    const tempRow = -Date.now();
-    const newRow = { row: tempRow, fecha: todayYMD(), tipo: "COMPOSE", canal, channel_id, mensaje, estado: "BORRADOR", programado_para: "" };
-    S.outbox = [newRow, ...(S.outbox || [])];
-    renderOutbox();
-    clearCompose();
-    toast("Mensajes", "✓ Borrador guardado");
-
-    try {
-      const appended = await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
-      const realRow = appended?.data?.row || appended?.row;
-      if (realRow && realRow > 0) {
-        // Reemplazar tempRow con el row real sin re-fetch
-        const idx = (S.outbox||[]).findIndex(x => x.row === tempRow);
-        if (idx >= 0) S.outbox[idx].row = realRow;
-        renderOutbox();
-      } else {
-        // Fallback: fetch completo si no vino el row
-        const fresh = await API.slackOutboxList();
-        if (fresh) { S.outbox = fresh; renderOutbox(); }
-      }
-    } catch (e) {
-      S.outbox = (S.outbox || []).filter(x => x.row !== tempRow);
+    await withOpLock_("compose-draft", async () => {
+      const tempRow = -Date.now();
+      const newRow = { row: tempRow, fecha: todayYMD(), tipo: "COMPOSE", canal, channel_id, mensaje, estado: "BORRADOR", programado_para: "" };
+      S.outbox = [newRow, ...(S.outbox || [])];
       renderOutbox();
-      setErr("No se pudo guardar el borrador. Intentá de nuevo.");
-    }
+      setBusy("Mensajes", "Guardando borrador...");
+      try {
+        const appended = await retryTransient_(() => API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR"));
+        const realRow = appended?.data?.row || appended?.row;
+        if (realRow && realRow > 0) {
+          const idx = (S.outbox||[]).findIndex(x => x.row === tempRow);
+          if (idx >= 0) S.outbox[idx].row = realRow;
+          renderOutbox();
+        } else {
+          const fresh = await API.slackOutboxList();
+          if (fresh) { S.outbox = fresh; renderOutbox(); }
+        }
+        clearCompose();
+        toast("Mensajes", "Borrador guardado", "ok");
+      } catch (err) {
+        recordSaveIssue_("slack.outbox.appendDraft", err, { channel_id });
+        S.outbox = (S.outbox || []).filter(x => x.row !== tempRow);
+        renderOutbox();
+        setErr("No se pudo guardar el borrador. Intentá de nuevo.");
+      } finally {
+        clearBusy();
+      }
+    }, btnDraft, "Guardando...");
   });
 
   btnSendNow.addEventListener("click", async () => {
@@ -2294,22 +2411,29 @@ function mountSlackCompose_() {
     if (!mensaje)    { setErr("Escribí un mensaje antes de enviar."); return; }
     if (!channel_id) { setErr("Elegí el canal de Slack."); return; }
     const canal = (S.canales || []).find(c => c.channel_id === channel_id)?.canal || "";
-    setBusy("Mensajes", "Enviando...");
-    try {
-      await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
-      const fresh = await API.slackOutboxList();
-      S.outbox = fresh || [];
-      const newest = (S.outbox).slice().sort((a, b) => (b.row||0) - (a.row||0))[0];
-      if (!newest?.row) throw new Error("No se pudo obtener la fila.");
-      await API.slackSendRow(newest.row);
-      clearCompose();
-      toast("Mensajes", "✓ Mensaje enviado por Slack");
-      API.slackOutboxList().then(d => { if(d) { S.outbox = d; renderOutbox(); } }).catch(()=>{});
-    } catch (e) {
-      setErr("No se pudo enviar. Revisá el canal y el mensaje.");
-    } finally {
-      clearBusy();
-    }
+    await withOpLock_("compose-send-now", async () => {
+      setBusy("Mensajes", "Creando borrador...");
+      try {
+        const appended = await retryTransient_(() => API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR"));
+        let row = appended?.data?.row || appended?.row;
+        if (!row || row < 2) {
+          const fresh = await API.slackOutboxList();
+          S.outbox = fresh || [];
+          row = (S.outbox).slice().sort((a, b) => (b.row||0) - (a.row||0))[0]?.row;
+        }
+        if (!row) throw new Error("No se pudo obtener la fila.");
+        setBusy("Mensajes", "Enviando a Slack...");
+        await retryTransient_(() => API.slackSendRow(row));
+        clearCompose();
+        toast("Mensajes", "Mensaje enviado por Slack", "ok");
+        API.slackOutboxList().then(d => { if(d) { S.outbox = d; renderOutbox(); } }).catch((err)=>recordSaveIssue_("slack.outbox.refreshAfterSend", err));
+      } catch (err) {
+        recordSaveIssue_("slack.outbox.composeSend", err, { channel_id });
+        setErr("No se pudo enviar. Revisá el canal y el mensaje.");
+      } finally {
+        clearBusy();
+      }
+    }, btnSendNow, "Enviando...");
   });
 
   btnSched.addEventListener("click", async () => {
@@ -2322,30 +2446,31 @@ function mountSlackCompose_() {
     if (!channel_id) { setErr("Elegí el canal de Slack."); return; }
     const canal = (S.canales || []).find(c => c.channel_id === channel_id)?.canal || "";
 
-    // Optimistic: mostrar como programado inmediatamente
-    const tempRow = -Date.now();
-    S.outbox = [{ row: tempRow, fecha: todayYMD(), tipo: "COMPOSE", canal, channel_id,
-      mensaje, estado: "PROGRAMADO " + v, programado_para: v }, ...(S.outbox || [])];
-    renderOutbox();
-    clearCompose();
-    toast("Mensajes", "✓ Mensaje programado");
-
-    try {
-      // 1. Crear fila + obtener row en 1 sola llamada (append devuelve { ok, row })
-      const appended = await API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR");
-      const newRow = appended?.data?.row || appended?.row;
-      if (!newRow || newRow < 2) throw new Error("No se pudo obtener la fila creada.");
-      // 2. Programar + guardar en 1 sola llamada (cache se invalida en GAS)
-      await API.slackOutboxProgramar(newRow, v, canal, channel_id, mensaje);
-      // 3. Fetch final para sincronizar estado real (⏰ dd/MM/yyyy)
-      const confirmed = await API.slackOutboxList();
-      S.outbox = confirmed || (S.outbox||[]).map(x => x.row === tempRow ? {...x, row: newRow} : x);
+    await withOpLock_("compose-schedule", async () => {
+      const tempRow = -Date.now();
+      S.outbox = [{ row: tempRow, fecha: todayYMD(), tipo: "COMPOSE", canal, channel_id,
+        mensaje, estado: fmtProgLocal_(v), programado_para: v }, ...(S.outbox || [])];
       renderOutbox();
-    } catch (e) {
-      S.outbox = (S.outbox || []).filter(x => x.row !== tempRow);
-      renderOutbox();
-      setErr("No se pudo programar. Intentá de nuevo.");
-    }
+      setBusy("Mensajes", "Programando...");
+      try {
+        const appended = await retryTransient_(() => API.slackOutboxAppend(todayYMD(), "COMPOSE", canal, channel_id, mensaje, "BORRADOR"));
+        const newRow = appended?.data?.row || appended?.row;
+        if (!newRow || newRow < 2) throw new Error("No se pudo obtener la fila creada.");
+        await retryTransient_(() => API.slackOutboxProgramar(newRow, v, canal, channel_id, mensaje));
+        S.outbox = (S.outbox||[]).map(x => x.row === tempRow ? { ...x, row: newRow, estado: fmtProgLocal_(v) } : x);
+        renderOutbox();
+        clearCompose();
+        toast("Mensajes", "Mensaje programado", "ok");
+        API.slackOutboxList().then(d => { if (d) { S.outbox = d; renderOutbox(); } }).catch((err) => recordSaveIssue_("slack.outbox.refreshAfterSchedule", err));
+      } catch (err) {
+        recordSaveIssue_("slack.outbox.composeSchedule", err, { channel_id });
+        S.outbox = (S.outbox || []).filter(x => x.row !== tempRow);
+        renderOutbox();
+        setErr("No se pudo programar. Intentá de nuevo.");
+      } finally {
+        clearBusy();
+      }
+    }, btnSched, "Programando...");
   });
   // Emojis: paleta operativa (vista unificada).
   // - Sin tabs ni categorías visibles.
@@ -2384,7 +2509,7 @@ function mountSlackCompose_() {
 
 async function onOutboxSend(row) {
   // Solo envía — el caller maneja el toast y el patch
-  await API.slackSendRow(row);
+  await retryTransient_(() => API.slackSendRow(row));
 }
 
 /* ========= Colaboradores ========= */
@@ -2613,31 +2738,38 @@ async function saveColabModal_() {
   }
 
   setErr("");
+  const btn = $("colabModalSave");
+  const lockKey = _colabModalMode_ === "add" ? `colab-add-${id_meli}` : `colab-update-${_colabEditId_ || id_meli}`;
+  if (OP_LOCKS.has(lockKey)) return;
+  OP_LOCKS.add(lockKey);
+  buttonBusy_(btn, true, _colabModalMode_ === "add" ? "Agregando..." : "Guardando...");
   try {
     setBusy("Colaboradores", _colabModalMode_ === "add" ? "Agregando..." : "Guardando...");
 
     const payload = { id_meli, nombre, rol, equipo, ubicacion, mail_prod, mail_ext, fecha_ingreso, slack_id, cuil };
 
     if (_colabModalMode_ === "add") {
-      await API.colaboradoresAdd(payload);
-      toast("Colaboradores", `✓ ${nombre} agregado`);
+      await retryTransient_(() => API.colaboradoresAdd(payload));
     } else {
-      await API.colaboradoresUpdate({ ...payload, id_meli: _colabEditId_ || id_meli });
-      toast("Colaboradores", `✓ ${nombre} actualizado`);
+      await retryTransient_(() => API.colaboradoresUpdate({ ...payload, id_meli: _colabEditId_ || id_meli }));
     }
 
     // Recargar colabs y cerrar modal
-    S.colabs = await API.colaboradoresList();
+    S.colabs = await retryTransient_(() => API.colaboradoresList());
     CACHE.invalidate("colabs");
     CACHE.set("colabs", S.colabs, 5 * 60_000);
     _refreshRoleFilters_();
     renderColabs();
     renderDashboard();
     closeColabModal_();
+    toast("Colaboradores", _colabModalMode_ === "add" ? `${nombre} agregado` : `${nombre} actualizado`, "ok");
   } catch (e) {
+    recordSaveIssue_("colaboradores.save", e, { id_meli, mode: _colabModalMode_ });
     setErr(`Colaboradores: ${e.message || e}`);
   } finally {
     clearBusy();
+    buttonBusy_(btn, false);
+    OP_LOCKS.delete(lockKey);
   }
 }
 
@@ -2667,21 +2799,28 @@ function closeDeleteModal_() {
 async function deleteColabsExecute_() {
   const ids = [...S.selColabs];
   closeDeleteModal_();
+  const btn = $("colabDeleteConfirm");
+  if (OP_LOCKS.has("colab-delete")) return;
+  OP_LOCKS.add("colab-delete");
+  buttonBusy_(btn, true, "Eliminando...");
   try {
     setBusy("Colaboradores", "Eliminando...");
-    await API.colaboradoresDelete(ids);
+    await retryTransient_(() => API.colaboradoresDelete(ids));
     S.selColabs.clear();
-    S.colabs = await API.colaboradoresList();
+    S.colabs = await retryTransient_(() => API.colaboradoresList());
     CACHE.invalidate("colabs");
     CACHE.set("colabs", S.colabs, 5 * 60_000);
     _refreshRoleFilters_();
     renderColabs();
     renderDashboard();
-    toast("Colaboradores", `✓ ${ids.length} colaborador${ids.length > 1 ? "es" : ""} eliminado${ids.length > 1 ? "s" : ""}`);
+    toast("Colaboradores", `${ids.length} colaborador${ids.length > 1 ? "es" : ""} eliminado${ids.length > 1 ? "s" : ""}`, "ok");
   } catch (e) {
+    recordSaveIssue_("colaboradores.delete", e, { count: ids.length });
     setErr(`Colaboradores: ${e.message || e}`);
   } finally {
     clearBusy();
+    buttonBusy_(btn, false);
+    OP_LOCKS.delete("colab-delete");
   }
 }
 
@@ -2862,7 +3001,7 @@ Se quitará de Operativa diaria y de Asignaciones. Esta acción no se puede desh
 
         try {
           // Guardar en GAS
-          await API.flujosUpsert(nombre, 0, "");
+          await retryTransient_(() => API.flujosUpsert(nombre, 0, ""));
 
           // Confirmar con datos reales — GAS ya tiene cache invalidado
           const [fl, hab] = await Promise.all([
@@ -2874,8 +3013,9 @@ Se quitará de Operativa diaria y de Asignaciones. Esta acción no se puede desh
 
           renderFlujos();
           renderHabil();
-          toast("Asignaciones", `✓ Flujo "${nombre}" creado. Habilitá colaboradores desde la tabla.`);
+          toast("Asignaciones", `Flujo "${nombre}" creado. Habilitá colaboradores desde la tabla.`, "ok");
         } catch (e) {
+          recordSaveIssue_("flujos.createFromHabil", e, { flujo: nombre });
           // Revertir optimistic si GAS falla
           S.flujos = (S.flujos || []).filter(f => String(f.flujo || f).trim() !== nombre);
           if (S.habil?.flujos) {
@@ -3129,23 +3269,36 @@ function _syncHabilBulkBar_() {
 
 async function setHabilitacion(idMeli, flujo, habilitado, fijo) {
   setErr("");
+  const lockKey = `habil-${idMeli}-${flujo}`;
+  if (OP_LOCKS.has(lockKey)) {
+    setErr("Todavía se está guardando el cambio anterior de esa habilitación.");
+    renderHabil();
+    return;
+  }
+  OP_LOCKS.add(lockKey);
+  const prevHabil = S.habil
+    ? { ...S.habil, rows: (S.habil.rows || []).map(r => ({ ...r })) }
+    : S.habil;
   // Optimistic update: modificar S.habil local sin recargar la lista completa
   if (S.habil?.rows) {
     const r = S.habil.rows.find(x => (x.id_meli || x.ID_MELI || x.Id_Meli) === idMeli);
     if (r) { r[`H_${flujo}`] = !!habilitado; r[`F_${flujo}`] = !!fijo; }
   }
   try {
-    await API.habilitacionesSet(idMeli, flujo, !!habilitado, !!fijo);
+    await retryTransient_(() => API.habilitacionesSet(idMeli, flujo, !!habilitado, !!fijo));
     CACHE.invalidate("habil");
-    toast("Asignaciones", "✓ Cambio guardado");
+    toast("Asignaciones", "Cambio guardado", "ok");
     // Actualizar chips de resumen sin re-render completo
     const chipsWrap = $("habilResumenChips");
     if (chipsWrap && S.habil?.flujos) renderHabil();
   } catch (e) {
+    recordSaveIssue_("habilitaciones.set", e, { idMeli, flujo });
     setErr(`Habilitaciones: ${e.message || e}`);
     // Revertir: recargar desde el servidor
-    S.habil = await API.habilitacionesList().catch(() => S.habil);
+    S.habil = await API.habilitacionesList().catch(() => prevHabil);
     renderHabil();
+  } finally {
+    OP_LOCKS.delete(lockKey);
   }
 }
 
@@ -3324,6 +3477,10 @@ function renderPresentismo() {
 
 async function onSetLicencia() {
   setErr("");
+  if (OP_LOCKS.has("presentismo-licencia")) return;
+  OP_LOCKS.add("presentismo-licencia");
+  const btn = $("btnSetLicencia");
+  buttonBusy_(btn, true, "Guardando...");
   try {
     setBusy("Presentismo", "Guardando licencia...");
     const idMeli = $("presSelectColab").value;
@@ -3334,15 +3491,18 @@ async function onSetLicencia() {
     if (!idMeli) throw new Error("Seleccioná un colaborador.");
     if (!desde) throw new Error("Seleccioná fecha Desde.");
 
-    await API.presentismoSetLicencia(idMeli, desde, hasta, tipo);
+    await retryTransient_(() => API.presentismoSetLicencia(idMeli, desde, hasta, tipo));
     await refreshPresentismo();
     renderPresentismo();
     renderDashboard();
-    toast("Presentismo", "Licencia guardada");
+    toast("Presentismo", "Licencia guardada", "ok");
   } catch (e) {
+    recordSaveIssue_("presentismo.setLicencia", e);
     setErr(`Presentismo: ${e.message || e}`);
   } finally {
     clearBusy();
+    buttonBusy_(btn, false);
+    OP_LOCKS.delete("presentismo-licencia");
   }
 }
 
@@ -4653,6 +4813,7 @@ function renderAgenda() {
 
   const saveRow_ = async (row, card) => {
     const payload = buildPayload_(card, row);
+    const prev = (S.agenda||[]).map(r => ({ ...r }));
     // Actualizar S.agenda inmediatamente
     const idx = (S.agenda||[]).findIndex(r => r.row === row);
     if (idx >= 0) Object.assign(S.agenda[idx], {
@@ -4660,18 +4821,23 @@ function renderAgenda() {
       tiempo: payload.tiempo, prioridad: payload.prioridad,
       descripcion: payload.descripcion, estado: payload.estado
     });
-    // Guardar en GAS en background — no bloquear la UI
-    API.agendaUpdate(payload).then(() => {
+    try {
+      await retryTransient_(() => API.agendaUpdate(payload));
       CACHE.invalidate("agenda");
       _updateAgendaBadge_();
       _updateKpiAgenda_();
-    }).catch(e => {
+    } catch (e) {
+      recordSaveIssue_("agenda.update", e, { row });
       setErr(`Agenda: ${e.message || e}`);
-      // Re-fetch para sincronizar si falló
-      API.agendaList().then(d => {
+      S.agenda = prev;
+      try {
+        const d = await API.agendaList();
         if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
-      }).catch(() => {});
-    });
+      } catch (err) {
+        recordSaveIssue_("agenda.refetchAfterUpdateFail", err, { row });
+      }
+      throw e;
+    }
   };
 
   // ── Pill de estado con dropdown (position:fixed) ────────
@@ -4699,26 +4865,31 @@ function renderAgenda() {
     document.addEventListener("click", () => { menu.style.display = "none"; });
 
     menu.querySelectorAll("[data-estado-opt]").forEach(opt => {
-      opt.addEventListener("click", () => {
+      opt.addEventListener("click", async () => {
         const nuevoEstado = opt.getAttribute("data-estado-opt");
         menu.style.display = "none";
-        // Patch optimista inmediato en S.agenda
-        const idx = (S.agenda || []).findIndex(r => r.row === rowId);
-        if (idx >= 0) S.agenda[idx].estado = nuevoEstado;
-        CACHE.invalidate("agenda");
-        // Renderizar inmediatamente — la tarjeta se mueve a historial si corresponde
-        renderAgenda();
-        // Guardar en GAS en background (sin bloquear UI)
-        const card2 = host.querySelector(`[data-agenda-row="${rowId}"]`);
-        if (card2) {
-          const payload = buildPayload_(card2, rowId);
-          payload.estado = nuevoEstado;
-          API.agendaUpdate(payload).catch(e => setErr(`Agenda: ${e.message || e}`));
-        } else {
-          // La tarjeta ya no está en pendientes (se movió a historial) — guardar igual
-          const item = (S.agenda || []).find(r => r.row === rowId);
-          if (item) API.agendaUpdate({ row: rowId, estado: nuevoEstado }).catch(e => setErr(`Agenda: ${e.message || e}`));
-        }
+        await withOpLock_(`agenda-status-${rowId}`, async () => {
+          const prev = (S.agenda || []).map(r => ({ ...r }));
+          const cardBeforeRender = host.querySelector(`[data-agenda-row="${rowId}"]`);
+          const payload = cardBeforeRender
+            ? { ...buildPayload_(cardBeforeRender, rowId), estado: nuevoEstado }
+            : { row: rowId, estado: nuevoEstado };
+
+          const idx = (S.agenda || []).findIndex(r => r.row === rowId);
+          if (idx >= 0) S.agenda[idx].estado = nuevoEstado;
+          CACHE.invalidate("agenda");
+          renderAgenda();
+
+          try {
+            await retryTransient_(() => API.agendaUpdate(payload));
+            toast("Agenda", "Estado guardado", "ok");
+          } catch (e) {
+            recordSaveIssue_("agenda.status", e, { row: rowId, estado: nuevoEstado });
+            S.agenda = prev;
+            renderAgenda();
+            setErr(`Agenda: ${e.message || e}`);
+          }
+        });
       });
     });
   });
@@ -4753,10 +4924,15 @@ function renderAgenda() {
           }
         }
       }
-      await saveRow_(rowId, card);
-      if (btn) { btn.disabled = false; btn.textContent = "Guardar"; }
-      // Re-renderizar para que la vista lectura muestre los datos actualizados
-      renderAgenda();
+      try {
+        await saveRow_(rowId, card);
+        toast("Agenda", "Tema guardado", "ok");
+        renderAgenda();
+      } catch (e) {
+        // saveRow_ ya muestra y registra el error; evitamos promesas sin manejar.
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "Guardar"; }
+      }
     });
 
     // Cancelar: volver a vista lectura sin guardar
@@ -4796,16 +4972,22 @@ function renderAgenda() {
     btn.addEventListener("click", async () => {
       const row = Number(btn.getAttribute("data-ag-del"));
       if (!await hubConfirm_("¿Eliminás este tema de la agenda? No se puede recuperar.", "Sí, eliminar")) return;
-      const idx = (S.agenda||[]).findIndex(r => r.row === row);
-      if (idx >= 0) S.agenda.splice(idx, 1);
-      CACHE.invalidate("agenda");
-      renderAgenda();
-      // Confirmar eliminación en GAS en background
-      API.agendaDelete(row).catch(e => {
-        setErr(`Agenda: ${e.message || e}`);
-        // Si falla, recargar desde GAS
-        API.agendaList().then(d => { if (d) { S.agenda = d; renderAgenda(); } }).catch(() => {});
-      });
+      await withOpLock_(`agenda-delete-${row}`, async () => {
+        const prev = (S.agenda || []).map(r => ({ ...r }));
+        const idx = (S.agenda||[]).findIndex(r => r.row === row);
+        if (idx >= 0) S.agenda.splice(idx, 1);
+        CACHE.invalidate("agenda");
+        renderAgenda();
+        try {
+          await retryTransient_(() => API.agendaDelete(row));
+          toast("Agenda", "Tema eliminado", "ok");
+        } catch (e) {
+          recordSaveIssue_("agenda.delete", e, { row });
+          S.agenda = prev;
+          renderAgenda();
+          setErr(`Agenda: ${e.message || e}`);
+        }
+      }, btn, "...");
     });
   });
 
@@ -4924,68 +5106,61 @@ async function onAgendaAgregar_(ownerParam) {
   CACHE.invalidate("agenda");
   renderAgenda();
 
-  // Limpiar y cerrar formulario inmediatamente — el optimistic ya mostró el item
-  if ($("agTema")) $("agTema").value = "";
-  if (_agDescEditor_) _agDescEditor_.clear();
-  const linkWrap = $("agLinksWrap");
-  if (linkWrap) linkWrap.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
-  const agFormBody = $("agFormBody");
-  const agFormBtn  = $("btnAgFormToggle");
-  if (agFormBody) agFormBody.style.display = "none";
-  if (agFormBtn)  agFormBtn.textContent = "+ Agregar tema";
-  if (btnAgregar) { btnAgregar.disabled = false; btnAgregar.textContent = "Agregar"; }
-  toast("Agenda", "✓ Tema agregado");
-  _agendaAddInProgress_ = false;
+  if (btnAgregar) { btnAgregar.disabled = true; btnAgregar.textContent = "Guardando..."; }
+  setBusy("Agenda", "Guardando tema...");
 
-  // Guardar en GAS en background
-  API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc })
-    .then(result => {
-      // Actualizar row real si GAS lo devuelve
-      if (result?.row) {
-        const idx = (S.agenda || []).findIndex(x => x.row === tempRow);
-        if (idx >= 0) S.agenda[idx].row = result.row;
-      }
-      CACHE.invalidate("agenda");
-      // Re-fetch silencioso para sincronizar
-      API.agendaList().then(d => {
-        if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
-      }).catch(() => {});
-    })
-    .catch(e => {
-      const msg = String(e?.message || e);
-      if (msg.includes("Non-JSON") || msg.includes("lock") || msg.includes("timeout")) {
-        // GAS probablemente escribió igual — re-fetch demorado para confirmar
-        setTimeout(() => {
-          API.agendaList().then(d => {
-            if (d) { S.agenda = d; CACHE.set("agenda", d, 5 * 60_000); renderAgenda(); }
-          }).catch(() => {});
-        }, 3000);
-      } else {
-        // Error real — revertir optimistic
-        S.agenda = (S.agenda || []).filter(r => r.row !== tempRow);
-        CACHE.invalidate("agenda");
-        renderAgenda();
-        setErr("No se pudo guardar el tema. Intentá de nuevo.");
-      }
+  try {
+    const result = await retryTransient_(() => API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc }));
+    if (result?.row) {
+      const idx = (S.agenda || []).findIndex(x => x.row === tempRow);
+      if (idx >= 0) S.agenda[idx].row = result.row;
+    }
+    CACHE.invalidate("agenda");
+    const fresh = await API.agendaList().catch((err) => {
+      recordSaveIssue_("agenda.listAfterAdd", err, { tempRow });
+      return null;
     });
+    if (fresh) { S.agenda = fresh; CACHE.set("agenda", fresh, 5 * 60_000); renderAgenda(); }
+
+    if ($("agTema")) $("agTema").value = "";
+    if (_agDescEditor_) _agDescEditor_.clear();
+    const linkWrap = $("agLinksWrap");
+    if (linkWrap) linkWrap.querySelectorAll("[data-link-pill]").forEach(el => el.remove());
+    const agFormBody = $("agFormBody");
+    const agFormBtn  = $("btnAgFormToggle");
+    if (agFormBody) agFormBody.style.display = "none";
+    if (agFormBtn)  agFormBtn.textContent = "+ Agregar tema";
+    toast("Agenda", "Tema agregado", "ok");
+  } catch (e) {
+    recordSaveIssue_("agenda.add", e, { tempRow, tema });
+    S.agenda = (S.agenda || []).filter(r => r.row !== tempRow);
+    CACHE.invalidate("agenda");
+    renderAgenda();
+    setErr("No se pudo guardar el tema. Intentá de nuevo.");
+  } finally {
+    if (btnAgregar) { btnAgregar.disabled = false; btnAgregar.textContent = "Agregar"; }
+    _agendaAddInProgress_ = false;
+    clearBusy();
+  }
 }
 
 async function onAgendaSetHecho_(row, btn) {
-  // Optimistic update
-  const idx = (S.agenda || []).findIndex(r => r.row === row);
-  if (idx >= 0) S.agenda[idx].estado = "Hecho";
-  renderAgenda();
-  try {
-    await API.agendaSetHecho(row);
-    CACHE.invalidate("agenda");
-    // Sin re-fetch — patch optimista ya aplicado
-    toast("Agenda", "✓ Marcado como hecho");
-  } catch (e) {
-    // Revertir si falla
-    if (idx >= 0) S.agenda[idx].estado = "Pendiente";
+  await withOpLock_(`agenda-hecho-${row}`, async () => {
+    const idx = (S.agenda || []).findIndex(r => r.row === row);
+    const prevEstado = idx >= 0 ? S.agenda[idx].estado : "";
+    if (idx >= 0) S.agenda[idx].estado = "Hecho";
     renderAgenda();
-    setErr(`Agenda: ${e.message || e}`);
-  }
+    try {
+      await retryTransient_(() => API.agendaSetHecho(row));
+      CACHE.invalidate("agenda");
+      toast("Agenda", "Marcado como hecho", "ok");
+    } catch (e) {
+      recordSaveIssue_("agenda.setHecho", e, { row });
+      if (idx >= 0) S.agenda[idx].estado = prevEstado || "Para hacer";
+      renderAgenda();
+      setErr(`Agenda: ${e.message || e}`);
+    }
+  }, btn, "...");
 }
 
 function buildMensajeAgenda_() {
@@ -5031,49 +5206,49 @@ async function onAgendaCopiar_() {
 
 async function onGenerarPlanificacionYOutbox_() {
   setErr("");
-  try {
-    setBusy("Operativa diaria", "Generando planificación...");
-    $("dailyStatus").textContent = "Generando...";
-    await API.planificacionGenerar();
-    // Solo mensaje GENERAL (los POR_FLUJO se generan desde cada flujo)
-    await API.slackOutboxGenerarGeneral();
-    await refreshPlanAndOutbox();
-    await refreshPresentismo();
-    renderPlan();
-    renderOutbox();
-    renderDashboard();
+  await withOpLock_("daily-generate-plan", async () => {
+    try {
+      setBusy("Operativa diaria", "Generando planificación...");
+      $("dailyStatus").textContent = "Generando planificación...";
+      await retryTransient_(() => API.planificacionGenerar(), { retries: 1, delayMs: 1200 });
 
-    // Detectar colaboradores duplicados y mostrar alerta
-    const planRows = (S.plan || []).filter(r => r?.id_meli && r.id_meli !== "SIN PERFILES DISPONIBLES");
-    const idCount = new Map();
-    planRows.forEach(r => idCount.set(r.id_meli, (idCount.get(r.id_meli) || 0) + 1));
-    const dups = [...idCount.entries()].filter(([, c]) => c > 1);
-    if (dups.length > 0) {
-      const dupNames = dups.map(([id]) => {
-        const colab = (S.colabs || []).map(c => { const v = colabRowView(c); return v; }).find(v => v.id === id);
-        return colab?.nombre || id;
-      });
-      const flujosPorId = {};
-      planRows.forEach(r => {
-        if (!flujosPorId[r.id_meli]) flujosPorId[r.id_meli] = [];
-        if (!flujosPorId[r.id_meli].includes(r.flujo)) flujosPorId[r.id_meli].push(r.flujo);
-      });
-      const dupDetail = dups.map(([id]) => {
-        const colab = (S.colabs || []).map(c => colabRowView(c)).find(v => v.id === id);
-        const name = colab?.nombre || id;
-        const flujos = (flujosPorId[id] || []).join(" y ");
-        return `${name} (${flujos})`;
-      }).join(", ");
-      setErr(`⚠️ ${dups.length} colaborador${dups.length > 1 ? "es aparecen" : " aparece"} en más de un flujo: ${dupDetail}`);
-    } else {
-      toast("Planificación del día", "✓ Planificación y mensajes generados");
+      $("dailyStatus").textContent = "Generando mensajes...";
+      await retryTransient_(() => API.slackOutboxGenerarGeneral(), { retries: 1, delayMs: 1200 });
+
+      $("dailyStatus").textContent = "Actualizando datos...";
+      await Promise.all([refreshPlanAndOutbox(), refreshPresentismo()]);
+      renderPlan();
+      renderOutbox();
+      renderDashboard();
+
+      const planRows = (S.plan || []).filter(r => r?.id_meli && r.id_meli !== "SIN PERFILES DISPONIBLES");
+      const idCount = new Map();
+      planRows.forEach(r => idCount.set(r.id_meli, (idCount.get(r.id_meli) || 0) + 1));
+      const dups = [...idCount.entries()].filter(([, c]) => c > 1);
+      if (dups.length > 0) {
+        const flujosPorId = {};
+        planRows.forEach(r => {
+          if (!flujosPorId[r.id_meli]) flujosPorId[r.id_meli] = [];
+          if (!flujosPorId[r.id_meli].includes(r.flujo)) flujosPorId[r.id_meli].push(r.flujo);
+        });
+        const dupDetail = dups.map(([id]) => {
+          const colab = (S.colabs || []).map(c => colabRowView(c)).find(v => v.id === id);
+          const name = colab?.nombre || id;
+          const flujos = (flujosPorId[id] || []).join(" y ");
+          return `${name} (${flujos})`;
+        }).join(", ");
+        setErr(`⚠️ ${dups.length} colaborador${dups.length > 1 ? "es aparecen" : " aparece"} en más de un flujo: ${dupDetail}`);
+      } else {
+        toast("Planificación del día", "Planificación y mensajes generados", "ok");
+      }
+    } catch (e) {
+      recordSaveIssue_("daily.generate", e);
+      setErr("No se pudo generar la planificación. Intentá de nuevo.");
+    } finally {
+      ($("dailyStatus") && ($("dailyStatus").textContent = "Listo"));
+      clearBusy();
     }
-  } catch (e) {
-    setErr("No se pudo generar la planificación. Intentá de nuevo.");
-  } finally {
-    ($("dailyStatus") && ($("dailyStatus").textContent = "Listo"));
-    clearBusy();
-  }
+  }, $("btnGenerarPlan"), "Generando...");
 }
 
 /* ========= Empty state helper ========= */
@@ -5344,6 +5519,9 @@ async function main() {
 
     setBusy("Habilitaciones", `Aplicando a ${sel.length} colaboradores...`);
     setErr("");
+    const prevHabil = S.habil
+      ? { ...S.habil, rows: (S.habil.rows || []).map(r => ({ ...r })) }
+      : S.habil;
 
     try {
       // Optimistic update local
@@ -5362,23 +5540,27 @@ async function main() {
       }
       renderHabil();
 
-      // Llamadas al backend en paralelo
-      const calls = [];
+      const items = [];
       for (const idMeli of sel) {
         const r = (S.habil?.rows || []).find(x => (x.id_meli || x.ID_MELI || x.Id_Meli) === idMeli);
         if (!r) continue;
         for (const f of flujosSel) {
           const hVal = !!r[`H_${f}`];
           const fVal = !!r[`F_${f}`];
-          calls.push(API.habilitacionesSet(idMeli, f, hVal, fVal));
+          items.push({ idMeli, flujo: f, habilitado: hVal, fijo: fVal });
         }
       }
-      await Promise.all(calls);
+      if (API.habilitacionesSetMany) {
+        await retryTransient_(() => API.habilitacionesSetMany(items), { retries: 1, delayMs: 1200 });
+      } else {
+        await Promise.all(items.map(x => retryTransient_(() => API.habilitacionesSet(x.idMeli, x.flujo, x.habilitado, x.fijo))));
+      }
       CACHE.invalidate("habil");
-      toast("Asignaciones", `✓ Cambios aplicados a ${sel.length} colaborador${sel.length !== 1 ? "es" : ""} en ${flujosSel.length} flujo${flujosSel.length !== 1 ? "s" : ""}`);
+      toast("Asignaciones", `Cambios aplicados a ${sel.length} colaborador${sel.length !== 1 ? "es" : ""} en ${flujosSel.length} flujo${flujosSel.length !== 1 ? "s" : ""}`, "ok");
     } catch (e) {
+      recordSaveIssue_("habilitaciones.bulk", e, { colaboradores: sel.length, flujos: flujosSel.length });
       setErr(`Habilitaciones: ${e.message || e}`);
-      S.habil = await API.habilitacionesList().catch(() => S.habil);
+      S.habil = await API.habilitacionesList().catch(() => prevHabil);
       renderHabil();
     } finally {
       clearBusy();
@@ -5648,10 +5830,17 @@ function renderLinksDrawer_() {
       document.body.appendChild(inp);
       inp.addEventListener("change", async () => {
         const newColor = inp.value;
+        const prevColor = S_linksCats[cat];
         S_linksCats[cat] = newColor;
         renderLinksDrawer_();
-        try { await API.linksCategoriasUpsert({ categoria: cat, color: newColor }); }
-        catch (e) { /* silent */ }
+        try {
+          await retryTransient_(() => API.linksCategoriasUpsert({ categoria: cat, color: newColor }));
+        } catch (e) {
+          recordSaveIssue_("links.categorias.upsert", e, { categoria: cat });
+          S_linksCats[cat] = prevColor;
+          renderLinksDrawer_();
+          toast("Links útiles", "No se pudo guardar el color.");
+        }
         inp.remove();
       });
       inp.addEventListener("blur", () => setTimeout(() => inp.remove(), 300));
@@ -5684,13 +5873,21 @@ function renderLinksDrawer_() {
       if (!_linksDragSrc || _linksDragSrc === pill) return;
       const wrap = pill.closest(".links-pills-wrap");
       if (!wrap) return;
+      const prev = S_links.map(l => ({ ...l }));
       const pills = [...wrap.querySelectorAll(".link-pill")];
       const items = pills.map((p, i) => ({ row: Number(p.dataset.row), orden: i }));
       items.forEach(({ row, orden }) => {
         const link = S_links.find(l => l._row === row);
         if (link) link.orden = orden;
       });
-      try { await API.linksReorder(items); } catch (_) { /* silent */ }
+      try {
+        await retryTransient_(() => API.linksReorder(items));
+      } catch (e) {
+        recordSaveIssue_("links.reorder", e, { items: items.length });
+        S_links = prev;
+        renderLinksDrawer_();
+        toast("Links útiles", "No se pudo guardar el orden.");
+      }
     });
   });
 
@@ -5705,8 +5902,15 @@ function renderLinksDrawer_() {
       const prev = [...S_links];
       S_links = S_links.filter(l => l._row !== row);
       renderLinksDrawer_();
-      try { await API.linksDelete(row); }
-      catch (_) { S_links = prev; renderLinksDrawer_(); toast("Links útiles", "No se pudo eliminar."); }
+      try {
+        await retryTransient_(() => API.linksDelete(row));
+        toast("Links útiles", "Link eliminado", "ok");
+      } catch (e) {
+        recordSaveIssue_("links.delete", e, { row });
+        S_links = prev;
+        renderLinksDrawer_();
+        toast("Links útiles", "No se pudo eliminar.");
+      }
     });
   });
 
@@ -5819,35 +6023,53 @@ function wireLinksDrawer_() {
 
     const btn = $("linksAddBtn");
     const editRow = btn?._editRow;
+    const lockKey = editRow ? `links-save-${editRow}` : "links-add";
+    if (OP_LOCKS.has(lockKey)) return;
+    OP_LOCKS.add(lockKey);
+    if (btn) { btn.disabled = true; btn.textContent = "Guardando..."; }
 
-    if (editRow) {
-      // Modo editar
-      const prev = S_links.map(l => ({...l}));
-      const link = S_links.find(l => l._row === editRow);
-      if (link) { link.titulo = titulo; link.url = url; link.categoria = cat; }
-      renderLinksDrawer_();
-      _linksResetForm_();
-      try { await API.linksUpdate({ row: editRow, titulo, url, categoria: cat }); }
-      catch (_) { S_links = prev; renderLinksDrawer_(); toast("Links útiles", "No se pudo guardar."); }
-    } else {
-      // Modo agregar
-      const tempRow = -Date.now();
-      S_links = [...S_links, { titulo, url, categoria: cat, orden: S_links.length, _row: tempRow }];
-      renderLinksDrawer_();
-      _linksResetForm_();
-      try {
-        const result = await API.linksAdd({ titulo, url, categoria: cat });
-        // Actualizar el row temporal con el real devuelto por GAS
-        if (result?.row) {
-          const idx = S_links.findIndex(l => l._row === tempRow);
-          if (idx >= 0) S_links[idx]._row = result.row;
+    try {
+      if (editRow) {
+        const prev = S_links.map(l => ({...l}));
+        const link = S_links.find(l => l._row === editRow);
+        if (link) { link.titulo = titulo; link.url = url; link.categoria = cat; }
+        renderLinksDrawer_();
+        _linksResetForm_();
+        try {
+          await retryTransient_(() => API.linksUpdate({ row: editRow, titulo, url, categoria: cat }));
+          toast("Links útiles", "Link guardado", "ok");
+        } catch (e) {
+          recordSaveIssue_("links.update", e, { row: editRow });
+          S_links = prev;
+          renderLinksDrawer_();
+          toast("Links útiles", "No se pudo guardar.");
         }
+      } else {
+        const tempRow = -Date.now();
+        S_links = [...S_links, { titulo, url, categoria: cat, orden: S_links.length, _row: tempRow }];
         renderLinksDrawer_();
-        toast("Links útiles", "✓ Link agregado");
-      } catch (_) {
-        S_links = S_links.filter(l => l._row !== tempRow);
-        renderLinksDrawer_();
-        toast("Links útiles", "No se pudo agregar.");
+        _linksResetForm_();
+        try {
+          const result = await retryTransient_(() => API.linksAdd({ titulo, url, categoria: cat }));
+          if (result?.row) {
+            const idx = S_links.findIndex(l => l._row === tempRow);
+            if (idx >= 0) S_links[idx]._row = result.row;
+          }
+          renderLinksDrawer_();
+          toast("Links útiles", "Link agregado", "ok");
+        } catch (e) {
+          recordSaveIssue_("links.add", e, { titulo });
+          S_links = S_links.filter(l => l._row !== tempRow);
+          renderLinksDrawer_();
+          toast("Links útiles", "No se pudo agregar.");
+        }
+      }
+    } finally {
+      OP_LOCKS.delete(lockKey);
+      const freshBtn = $("linksAddBtn");
+      if (freshBtn) {
+        freshBtn.disabled = false;
+        freshBtn.textContent = freshBtn._editRow ? "Guardar cambios" : "+ Agregar";
       }
     }
   });
@@ -5970,11 +6192,20 @@ function renderAsignacion_() {
       if (!item) return;
       const ok = await hubConfirm_(`¿Eliminar la tarea "${item.tarea}"? Esta acción no se puede deshacer.`, "Eliminar", "Cancelar");
       if (!ok) return;
-      const prev = [...S_asignacion];
-      S_asignacion = S_asignacion.filter(r => r._row !== row);
-      renderAsignacion_();
-      try { await API.asignacionDelete(row); }
-      catch (e) { S_asignacion = prev; renderAsignacion_(); toast("Asignación", "No se pudo eliminar."); }
+      await withOpLock_(`asignacion-delete-${row}`, async () => {
+        const prev = [...S_asignacion];
+        S_asignacion = S_asignacion.filter(r => r._row !== row);
+        renderAsignacion_();
+        try {
+          await retryTransient_(() => API.asignacionDelete(row));
+          toast("Asignación", "Tarea eliminada", "ok");
+        } catch (e) {
+          recordSaveIssue_("asignacion.delete", e, { row });
+          S_asignacion = prev;
+          renderAsignacion_();
+          toast("Asignación", "No se pudo eliminar.");
+        }
+      }, btn, "...");
     });
   });
 }
@@ -5985,9 +6216,16 @@ async function _saveAsignacionCell_(cell) {
   const val   = cell.innerText.trim();
   const item  = S_asignacion.find(r => r._row === row);
   if (!item || item[field] === val) return;
+  const prev = item[field] || "";
   item[field] = val;
-  try { await API.asignacionUpsert({ ...item, row }); }
-  catch (e) { toast("Asignación", "No se pudo guardar."); }
+  try {
+    await retryTransient_(() => API.asignacionUpsert({ ...item, row }));
+  } catch (e) {
+    recordSaveIssue_("asignacion.inline", e, { row, field });
+    item[field] = prev;
+    cell.innerText = prev;
+    toast("Asignación", "No se pudo guardar.");
+  }
 }
 
 let _asigModalRow_ = null; // null = agregar, number = editar
@@ -6024,17 +6262,26 @@ async function saveAsignacionModal_() {
     backup:     $("amBackup")?.value?.trim()  || "",
   };
 
-  if (_asigModalRow_) {
+  const btn = $("asignacionModalSave");
+  const editRow = _asigModalRow_;
+  const lockKey = editRow ? `asignacion-save-${editRow}` : "asignacion-add";
+  if (OP_LOCKS.has(lockKey)) return;
+  OP_LOCKS.add(lockKey);
+  buttonBusy_(btn, true, "Guardando...");
+
+  try {
+  if (editRow) {
     // Editar
     const prev = [...S_asignacion];
-    const idx = S_asignacion.findIndex(r => r._row === _asigModalRow_);
+    const idx = S_asignacion.findIndex(r => r._row === editRow);
     if (idx >= 0) S_asignacion[idx] = { ...S_asignacion[idx], ...payload };
     renderAsignacion_();
     closeAsignacionModal_();
     try {
-      await API.asignacionUpsert({ ...payload, row: _asigModalRow_ });
-      toast("Asignación", "✓ Tarea actualizada");
+      await retryTransient_(() => API.asignacionUpsert({ ...payload, row: editRow }));
+      toast("Asignación", "Tarea actualizada", "ok");
     } catch (e) {
+      recordSaveIssue_("asignacion.update", e, { row: editRow });
       S_asignacion = prev; renderAsignacion_();
       toast("Asignación", "No se pudo guardar.");
     }
@@ -6045,14 +6292,19 @@ async function saveAsignacionModal_() {
     renderAsignacion_();
     closeAsignacionModal_();
     try {
-      await API.asignacionUpsert(payload);
+      await retryTransient_(() => API.asignacionUpsert(payload));
       await refreshEquipo_();
-      toast("Asignación", "✓ Tarea agregada");
+      toast("Asignación", "Tarea agregada", "ok");
     } catch (e) {
+      recordSaveIssue_("asignacion.add", e, { tarea });
       S_asignacion = S_asignacion.filter(r => r._row !== tempRow);
       renderAsignacion_();
       toast("Asignación", "No se pudo agregar.");
     }
+  }
+  } finally {
+    buttonBusy_(btn, false);
+    OP_LOCKS.delete(lockKey);
   }
 }
 
@@ -6129,11 +6381,20 @@ function renderCanales_() {
       if (!item) return;
       const ok = await hubConfirm_(`¿Eliminar el canal "#${item.canal}"? Esta acción no se puede deshacer.`, "Eliminar", "Cancelar");
       if (!ok) return;
-      const prev = [...S_canales];
-      S_canales = S_canales.filter(c => c._row !== row);
-      renderCanales_();
-      try { await API.gestionCanalesDelete(row); }
-      catch (e) { S_canales = prev; renderCanales_(); toast("Canales", "No se pudo eliminar."); }
+      await withOpLock_(`canales-delete-${row}`, async () => {
+        const prev = [...S_canales];
+        S_canales = S_canales.filter(c => c._row !== row);
+        renderCanales_();
+        try {
+          await retryTransient_(() => API.gestionCanalesDelete(row));
+          toast("Canales", "Canal eliminado", "ok");
+        } catch (e) {
+          recordSaveIssue_("canales.delete", e, { row });
+          S_canales = prev;
+          renderCanales_();
+          toast("Canales", "No se pudo eliminar.");
+        }
+      }, btn, "...");
     });
   });
 }
@@ -6144,9 +6405,16 @@ async function _saveCanalCell_(cell) {
   const val   = cell.innerText.trim();
   const item  = S_canales.find(c => c._row === row);
   if (!item || item[field] === val) return;
+  const prev = item[field] || "";
   item[field] = val;
-  try { await API.gestionCanalesUpsert({ ...item, row }); }
-  catch (e) { toast("Canales", "No se pudo guardar."); }
+  try {
+    await retryTransient_(() => API.gestionCanalesUpsert({ ...item, row }));
+  } catch (e) {
+    recordSaveIssue_("canales.inline", e, { row, field });
+    item[field] = prev;
+    cell.innerText = prev;
+    toast("Canales", "No se pudo guardar.");
+  }
 }
 
 let _canalModalRow_ = null;
@@ -6190,16 +6458,25 @@ async function saveCanalesModal_() {
     grupo:    $("cmGrupo")?.value?.trim()   || "",
   };
 
-  if (_canalModalRow_) {
+  const btn = $("canalesModalSave");
+  const editRow = _canalModalRow_;
+  const lockKey = editRow ? `canales-save-${editRow}` : "canales-add";
+  if (OP_LOCKS.has(lockKey)) return;
+  OP_LOCKS.add(lockKey);
+  buttonBusy_(btn, true, "Guardando...");
+
+  try {
+  if (editRow) {
     const prev = [...S_canales];
-    const idx = S_canales.findIndex(c => c._row === _canalModalRow_);
+    const idx = S_canales.findIndex(c => c._row === editRow);
     if (idx >= 0) S_canales[idx] = { ...S_canales[idx], ...payload };
     renderCanales_();
     closeCanalesModal_();
     try {
-      await API.gestionCanalesUpsert({ ...payload, row: _canalModalRow_ });
-      toast("Canales", "✓ Canal actualizado");
+      await retryTransient_(() => API.gestionCanalesUpsert({ ...payload, row: editRow }));
+      toast("Canales", "Canal actualizado", "ok");
     } catch (e) {
+      recordSaveIssue_("canales.update", e, { row: editRow });
       S_canales = prev; renderCanales_();
       toast("Canales", "No se pudo guardar.");
     }
@@ -6209,14 +6486,19 @@ async function saveCanalesModal_() {
     renderCanales_();
     closeCanalesModal_();
     try {
-      await API.gestionCanalesUpsert(payload);
+      await retryTransient_(() => API.gestionCanalesUpsert(payload));
       await refreshEquipo_();
-      toast("Canales", "✓ Canal agregado");
+      toast("Canales", "Canal agregado", "ok");
     } catch (e) {
+      recordSaveIssue_("canales.add", e, { canal });
       S_canales = S_canales.filter(c => c._row !== tempRow);
       renderCanales_();
       toast("Canales", "No se pudo agregar.");
     }
+  }
+  } finally {
+    buttonBusy_(btn, false);
+    OP_LOCKS.delete(lockKey);
   }
 }
 
@@ -6369,6 +6651,10 @@ async function saveFlujoConfigModal_() {
   const btn = $("flujoConfigModalSave");
   if (btn) { btn.disabled = true; btn.textContent = _flujoConfigMode === "create" ? "Creando..." : "Guardando..."; }
   setErr("");
+  const prevFlujos = (S.flujos || []).map(f => typeof f === "object" ? { ...f } : f);
+  const prevHabil = S.habil
+    ? { ...S.habil, rows: (S.habil.rows || []).map(r => ({ ...r })), flujos: [...(S.habil.flujos || [])] }
+    : S.habil;
 
   try {
     if (_flujoConfigMode === "create") {
@@ -6385,32 +6671,29 @@ async function saveFlujoConfigModal_() {
       CACHE.invalidate("flujos");
       CACHE.invalidate("habil");
       renderFlujos();
-      closeFlujoConfigModal_();
-      toast("Operativa diaria", `✓ Flujo "${flujo}" creado`);
-      await API.flujosUpsert(flujo, 0, selectedChannelId);
+      await retryTransient_(() => API.flujosUpsert(flujo, 0, selectedChannelId));
       // Si tiene config extra (rotación, fijos), actualizar también
       if (rotMode !== "Off" || selectedChannelId || payload.allowFixed) {
-        await API.flujosUpdate(payload).catch(() => {});
+        await retryTransient_(() => API.flujosUpdate(payload));
       }
     } else {
-      await API.flujosUpdate(payload);
-      closeFlujoConfigModal_();
-      toast("Operativa diaria", `✓ Configuración de "${flujo}" guardada`);
+      await retryTransient_(() => API.flujosUpdate(payload));
     }
     // Refrescar con datos reales
     const [fl, hab] = await Promise.all([
-      API.flujosList().catch(() => null),
-      API.habilitacionesList().catch(() => null),
+      API.flujosList().catch((err) => { recordSaveIssue_("flujos.refreshAfterSave", err, { flujo }); return null; }),
+      API.habilitacionesList().catch((err) => { recordSaveIssue_("habil.refreshAfterFlujoSave", err, { flujo }); return null; }),
     ]);
     if (fl)  { S.flujos = fl;  CACHE.set("flujos", fl,  2  * 60_000); }
     if (hab) { S.habil  = hab; CACHE.set("habil",  hab, 10 * 60_000); }
     renderFlujos();
+    closeFlujoConfigModal_();
+    toast("Operativa diaria", _flujoConfigMode === "create" ? `Flujo "${flujo}" creado` : `Configuración de "${flujo}" guardada`, "ok");
   } catch (e) {
-    if (_flujoConfigMode === "create") {
-      // Revert optimistic
-      S.flujos = (S.flujos || []).filter(f => String(f.flujo || f).trim() !== flujo);
-      renderFlujos();
-    }
+    recordSaveIssue_("flujos.saveConfig", e, { flujo, mode: _flujoConfigMode });
+    S.flujos = prevFlujos;
+    S.habil = prevHabil;
+    renderFlujos();
     setErr(`No se pudo guardar: ${e.message || e}`);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = _flujoConfigMode === "create" ? "Crear flujo" : "Guardar configuración"; }
@@ -6550,18 +6833,22 @@ async function saveTemplatesModal_() {
   if (hasError) { setErr("Cada template necesita un nombre (key)."); return; }
 
   const btn = $("templatesModalSave");
+  if (OP_LOCKS.has("templates-save")) return;
+  OP_LOCKS.add("templates-save");
   if (btn) { btn.disabled = true; btn.textContent = "Guardando..."; }
   setErr("");
   try {
-    await API.templatesSave(items);
+    await retryTransient_(() => API.templatesSave(items));
     _templatesCache = null; // invalidar cache
     _templatesCacheTs = 0;
     closeTemplatesModal_();
-    toast("Mensajes de Slack", `✓ ${items.length} template${items.length !== 1 ? "s" : ""} guardado${items.length !== 1 ? "s" : ""}`);
+    toast("Mensajes de Slack", `${items.length} template${items.length !== 1 ? "s" : ""} guardado${items.length !== 1 ? "s" : ""}`, "ok");
   } catch (e) {
+    recordSaveIssue_("templates.save", e, { count: items.length });
     setErr(`No se pudieron guardar los templates: ${e.message || e}`);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "Guardar templates"; }
+    OP_LOCKS.delete("templates-save");
   }
 }
 

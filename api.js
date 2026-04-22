@@ -11,13 +11,14 @@ async function safeJson(resp) {
   }
 }
 
-function perfLog_(kind, action, ms, bytes) {
+function perfLog_(kind, action, ms, bytes, ok = true, detail = "") {
   try {
-    const entry = { ts: Date.now(), kind, action, ms, bytes };
+    const entry = { ts: Date.now(), kind, action, ms, bytes, ok: !!ok, detail: String(detail || "").slice(0, 240) };
     window.__hubPerf = window.__hubPerf || [];
+    if (window.__hubPerf.length >= 100) window.__hubPerf.shift();
     window.__hubPerf.push(entry);
     // Solo consola (no UI)
-    console.debug(`[perf] ${kind} ${action} ${ms.toFixed(0)}ms ${bytes}b`);
+    console.debug(`[perf] ${kind} ${action} ${ms.toFixed(0)}ms ${bytes}b ${ok ? "ok" : "err"}${detail ? " - " + detail : ""}`);
   } catch {}
 }
 
@@ -29,7 +30,8 @@ async function get(action, params = {}) {
     headers: { Accept: "application/json" },
   });
   const { json: data, textLen } = await safeJson(resp);
-  perfLog_("GET", action, performance.now() - t0, textLen);
+  const ok = resp.ok && data?.ok !== false;
+  perfLog_("GET", action, performance.now() - t0, textLen, ok, ok ? "" : (data?.error || `HTTP ${resp.status}`));
   if (!resp.ok || data?.ok === false) throw new Error(data?.error || `GET ${action} failed (${resp.status})`);
   return data.data;
 }
@@ -42,7 +44,8 @@ async function post(action, payload = {}) {
     body: JSON.stringify({ action, ...payload }),
   });
   const { json: data, textLen } = await safeJson(resp);
-  perfLog_("POST", action, performance.now() - t0, textLen);
+  const ok = resp.ok && data?.ok !== false;
+  perfLog_("POST", action, performance.now() - t0, textLen, ok, ok ? "" : (data?.error || `HTTP ${resp.status}`));
   if (!resp.ok || data?.ok === false) throw new Error(data?.error || `POST ${action} failed (${resp.status})`);
   return data.data;
 }
@@ -73,6 +76,8 @@ export const API = {
   colaboradoresDelete: (ids)  => post("colaboradores.delete", { ids }),
   canalesList: () => get("canales.list"),
 
+  batch: (items) => post("hub.batch", { items }),
+
   flujosList: () => get("flujos.list"),
   flujosUpdate: (data) => post("flujos.update", data),
   flujosUpsert: (flujo, perfiles_requeridos, channel_id = "") =>
@@ -82,6 +87,16 @@ export const API = {
   habilitacionesList: () => get("habilitaciones.list"),
   habilitacionesSet: (idMeli, flujo, habilitado, fijo) =>
     post("habilitaciones.set", { idMeli, flujo, habilitado, fijo }),
+  habilitacionesSetMany: (items) =>
+    post("hub.batch", {
+      items: (items || []).map(({ idMeli, flujo, habilitado, fijo }) => ({
+        action: "habilitaciones.set",
+        idMeli,
+        flujo,
+        habilitado: !!habilitado,
+        fijo: !!fijo,
+      })),
+    }),
 
   planificacionGenerar: () => post("planificacion.generar", {}),
   planificacionList: () => get("planificacion.list"),
