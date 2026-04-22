@@ -5110,7 +5110,7 @@ async function onAgendaAgregar_(ownerParam) {
   setBusy("Agenda", "Guardando tema...");
 
   try {
-    const result = await retryTransient_(() => API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc }));
+    const result = await API.agendaAdd({ fecha: fechaGAS, owner, tema, tiempo, prioridad, descripcion: desc });
     if (result?.row) {
       const idx = (S.agenda || []).findIndex(x => x.row === tempRow);
       if (idx >= 0) S.agenda[idx].row = result.row;

@@ -278,7 +278,27 @@ if (method === "GET") {
       });
 
       const text = await resp.text();
-      return { statusCode: resp.status, headers: cors(), body: text };
+      let parsed;
+      try { parsed = JSON.parse(text); } catch { parsed = null; }
+      if (!parsed) {
+        const contentType = resp.headers.get("content-type") || "";
+        const bodyPreview = String(text || "").slice(0, 500);
+        console.error("Upstream GAS returned non-JSON response", {
+          action,
+          status: resp.status,
+          contentType,
+          bodyPreview,
+        });
+        return json(200, {
+          ok: false,
+          error: "Upstream GAS returned non-JSON response",
+          action,
+          http_status: resp.status,
+          content_type: contentType,
+          body_preview: bodyPreview,
+        });
+      }
+      return { statusCode: resp.status, headers: { ...cors(), "Content-Type": "application/json" }, body: text };
     }
 
     return json(405, { ok: false, error: "Method not allowed" });
