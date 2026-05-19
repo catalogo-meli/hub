@@ -2246,6 +2246,12 @@ function peopleforceHealth_() {
   return { enabled, cache_ts: ts, cache_ttl_min: ttlMin };
 }
 
+function peopleforceIsActiveLeaveStatus_(status) {
+  const s = String(status || '').trim().toLowerCase();
+  if (!s) return false;
+  return ['approved', 'pending'].indexOf(s) !== -1;
+}
+
 function peopleforceSync_() {
   if (!peopleforceEnabled_()) {
     return { ok: true, enabled: false, msg: 'PeopleForce desactivado (PEOPLEFORCE_ENABLED=0).' };
@@ -2312,6 +2318,8 @@ function peopleforceSync_() {
   //   byId: { "<ID_MELI>": { "YYYY-MM-DD": { tipo, estado, source:'PF', req_id } } }
   // }
   const byId = {};
+  const inactiveById = {};
+  let skippedInactiveStatus = 0;
 
   out.forEach(lr => {
     // Extraccion flexible de email/employee
@@ -2337,9 +2345,12 @@ function peopleforceSync_() {
       days.push(key);
     }
 
-    if (!byId[idMeli]) byId[idMeli] = {};
+    const target = peopleforceIsActiveLeaveStatus_(status) ? byId : inactiveById;
+    if (!peopleforceIsActiveLeaveStatus_(status)) skippedInactiveStatus++;
+
+    if (!target[idMeli]) target[idMeli] = {};
     days.forEach(key => {
-      byId[idMeli][key] = {
+      target[idMeli][key] = {
         tipo: String(leaveType),
         estado: status,
         source: 'PF',
@@ -2350,13 +2361,21 @@ function peopleforceSync_() {
 
   const payload = {
     byId,
+    inactiveById,
     updated_at: new Date().toISOString(),
   };
 
   p.setProperty('PEOPLEFORCE_CACHE', JSON.stringify(payload));
   p.setProperty('PEOPLEFORCE_CACHE_TS', payload.updated_at);
 
-  return { ok: true, enabled: true, total_requests: out.length, total_ids: Object.keys(byId).length, cache_ts: payload.updated_at };
+  return {
+    ok: true,
+    enabled: true,
+    total_requests: out.length,
+    skipped_inactive_status: skippedInactiveStatus,
+    total_ids: Object.keys(byId).length,
+    cache_ts: payload.updated_at,
+  };
 }
 
 function peopleforceGetCache_() {
@@ -2379,7 +2398,9 @@ function peopleforceGetCache_() {
 function peopleforceHasDay_(idMeli, ymd) {
   const { cache } = peopleforceGetCache_();
   if (!cache || !cache.byId) return false;
-  return !!(cache.byId[idMeli] && cache.byId[idMeli][ymd]);
+  const item = cache.byId[idMeli] && cache.byId[idMeli][ymd];
+  if (!item) return false;
+  return peopleforceIsActiveLeaveStatus_(item.estado);
 }
 
 function mergePeopleforceIntoPresentismo_(rows, days) {
